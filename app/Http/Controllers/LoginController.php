@@ -70,7 +70,7 @@ class LoginController extends Controller
         }
 
         $userinfo = DB::table('admin_users')
-            ->select('id', 'username', 'password')
+            ->select('id', 'username', 'password', 'is_admin', 'nickname', 'avatar', 'email')
             ->where('username', $username)
             ->first();
 
@@ -85,20 +85,67 @@ class LoginController extends Controller
         $userId = $userinfo->id;
         $token = $this->createToken($userId, $userinfo->username);
 
+        // 获取用户角色信息
+        $roles = DB::table('admin_user_role')
+            ->join('admin_roles', 'admin_roles.id', '=', 'admin_user_role.role_id')
+            ->where('admin_user_role.user_id', $userId)
+            ->where('admin_roles.status', 'ENABLED')
+            ->where('admin_roles.deleted', 0)
+            ->select('admin_roles.id', 'admin_roles.name', 'admin_roles.key')
+            ->get();
+
+        // 获取角色对应的菜单权限
+        $permissions = [];
+        $roleKeys = [];
+        
+        foreach ($roles as $role) {
+            $roleKeys[] = $role->key;
+            
+            // 获取角色对应的菜单权限
+            $menuPermissions = DB::table('admin_role_menu')
+                ->join('admin_menus', 'admin_menus.id', '=', 'admin_role_menu.menu_id')
+                ->where('admin_role_menu.role_id', $role->id)
+                ->where('admin_menus.status', 'ENABLED')
+                ->where('admin_menus.deleted', 0)
+                ->whereNotNull('admin_menus.permission')
+                ->where('admin_menus.permission', '!=', '')
+                ->pluck('admin_menus.permission')
+                ->toArray();
+            
+            $permissions = array_merge($permissions, $menuPermissions);
+        }
+        
+        // 去重权限
+        $permissions = array_unique($permissions);
+        
+        // 如果是超级管理员，给予所有权限
+        if ($userinfo->is_admin) {
+            $permissions = ["*:*:*"];
+            if (empty($roleKeys)) {
+                $roleKeys[] = "admin";
+            }
+        }
+        
+        // 如果没有任何权限，至少给一个基本权限
+        if (empty($permissions)) {
+            $permissions[] = "common";
+        }
+
         return $this->jsonOk([
             "token" => $token,
             "currentUser" => [
                 "userInfo" => [
                     "id" => $userId,
                     "username" => $userinfo->username,
+                    "nickname" => $userinfo->nickname,
+                    "avatar" => $userinfo->avatar,
+                    "email" => $userinfo->email,
+                    "is_admin" => $userinfo->is_admin,
                 ],
-                "roleKey" => "admin",
-                "permissions" => [
-                    "*:*:*"
-                ]
+                "roleKeys" => $roleKeys,
+                "permissions" => $permissions
             ]
         ]);
-
     }
 
     private function decryptPassword($originalPassword)

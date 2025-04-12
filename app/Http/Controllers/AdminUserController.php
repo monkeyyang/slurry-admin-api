@@ -211,10 +211,34 @@ class AdminUserController extends Controller
     {
         $userId = $this->getAdminId();
 
+        // 获取基本用户信息
         $userinfo = DB::table('admin_users')
-            ->select('id', 'username', 'phone_number', 'gender', 'nickname', 'avatar', 'email', 'create_time')
+            ->select('id', 'username', 'phone_number', 'gender', 'nickname', 'avatar', 'email', 'create_time', 'is_admin', 'status')
             ->where('id', $userId)
             ->first();
+
+        if (!$userinfo) {
+            return $this->jsonError('用户不存在');
+        }
+
+        // 获取用户角色ID列表
+        $userinfo->role_ids = DB::table('admin_user_role')
+            ->where('user_id', $userId)
+            ->pluck('role_id')
+            ->toArray();
+
+        // 获取用户角色详细信息
+        $roles = DB::table('admin_roles')
+            ->whereIn('id', $userinfo->role_ids)
+            ->where('status', 'ENABLED') // 只获取启用状态的角色
+            ->select('id', 'name', 'key', 'remark')
+            ->get();
+
+        // 将角色详细信息添加到用户信息中
+        $userinfo->roles = $roles;
+
+        // 添加角色代码列表，方便前端判断权限
+        $userinfo->role_codes = $roles->pluck('key')->toArray();
 
         return $this->jsonOk($userinfo);
     }

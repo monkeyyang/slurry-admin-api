@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use Imagick;
+use Illuminate\Support\Facades\Validator;
 
 class AdminMenuController extends Controller
 {
@@ -124,32 +125,65 @@ class AdminMenuController extends Controller
         return $this->jsonOk($menu_info);
     }
 
+    /**
+     * 创建菜单
+     */
     public function create(Request $request)
     {
-        $this->validate($request, [
-            'name' => 'required|string',
-            'path' => 'required|string',
-            'parent_id' => 'required|int',
+        $validator = Validator::make($request->all(), [
+            'parent_id' => 'required|integer',
+            'name' => 'required|string|max:50',
+            'router_name' => 'nullable|string|max:50',
+            'path' => 'nullable|string|max:255',
+            'is_button' => 'required|integer|in:0,1',
+            'permission' => 'nullable|string|max:100',
+            'status' => 'required|string|in:ENABLED,DISABLED',
+            'meta' => 'nullable|array',
+            'meta.title' => 'nullable|string',
+            'meta.icon' => 'nullable|string',
+            'meta.rank' => 'nullable|integer'
         ]);
 
-        $body_entity = $request->json()->all();
+        if ($validator->fails()) {
+            return $this->jsonError('参数错误：' . $validator->errors()->first());
+        }
 
-        $menu_info = [
-            'name' => $body_entity['name'],
-            'type' => $body_entity['type'],
-            'router_name' => $body_entity['router_name'] ?? '',
-            'parent_id' => $body_entity['parent_id'],
-            'path' => $body_entity['path'],
-            'is_button' => $body_entity['is_button'],
-            'permission' => $body_entity['permission'] ?? '',
-            'meta_info' => json_encode($body_entity['meta'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            'status' => $body_entity['status'],
+        // 检查父级菜单是否存在
+        if ($request->parent_id > 0) {
+            $parentMenu = DB::table('admin_menus')->where('id', $request->parent_id)->first();
+            if (!$parentMenu) {
+                return $this->jsonError('父级菜单不存在');
+            }
+        }
+
+        // 将is_button从整数转换为位值
+        $isButton = $request->is_button ? 1 : 0;
+
+        $data = [
+            'parent_id' => $request->parent_id,
+            'name' => $request->name,
+            'router_name' => $request->router_name ?? '',
+            'path' => $request->path ?? '',
+            'is_button' => $isButton,
+            'permission' => $request->permission ?? '',
+            'status' => $request->status,
+            'meta_info' => json_encode($request->meta ?? []),
+            'create_time' => date('Y-m-d H:i:s')
         ];
-        $menu_id = DB::table('admin_menus')->insertGetId($menu_info);
 
-        return $this->jsonOk([
-            'id' => $menu_id,
-        ]);
+        // 检查 type 是否存在
+        if (isset($request->type)) {
+            $data['type'] = $request->type;
+        } else {
+            $data['type'] = 'menu'; // 设置默认值
+        }
+
+        // 设置默认的deleted值
+        $data['deleted'] = 0;
+
+        $id = DB::table('admin_menus')->insertGetId($data);
+
+        return $this->jsonOk(['id' => $id], '创建成功');
     }
 
     public function update(Request $request)
@@ -157,7 +191,7 @@ class AdminMenuController extends Controller
         $this->validate($request, [
             'id' => 'required|int',
             'name' => 'required|string',
-            'path' => 'required|string',
+            'path' => 'nullable|string',
             'parent_id' => 'required|int',
         ]);
 
