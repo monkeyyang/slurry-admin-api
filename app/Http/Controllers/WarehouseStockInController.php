@@ -25,7 +25,7 @@ class WarehouseStockInController extends Controller
                 'warehouse_goods.name as goods_name',
                 'admin_users.username as create_user_name'
             )
-//            ->where('warehouse_stock_in.deleted', 0)
+            ->where('warehouse_stock_in.deleted', 0)
             ->orderBy('warehouse_stock_in.id', 'desc');
 
         // 仓库筛选
@@ -382,10 +382,14 @@ class WarehouseStockInController extends Controller
      */
     public function destroy($id)
     {
-        // 检查入库记录是否存在
-        $stockIn = DB::table('warehouse_stock_in')->where('id', $id)->first();
+        // 检查入库记录是否存在且未删除
+        $stockIn = DB::table('warehouse_stock_in')
+            ->where('id', $id)
+            ->where('deleted', 0)
+            ->first();
+        
         if (!$stockIn) {
-            return $this->jsonError('入库记录不存在');
+            return $this->jsonError('入库记录不存在或已删除');
         }
 
         DB::beginTransaction();
@@ -402,9 +406,15 @@ class WarehouseStockInController extends Controller
                     ]);
             }
 
-            // 删除入库记录
-            DB::table('warehouse_stock_in')->where('id', $id)->delete();
-
+            // 软删除入库记录
+            DB::table('warehouse_stock_in')
+                ->where('id', $id)
+                ->update([
+                    'deleted' => 1,
+                    'delete_time' => now(),
+                    'update_time' => now()
+                ]);
+                
             DB::commit();
             return $this->jsonOk(null, '删除成功');
         } catch (\Exception $e) {
@@ -423,7 +433,7 @@ class WarehouseStockInController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'ids' => 'required|array',
-            'ids.*' => 'integer|exists:warehouse_stock_in,id,deleted,0',
+            'ids.*' => 'integer|exists:warehouse_stock_in,id',
         ]);
 
         if ($validator->fails()) {
@@ -459,11 +469,13 @@ class WarehouseStockInController extends Controller
             }
 
             // 批量软删除入库记录
+            $now = now();
             DB::table('warehouse_stock_in')
                 ->whereIn('id', $ids)
                 ->update([
                     'deleted' => 1,
-                    'update_time' => now()
+                    'delete_time' => $now,
+                    'update_time' => $now
                 ]);
                 
             DB::commit();

@@ -70,6 +70,7 @@ Route::group(['middleware' => ['auth:api']], function() {
     Route::post('/warehouse/goods/update/{id}', [WarehouseGoodsController::class, 'update']);
     Route::post('/warehouse/goods/delete/{id}', [WarehouseGoodsController::class, 'destroy']);
     Route::post('/warehouse/goods/alias/delete/{id}', [WarehouseGoodsController::class, 'destroyAlias']);
+    Route::delete('/warehouse/goods/batch', [WarehouseGoodsController::class, 'batchDestroy']);
 
     // 仓库管理路由
     Route::get('/admin/warehouse/list', [AdminWarehouseController::class, 'index']);
@@ -91,10 +92,10 @@ Route::group(['middleware' => ['auth:api']], function() {
     Route::post('/warehouse/stock-in/cancel/{id}', [WarehouseStockInController::class, 'cancel']);
     Route::delete('/warehouse/stock-in/{id}', [WarehouseStockInController::class, 'destroy']);
     Route::delete('/warehouse/inbound/batch', [WarehouseStockInController::class, 'batchDestroy']);
-    
+
     // 结算入库记录
     Route::post('/warehouse/inbound/settle/{id}', [WarehouseStockInController::class, 'settle']);
-    
+
     // 重置入库记录结算状态
     Route::post('/warehouse/inbound/reset-settle/{id}', [WarehouseStockInController::class, 'resetSettle']);
 });

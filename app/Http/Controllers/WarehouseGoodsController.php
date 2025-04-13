@@ -221,8 +221,40 @@ class WarehouseGoodsController extends Controller
             return $this->jsonError('货品不存在');
         }
 
+        // 检查是否有库存
+        $hasStock = DB::table('warehouse_stock')
+            ->where('goods_id', $id)
+            ->where('quantity', '>', 0)
+            ->exists();
+
+        if ($hasStock) {
+            return $this->jsonError('该货品有库存记录，无法删除');
+        }
+
+        // 检查是否有入库记录
+        $hasStockIn = DB::table('warehouse_stock_in')
+            ->where('goods_id', $id)
+            ->where('deleted', 0)
+            ->exists();
+
+        if ($hasStockIn) {
+            return $this->jsonError('该货品有入库记录，无法删除');
+        }
+
+        // 检查是否有出库记录
+//        $hasStockOut = DB::table('warehouse_stock_out')
+//            ->where('goods_id', $id)
+//            ->where('deleted', 0)
+//            ->exists();
+//
+//        if ($hasStockOut) {
+//            return $this->jsonError('该货品有出库记录，无法删除');
+//        }
+
         DB::beginTransaction();
         try {
+            $now = now();
+
             // 软删除货品
             DB::table('warehouse_goods')
                 ->where('id', $id)
@@ -273,6 +305,82 @@ class WarehouseGoodsController extends Controller
             return $this->jsonOk([], '别名删除成功');
         } catch (\Exception $e) {
             return $this->jsonError('删除别名失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 批量删除货品
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function batchDestroy(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'ids' => 'required|array',
+            'ids.*' => 'integer|exists:warehouse_goods,id,deleted,0',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->jsonError($validator->errors()->first());
+        }
+
+        $ids = $request->ids;
+
+        // 检查是否有库存
+        $hasStock = DB::table('warehouse_stock')
+            ->whereIn('goods_id', $ids)
+            ->where('quantity', '>', 0)
+            ->exists();
+
+        if ($hasStock) {
+            return $this->jsonError('选中的货品中有库存记录，无法删除');
+        }
+
+        // 检查是否有入库记录
+        $hasStockIn = DB::table('warehouse_stock_in')
+            ->whereIn('goods_id', $ids)
+            ->where('deleted', 0)
+            ->exists();
+
+        if ($hasStockIn) {
+            return $this->jsonError('选中的货品中有入库记录，无法删除');
+        }
+
+        // 检查是否有出库记录
+//        $hasStockOut = DB::table('warehouse_stock_out')
+//            ->whereIn('goods_id', $ids)
+//            ->where('deleted', 0)
+//            ->exists();
+//
+//        if ($hasStockOut) {
+//            return $this->jsonError('选中的货品中有出库记录，无法删除');
+//        }
+
+        DB::beginTransaction();
+        try {
+            // 批量软删除货品
+            $now = now();
+            DB::table('warehouse_goods')
+                ->whereIn('id', $ids)
+                ->update([
+                    'deleted' => 1,
+                    'update_time' => $now
+                ]);
+
+            // 批量软删除货品别名
+            DB::table('warehouse_goods_alias')
+                ->whereIn('goods_id', $ids)
+                ->update([
+                    'deleted' => 1,
+                    'update_time' => $now
+                ]);
+
+            DB::commit();
+            return $this->jsonOk(null, '批量删除成功');
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return $this->jsonError('批量删除失败：' . $e->getMessage());
         }
     }
 }
