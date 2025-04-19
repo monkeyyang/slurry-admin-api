@@ -14,6 +14,7 @@ class ForecastCrawlerService
 {
     private $client;
     private $headers;
+    private $progressCallback;
 
     public function __construct()
     {
@@ -23,6 +24,18 @@ class ForecastCrawlerService
             'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language' => 'en-US,en;q=0.5',
         ];
+    }
+
+    public function onProgress(callable $callback)
+    {
+        $this->progressCallback = $callback;
+    }
+
+    private function reportProgress($message)
+    {
+        if ($this->progressCallback) {
+            call_user_func($this->progressCallback, $message);
+        }
     }
 
     public function processQueue(): void
@@ -36,6 +49,8 @@ class ForecastCrawlerService
 
         foreach ($queueItems as $item) {
             try {
+                $this->reportProgress("正在处理预报ID: {$item->forecast_id}, URL: {$item->goods_url}");
+
                 // 更新状态为处理中
                 DB::table('warehouse_forecast_crawler_queue')
                     ->where('id', $item->id)
@@ -50,6 +65,20 @@ class ForecastCrawlerService
                 $result = $this->crawlUrl($item->goods_url);
 
                 if (!empty($result)) {
+                    // 打印爬取到的详细信息
+                    $this->reportProgress("\n获取到的数据:");
+                    $this->reportProgress("商品名称: " . $result['name']);
+                    $this->reportProgress("订单状态: " . $result['status'] . " (" . $result['status_desc'] . ")");
+                    $this->reportProgress("快递单号: " . ($result['shipment_no'] ?: '暂无'));
+                    $this->reportProgress("承运商: " . ($result['shipment_arrive'] ?: '暂无'));
+                    $this->reportProgress("快递链接: " . ($result['shipment_link'] ?: '暂无'));
+                    if (isset($result['delivery_date'])) {
+                        $this->reportProgress("预计送达: " . $result['delivery_date']);
+                    }
+                    if (isset($result['image_url'])) {
+                        $this->reportProgress("商品图片: " . $result['image_url']);
+                    }
+
                     // 更新预报信息
                     DB::table('warehouse_forecast')
                         ->where('id', $item->forecast_id)
@@ -67,10 +96,14 @@ class ForecastCrawlerService
                             'status' => 2,
                             'update_time' => now(),
                         ]);
+
+                    $this->reportProgress("\n成功处理预报ID: {$item->forecast_id}");
                 } else {
-                    throw new Exception('Failed to parse data');
+                    throw new Exception('解析数据失败');
                 }
             } catch (Exception $e) {
+                $this->reportProgress("\n处理预报ID: {$item->forecast_id} 失败: " . $e->getMessage());
+                
                 // 更新队列状态为失败
                 DB::table('warehouse_forecast_crawler_queue')
                     ->where('id', $item->id)
