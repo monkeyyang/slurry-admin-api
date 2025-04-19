@@ -7,6 +7,7 @@ use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\InvitationCodeController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\RegisterController;
+use App\Http\Controllers\WarehouseForecastController;
 use App\Http\Controllers\WarehouseGoodsController;
 use App\Http\Controllers\AdminWarehouseController;
 use App\Http\Controllers\WarehouseStockInController;
@@ -98,4 +99,11 @@ Route::group(['middleware' => ['auth:api']], function() {
 
     // 重置入库记录结算状态
     Route::post('/warehouse/inbound/reset-settle/{id}', [WarehouseStockInController::class, 'resetSettle']);
+    // 预报管理
+    Route::prefix('forecast')->group(function () {
+        Route::get('list', [WarehouseForecastController::class, 'index']);
+        Route::post('add', [WarehouseForecastController::class, 'store']);
+        Route::post('cancel/{id}', [WarehouseForecastController::class, 'cancel']);
+        Route::delete('delete/{id}', [WarehouseForecastController::class, 'destroy']);
+    });
 });
