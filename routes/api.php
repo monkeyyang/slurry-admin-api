@@ -105,5 +105,6 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('add', [WarehouseForecastController::class, 'store']);
         Route::post('cancel/{id}', [WarehouseForecastController::class, 'cancel']);
         Route::delete('delete/{id}', [WarehouseForecastController::class, 'destroy']);
+        Route::delete('batch/delete', [WarehouseForecastController::class, 'batchDestroy']);
     });
 });

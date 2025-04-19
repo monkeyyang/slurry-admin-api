@@ -87,10 +87,34 @@ class WarehouseForecastController extends Controller
             $now = now();
             $userId = Auth::id();
             $createdForecasts = [];
+            $failedUrls = [];
 
             foreach ($request->urls as $url) {
                 $orderInfo = $this->parseOrderUrl($url);
+                $orderNumber = $orderInfo['orderNumber'] ?? '';
                 
+                if (empty($orderNumber)) {
+                    $failedUrls[] = [
+                        'url' => $url,
+                        'reason' => '无法解析订单号'
+                    ];
+                    continue;
+                }
+
+                // 检查订单号是否已存在
+                $existingForecast = DB::table('warehouse_forecast')
+                    ->where('order_number', $orderNumber)
+                    ->where('deleted', 0)
+                    ->first();
+
+                if ($existingForecast) {
+                    $failedUrls[] = [
+                        'url' => $url,
+                        'reason' => "订单号 {$orderNumber} 已存在，预报编号：{$existingForecast->preorder_no}"
+                    ];
+                    continue;
+                }
+
                 // 生成预报编号
                 $preorderNo = 'F' . date('YmdHis') . rand(1000, 9999);
 
@@ -102,7 +126,7 @@ class WarehouseForecastController extends Controller
                     'warehouse_id' => $warehouse->id,
                     'warehouse_name' => $warehouse->name,
                     'goods_url' => $url,
-                    'order_number' => $orderInfo['orderNumber'] ?? '',
+                    'order_number' => $orderNumber,
                     'status' => 0,
                     'create_time' => $now,
                     'update_time' => $now,
@@ -120,11 +144,39 @@ class WarehouseForecastController extends Controller
                     'update_time' => $now,
                 ]);
 
-                $createdForecasts[] = $forecastId;
+                $createdForecasts[] = [
+                    'id' => $forecastId,
+                    'preorderNo' => $preorderNo,
+                    'orderNumber' => $orderNumber
+                ];
             }
 
             DB::commit();
-            return $this->jsonOk(['ids' => $createdForecasts], '预报添加成功');
+
+            $response = [
+                'success' => $createdForecasts,
+                'failed' => $failedUrls
+            ];
+
+            if (empty($createdForecasts) && !empty($failedUrls)) {
+                $errorMessage = "所有预报添加失败：\n";
+                foreach ($failedUrls as $fail) {
+                    $errorMessage .= "• {$fail['reason']} (URL: {$fail['url']})\n";
+                }
+                return $this->jsonError($errorMessage, $response);
+            } elseif (!empty($failedUrls)) {
+                $successCount = count($createdForecasts);
+                $failCount = count($failedUrls);
+                $message = "成功添加 {$successCount} 个预报，失败 {$failCount} 个。\n失败详情：\n";
+                foreach ($failedUrls as $fail) {
+                    $message .= "• {$fail['reason']} (URL: {$fail['url']})\n";
+                }
+                return $this->jsonOk($response, $message);
+            } else {
+                $successCount = count($createdForecasts);
+                return $this->jsonOk($response, "成功添加 {$successCount} 个预报");
+            }
+
         } catch (\Exception $e) {
             DB::rollBack();
             return $this->jsonError('添加预报失败：' . $e->getMessage());
@@ -202,6 +254,94 @@ class WarehouseForecastController extends Controller
             return $this->jsonOk([], '预报删除成功');
         } catch (\Exception $e) {
             return $this->jsonError('删除预报失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 批量删除预报
+     */
+    public function batchDestroy(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'ids' => 'required|array',
+            'ids.*' => 'required|integer|exists:warehouse_forecast,id,deleted,0'
+        ]);
+
+        if ($validator->fails()) {
+            return $this->jsonError($validator->errors()->first());
+        }
+
+        $ids = $request->input('ids');
+
+        DB::beginTransaction();
+        try {
+            // 获取要删除的预报信息，用于记录结果
+            $forecasts = DB::table('warehouse_forecast')
+                ->whereIn('id', $ids)
+                ->where('deleted', 0)
+                ->get(['id', 'preorder_no', 'order_number', 'status']);
+
+            $now = now();
+            $successCount = 0;
+            $failedItems = [];
+
+            foreach ($forecasts as $forecast) {
+                try {
+                    // 删除预报
+                    $updated = DB::table('warehouse_forecast')
+                        ->where('id', $forecast->id)
+                        ->where('deleted', 0)
+                        ->update([
+                            'deleted' => 1,
+                            'delete_time' => $now,
+                            'update_time' => $now,
+                        ]);
+
+                    if ($updated) {
+                        $successCount++;
+                    } else {
+                        $failedItems[] = [
+                            'id' => $forecast->id,
+                            'preorderNo' => $forecast->preorder_no,
+                            'reason' => '删除失败'
+                        ];
+                    }
+                } catch (\Exception $e) {
+                    $failedItems[] = [
+                        'id' => $forecast->id,
+                        'preorderNo' => $forecast->preorder_no,
+                        'reason' => $e->getMessage()
+                    ];
+                }
+            }
+
+            // 同时删除对应的爬虫队列记录
+            DB::table('warehouse_forecast_crawler_queue')
+                ->whereIn('forecast_id', $ids)
+                ->delete();
+
+            DB::commit();
+
+            // 构建返回消息
+            if (count($failedItems) > 0) {
+                $message = "成功删除 {$successCount} 个预报，失败 " . count($failedItems) . " 个。\n失败详情：\n";
+                foreach ($failedItems as $item) {
+                    $message .= "• 预报编号 {$item['preorderNo']}：{$item['reason']}\n";
+                }
+                return $this->jsonOk([
+                    'success' => $successCount,
+                    'failed' => $failedItems
+                ], $message);
+            } else {
+                return $this->jsonOk([
+                    'success' => $successCount,
+                    'failed' => []
+                ], "成功删除 {$successCount} 个预报");
+            }
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return $this->jsonError('批量删除失败：' . $e->getMessage());
         }
     }
 }
