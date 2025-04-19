@@ -7,7 +7,28 @@ use Illuminate\Contracts\Auth\Authenticatable;
 
 class RedisTokenUser implements Authenticatable, ArrayAccess
 {
-    private $attributes = array();
+    public $id;
+    public $username;
+    public $roles;
+    public $is_admin;
+    public $login_time;
+    protected $attributes = [];
+
+    public function __construct($data = [])
+    {
+        if (is_string($data)) {
+            $data = json_decode($data, true);
+        }
+        
+        $data = $data ?: [];
+        $this->attributes = $data;  // 保存原始数据
+        
+        $this->id = $data['id'] ?? null;
+        $this->username = $data['username'] ?? '';
+        $this->roles = $data['roles'] ?? [];
+        $this->is_admin = $data['is_admin'] ?? false;
+        $this->login_time = $data['login_time'] ?? time();
+    }
 
     public function setAttributes($attributes)
     {
@@ -19,6 +40,7 @@ class RedisTokenUser implements Authenticatable, ArrayAccess
         }
     }
 
+    
     /**
      * @return string
      */
@@ -34,8 +56,7 @@ class RedisTokenUser implements Authenticatable, ArrayAccess
     public function getAuthIdentifier()
     {
         // Return the unique identifier for the user (e.g. their ID, 123)
-        $identifier_name = $this->getAuthIdentifierName();
-        return $this->attributes[$identifier_name];
+        return $this->attributes[$this->getAuthIdentifierName()] ?? null;
     }
 
     /**
@@ -44,6 +65,7 @@ class RedisTokenUser implements Authenticatable, ArrayAccess
     public function getAuthPassword()
     {
         // Returns the (hashed) password for the user
+        return $this->attributes['password'] ?? null;
     }
 
     /**
@@ -52,6 +74,7 @@ class RedisTokenUser implements Authenticatable, ArrayAccess
     public function getRememberToken()
     {
         // Return the token used for the "remember me" functionality
+        return $this->attributes[$this->getRememberTokenName()] ?? null;
     }
 
     /**
@@ -61,6 +84,7 @@ class RedisTokenUser implements Authenticatable, ArrayAccess
     public function setRememberToken($value)
     {
         // Save a new token user for the "remember me" functionality
+        $this->attributes[$this->getRememberTokenName()] = $value;
     }
 
     /**
@@ -69,6 +93,7 @@ class RedisTokenUser implements Authenticatable, ArrayAccess
     public function getRememberTokenName()
     {
         // Return the name of the column / attribute used to store the "remember me" token
+        return 'remember_token';
     }
 
     //实现ArrayAccess允许像数组字段一样访问

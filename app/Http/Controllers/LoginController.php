@@ -176,12 +176,32 @@ class LoginController extends Controller
 //        }
 
         $token = md5(uniqid(mt_rand(), true));
+        
+        // 获取用户角色
+        $roles = DB::table('admin_user_role')
+            ->join('admin_roles', 'admin_roles.id', '=', 'admin_user_role.role_id')
+            ->where('admin_user_role.user_id', $userId)
+            ->where('admin_roles.status', 'ENABLED')
+            ->where('admin_roles.deleted', 0)
+            ->pluck('admin_roles.key')
+            ->toArray();
+
         $userinfo = [
             'id' => $userId,
             'username' => $username,
+            'roles' => $roles,  // 添加角色信息
+            'is_admin' => 0,    // 默认非管理员
+            'login_time' => time()
         ];
+
+        // 如果角色中包含 admin，设置 is_admin 为 1
+        if (in_array('admin', $roles)) {
+            $userinfo['is_admin'] = 1;
+        }
+        
         $userinfoJSON = $this->toJson($userinfo);
         $ttl = 60 * 60 * 24 * 30; //30天
+        
         Redis::setex("admin:token:$token", $ttl, $userinfoJSON);
         Redis::setex("admin:user:token:$userId", $ttl, $token);
 

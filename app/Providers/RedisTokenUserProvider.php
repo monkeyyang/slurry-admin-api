@@ -16,6 +16,7 @@ class RedisTokenUserProvider implements IlluminateUserProvider
     public function retrieveById($identifier)
     {
         // Get and return a user by their unique identifier
+        return new RedisTokenUser(['id' => $identifier]); // 传入包含ID的数组
     }
 
     /**
@@ -47,23 +48,40 @@ class RedisTokenUserProvider implements IlluminateUserProvider
     public function retrieveByCredentials(array $credentials)
     {
         //根据通行证去返回用户信息
-        $user = null;
-        if (isset($credentials['api_token'])) {
-
-            $token = $credentials['api_token'];
-            if (!is_null($token) && strlen($token) == 32) {
-
-                $userinfoJSON = Redis::get("admin:token:$token");
-                if (!is_null($userinfoJSON)) {
-                    $userinfo = json_decode($userinfoJSON, true);
-                    if (!empty($userinfo)) {
-                        $user = new RedisTokenUser();
-                        $user->setAttributes($userinfo);
-                    }
-                }
-            }
+        if (empty($credentials['api_token'])) {
+            return new RedisTokenUser([]); // 传入空数组作为参数
         }
-        return $user;
+        $token = $credentials['api_token'];
+        $key = "admin:token:$token";
+        
+        $userJSON = Redis::get($key);
+        if (is_null($userJSON)) {
+            return new RedisTokenUser([]); // 传入空数组作为参数
+        }
+    
+        $userData = json_decode($userJSON, true);
+        if (empty($userData)) {
+            return new RedisTokenUser([]); // 传入空数组作为参数
+        }
+    
+        return new RedisTokenUser($userData); // 传入用户数据
+        // $user = null;
+        // if (isset($credentials['api_token'])) {
+
+        //     $token = $credentials['api_token'];
+        //     if (!is_null($token) && strlen($token) == 32) {
+
+        //         $userinfoJSON = Redis::get("admin:token:$token");
+        //         if (!is_null($userinfoJSON)) {
+        //             $userinfo = json_decode($userinfoJSON, true);
+        //             if (!empty($userinfo)) {
+        //                 $user = new RedisTokenUser();
+        //                 $user->setAttributes($userinfo);
+        //             }
+        //         }
+        //     }
+        // }
+        // return $user;
     }
 
     /**
@@ -76,7 +94,7 @@ class RedisTokenUserProvider implements IlluminateUserProvider
     public function validateCredentials(Authenticatable $user, array $credentials)
     {
         // Check that given credentials belong to the given user
-        return false;
+        return true;
     }
 
 }

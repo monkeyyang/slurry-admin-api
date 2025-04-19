@@ -14,44 +14,82 @@ class WarehouseForecastController extends Controller
      */
     public function index(Request $request)
     {
+        $user = Auth::user();
+
         $query = DB::table('warehouse_forecast')
-            ->where('deleted', 0)
-            ->orderBy('id', 'desc');
+            ->leftJoin('admin_users as customer', 'warehouse_forecast.customer_id', '=', 'customer.id')
+            ->leftJoin('admin_warehouse', 'warehouse_forecast.warehouse_id', '=', 'admin_warehouse.id')
+            ->where('warehouse_forecast.deleted', 0)
+            ->select([
+                'warehouse_forecast.*',
+                'customer.username as customer_username',
+                'admin_warehouse.name as warehouse_name'
+            ]);
+
+        // 判断用户角色
+        $isAdmin =  $user->is_admin;
+        $isWarehouseManager = in_array('warehouseManager', $user->roles);
+
+        // 如果既不是管理员也不是仓库管理员，只能查看自己的数据
+        if (!$isAdmin && !$isWarehouseManager) {
+            $query->where('warehouse_forecast.customer_id', $user->id);
+        }
+        // 仓库管理员只能查看自己负责仓库的数据
+        elseif (in_array('warehouseManager', $user->roles)) {
+            $managedWarehouses = DB::table('admin_warehouse_user')
+                ->where('user_id', $user->id)
+                ->pluck('warehouse_id')
+                ->toArray();
+            $query->whereIn('warehouse_forecast.warehouse_id', $managedWarehouses);
+        }
+        // admin 可以查看所有数据
 
         // 预报编号筛选
         if ($request->filled('preorderNo')) {
-            $query->where('preorder_no', 'like', '%' . $request->preorderNo . '%');
+            $query->where('warehouse_forecast.preorder_no', 'like', '%' . $request->preorderNo . '%');
         }
 
         // 客户筛选
         if ($request->filled('customerName')) {
-            $query->where('customer_name', 'like', '%' . $request->customerName . '%');
+            $query->where('customer.username', 'like', '%' . $request->customerName . '%');
         }
 
         // 仓库筛选
         if ($request->filled('warehouseId')) {
-            $query->where('warehouse_id', $request->warehouseId);
+            // 仓库管理员只能筛选自己管理的仓库
+            if (in_array('warehouseManager', $user->roles)) {
+                $managedWarehouses = DB::table('admin_warehouse_user')
+                    ->where('user_id', $user->id)
+                    ->pluck('warehouse_id')
+                    ->toArray();
+                if (!in_array($request->warehouseId, $managedWarehouses)) {
+                    return $this->jsonError('您没有权限查看该仓库的数据');
+                }
+            }
+            $query->where('warehouse_forecast.warehouse_id', $request->warehouseId);
         }
 
         // 订单编号筛选
         if ($request->filled('orderNumber')) {
-            $query->where('order_number', 'like', '%' . $request->orderNumber . '%');
+            $query->where('warehouse_forecast.order_number', 'like', '%' . $request->orderNumber . '%');
         }
 
         // 快递单号筛选
         if ($request->filled('trackingNo')) {
-            $query->where('tracking_no', 'like', '%' . $request->trackingNo . '%');
+            $query->where('warehouse_forecast.tracking_no', 'like', '%' . $request->trackingNo . '%');
         }
 
         // 状态筛选
         if ($request->filled('status')) {
-            $query->where('status', $request->status);
+            $query->where('warehouse_forecast.status', $request->status);
         }
 
         // 时间范围筛选
         if ($request->filled('startTime') && $request->filled('endTime')) {
-            $query->whereBetween('create_time', [$request->startTime, $request->endTime]);
+            $query->whereBetween('warehouse_forecast.create_time', [$request->startTime, $request->endTime]);
         }
+
+        $query->orderBy('warehouse_forecast.id', 'desc');
 
         $data = $query->paginate($request->input('pageSize', 10));
         return $this->jsonOk($data);
@@ -92,7 +130,7 @@ class WarehouseForecastController extends Controller
             foreach ($request->urls as $url) {
                 $orderInfo = $this->parseOrderUrl($url);
                 $orderNumber = $orderInfo['orderNumber'] ?? '';
-                
+
                 if (empty($orderNumber)) {
                     $failedUrls[] = [
                         'url' => $url,
