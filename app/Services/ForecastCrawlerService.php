@@ -122,36 +122,58 @@ class ForecastCrawlerService
         $attempt = 0;
         $delay = 2;
 
+        // 从URL中提取国家代码
+        $country = 'US'; // 默认美国
+        if (preg_match('/\/xc\/(xf|ca)\//', $url, $matches)) {
+            $country = 'CA';  // xc/xf 或 xc/ca 都表示加拿大
+        } elseif (preg_match('/\/xc\/us\//', $url)) {
+            $country = 'US';  // xc/us 表示美国
+        }
+
+        $this->reportProgress("检测到国家代码: {$country}");
+
         while ($attempt < $maxAttempts) {
             try {
+                // 根据国家选择代理
                 $proxy = [
-                    'http' => 'http://Ys00000011_-zone-custom-region-us:112233QQ@13373231fd719df0.arq.na.ipidea.online:2333',
-                    'https' => 'http://Ys00000011_-zone-custom-region-us:112233QQ@13373231fd719df0.arq.na.ipidea.online:2333'
+                    'http' => 'http://Ys00000011_-zone-custom-region-' . strtolower($country) . ':112233QQ@13373231fd719df0.arq.na.ipidea.online:2333',
+                    'https' => 'http://Ys00000011_-zone-custom-region-' . strtolower($country) . ':112233QQ@13373231fd719df0.arq.na.ipidea.online:2333'
                 ];
+
+                $this->reportProgress("使用代理: " . json_encode($proxy, JSON_UNESCAPED_SLASHES));
 
                 $response = $this->client->request('GET', $url, [
                     'proxy' => $proxy,
                     'headers' => $this->headers,
-                    'timeout' => 10
+                    'timeout' => 10,
+                    'verify' => false  // 如果有SSL证书问题，可以添加此选项
                 ]);
 
                 $html = $response->getBody()->getContents();
                 $dom = new DOMDocument();
                 @$dom->loadHTML($html);
                 $xpath = new DOMXPath($dom);
+                
+                $scriptNode = $xpath->query('//script[@type="application/json" and @id="init_data"]')->item(0);
+                
+                if (!$scriptNode) {
+                    throw new Exception('Init data script not found');
+                }
 
-                $scriptJsonData = $xpath->query('//script[@type="application/json" and @id="init_data"]')->item(0)->nodeValue;
+                $scriptJsonData = $scriptNode->nodeValue;
                 $jsonData = json_decode($scriptJsonData, true);
 
                 if (!$jsonData || !isset($jsonData['orderDetail']['orderItems'])) {
-                    throw new Exception('Invalid JSON data');
+                    throw new Exception('Invalid JSON data structure');
                 }
 
                 return $this->processOrderData($jsonData);
+
             } catch (Exception $e) {
+                $this->reportProgress("第 " . ($attempt + 1) . " 次尝试失败: " . $e->getMessage());
                 $attempt++;
                 if ($attempt >= $maxAttempts) {
-                    throw $e;
+                    throw new Exception('Failed to crawl URL after ' . $maxAttempts . ' attempts: ' . $e->getMessage());
                 }
                 sleep($delay);
             }
@@ -248,8 +270,19 @@ class ForecastCrawlerService
             if (isset($orderItem['orderItemStatusTracker']['d']['currentStatus'])) {
                 $currentStatus = $orderItem['orderItemStatusTracker']['d']['currentStatus'];
                 $orderStatus = $statusMap[$currentStatus] ?? 0;
+                $this->reportProgress("原始状态: {$currentStatus}, 映射后状态: {$orderStatus}");
             } elseif (in_array($deliveryDate, ['Canceled', 'Cancelled'])) {
                 $orderStatus = -2;
+                $this->reportProgress("订单已取消, 状态设为: {$orderStatus}");
+            } else {
+                $orderStatus = 0;
+                $this->reportProgress("未找到状态信息, 默认状态: {$orderStatus}");
+            }
+
+            // 如果有更详细的状态信息，也一并输出
+            if (isset($orderItem['orderItemStatusTracker']['d'])) {
+                $statusDetails = json_encode($orderItem['orderItemStatusTracker']['d'], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+                $this->reportProgress("状态详细信息:\n{$statusDetails}");
             }
 
             // 更新结果数组
