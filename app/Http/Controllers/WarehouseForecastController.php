@@ -35,13 +35,13 @@ class WarehouseForecastController extends Controller
             $query->where('warehouse_forecast.customer_id', $user->id);
         }
         // 仓库管理员只能查看自己负责仓库的数据
-        elseif (in_array('warehouseManager', $user->roles)) {
-            $managedWarehouses = DB::table('admin_warehouse_user')
-                ->where('user_id', $user->id)
-                ->pluck('warehouse_id')
-                ->toArray();
-            $query->whereIn('warehouse_forecast.warehouse_id', $managedWarehouses);
-        }
+        // elseif (in_array('warehouseManager', $user->roles)) {
+        //     $managedWarehouses = DB::table('admin_warehouse_user')
+        //         ->where('user_id', $user->id)
+        //         ->pluck('warehouse_id')
+        //         ->toArray();
+        //     $query->whereIn('warehouse_forecast.warehouse_id', $managedWarehouses);
+        // }
         // admin 可以查看所有数据
 
         // 预报编号筛选
@@ -57,15 +57,15 @@ class WarehouseForecastController extends Controller
         // 仓库筛选
         if ($request->filled('warehouseId')) {
             // 仓库管理员只能筛选自己管理的仓库
-            if (in_array('warehouseManager', $user->roles)) {
-                $managedWarehouses = DB::table('admin_warehouse_user')
-                    ->where('user_id', $user->id)
-                    ->pluck('warehouse_id')
-                    ->toArray();
-                if (!in_array($request->warehouseId, $managedWarehouses)) {
-                    return $this->jsonError('您没有权限查看该仓库的数据');
-                }
-            }
+            // if (in_array('warehouseManager', $user->roles)) {
+            //     $managedWarehouses = DB::table('admin_warehouse_user')
+            //         ->where('user_id', $user->id)
+            //         ->pluck('warehouse_id')
+            //         ->toArray();
+            //     if (!in_array($request->warehouseId, $managedWarehouses)) {
+            //         return $this->jsonError('您没有权限查看该仓库的数据');
+            //     }
+            // }
             $query->where('warehouse_forecast.warehouse_id', $request->warehouseId);
         }
 
