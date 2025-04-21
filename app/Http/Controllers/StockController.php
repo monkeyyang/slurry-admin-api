@@ -81,4 +81,27 @@ class StockController extends Controller {
             return $this->jsonError('结算失败：' . $e->getMessage());
         }
     }
+
+    public function list(Request $request)
+    {
+        $params = $request->validate([
+            'warehouseId' => 'nullable|integer',
+            'goodsName' => 'nullable|string',
+            'trackingNo' => 'nullable|string',
+            'productCode' => 'nullable|string',
+            'status' => 'nullable|integer',
+            'startTime' => 'nullable|date',
+            'endTime' => 'nullable|date',
+            'pageSize' => 'nullable|integer|min:1|max:100',
+            'sortField' => 'nullable|string|in:id,created_at,storage_time,settle_time',
+            'sortOrder' => 'nullable|string|in:asc,desc',
+        ]);
+
+        try {
+            $data = $this->stockService->getList($params);
+            return $this->jsonOk($data);
+        } catch (\Exception $e) {
+            return $this->jsonError('获取列表失败：' . $e->getMessage());
+        }
+    }
 }

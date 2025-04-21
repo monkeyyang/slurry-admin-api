@@ -7,6 +7,7 @@ use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\InvitationCodeController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\RegisterController;
+use App\Http\Controllers\StockController;
 use App\Http\Controllers\WarehouseForecastController;
 use App\Http\Controllers\WarehouseGoodsController;
 use App\Http\Controllers\AdminWarehouseController;
@@ -110,6 +111,9 @@ Route::group(['middleware' => ['auth:api']], function() {
 
     // 库存管理相关路由
     Route::prefix('warehouse/stock')->middleware(['auth:api'])->group(function () {
+        // 获取库存列表
+        Route::get('list', [StockController::class, 'list']);
+        
         // 批量导入库存
         Route::post('import', [StockController::class, 'import']);
         

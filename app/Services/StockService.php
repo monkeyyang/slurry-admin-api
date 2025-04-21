@@ -102,4 +102,49 @@ class StockService
         $inventory->updated_by = Auth::id();
         return $inventory->save();
     }
+
+    public function getList(array $params)
+    {
+        $query = WarehouseInventory::query()
+            ->with(['warehouse:id,name'])
+            ->where('deleted', 0);
+
+        // 仓库筛选
+        if (!empty($params['warehouseId'])) {
+            $query->where('warehouse_id', $params['warehouseId']);
+        }
+
+        // 商品名称搜索
+        if (!empty($params['goodsName'])) {
+            $query->where('goods_name', 'like', '%' . $params['goodsName'] . '%');
+        }
+
+        // 快递单号搜索
+        if (!empty($params['trackingNo'])) {
+            $query->where('tracking_no', 'like', '%' . $params['trackingNo'] . '%');
+        }
+
+        // 产品编码搜索
+        if (!empty($params['productCode'])) {
+            $query->where('product_code', 'like', '%' . $params['productCode'] . '%');
+        }
+
+        // 状态筛选
+        if (isset($params['status'])) {
+            $query->where('status', $params['status']);
+        }
+
+        // 时间范围筛选
+        if (!empty($params['startTime'])) {
+            $query->where('created_at', '>=', $params['startTime']);
+        }
+        if (!empty($params['endTime'])) {
+            $query->where('created_at', '<=', $params['endTime']);
+        }
+
+        // 排序
+        $query->orderBy($params['sortField'] ?? 'id', $params['sortOrder'] ?? 'desc');
+
+        return $query->paginate($params['pageSize'] ?? 10);
+    }
 } 
