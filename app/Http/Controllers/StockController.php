@@ -82,7 +82,13 @@ class StockController extends Controller {
         }
     }
 
-    public function list(Request $request)
+    /**
+     * 获取库存列表
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function list(Request $request): \Illuminate\Http\JsonResponse
     {
         $params = $request->validate([
             'warehouseId' => 'nullable|integer',

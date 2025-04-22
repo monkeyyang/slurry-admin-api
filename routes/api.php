@@ -110,24 +110,24 @@ Route::group(['middleware' => ['auth:api']], function() {
     });
 
     // 库存管理相关路由
-    Route::prefix('warehouse/stock')->middleware(['auth:api'])->group(function () {
+    Route::prefix('warehouse/stock')->group(function () {
         // 获取库存列表
         Route::get('list', [StockController::class, 'list']);
-        
+
         // 批量导入库存
         Route::post('import', [StockController::class, 'import']);
-        
+
         // 匹配预报
         Route::post('match', [StockController::class, 'match']);
-        
+
         // 确认入库
         Route::post('confirm/{id}', [StockController::class, 'confirm'])
             ->where('id', '[0-9]+');
-        
+
         // 获取预报详情
         Route::get('forecast/{id}', [StockController::class, 'getForecastDetail'])
             ->where('id', '[0-9]+');
-        
+
         // 结算库存
         Route::post('settle/{id}', [StockController::class, 'settle'])
             ->where('id', '[0-9]+');
