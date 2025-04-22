@@ -22,6 +22,7 @@ class StockController extends Controller {
             'items.*.goodsName' => 'required|string|max:255',
             'items.*.trackingNo' => 'required|string|max:100',
             'items.*.productCode' => 'nullable|string|max:100',
+            'items.*.forecastId' => 'nullable|integer',
         ]);
 
         try {
@@ -41,8 +42,8 @@ class StockController extends Controller {
         ]);
 
         try {
-            $matchedCount = $this->stockService->matchForecast($request->warehouseId, $request->items);
-            return $this->jsonOk(['matched_count' => $matchedCount]);
+            $matchedItems = $this->stockService->matchForecast($request->warehouseId, $request->items);
+            return $this->jsonOk(['items' => $matchedItems]);
         } catch (\Exception $e) {
             return $this->jsonError('匹配失败：' . $e->getMessage());
         }
@@ -108,6 +109,40 @@ class StockController extends Controller {
             return $this->jsonOk($data);
         } catch (\Exception $e) {
             return $this->jsonError('获取列表失败：' . $e->getMessage());
+        }
+    }
+
+    public function batchDelete(Request $request)
+    {
+        $this->validate($request, [
+            'ids' => 'required|array',
+            'ids.*' => 'required|integer|min:1'
+        ]);
+
+        try {
+            $result = $this->stockService->batchDelete($request->ids);
+            return $this->jsonOk(['affected' => $result]);
+        } catch (\Exception $e) {
+            return $this->jsonError('批量删除失败：' . $e->getMessage());
+        }
+    }
+
+    public function checkTrackingNoExists(Request $request)
+    {
+        $this->validate($request, [
+            'warehouseId' => 'required|integer',
+            'trackingNos' => 'required|array',
+            'trackingNos.*' => 'required|string|max:100'
+        ]);
+
+        try {
+            $existingNos = $this->stockService->checkTrackingNoExists(
+                $request->warehouseId,
+                $request->trackingNos
+            );
+            return $this->jsonOk(['exists' => $existingNos]);
+        } catch (\Exception $e) {
+            return $this->jsonError('检查失败：' . $e->getMessage());
         }
     }
 }

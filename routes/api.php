@@ -131,5 +131,11 @@ Route::group(['middleware' => ['auth:api']], function() {
         // 结算库存
         Route::post('settle/{id}', [StockController::class, 'settle'])
             ->where('id', '[0-9]+');
+
+        // 批量删除
+        Route::delete('batch', [StockController::class, 'batchDelete']);
+
+        // 检查快递单号是否存在
+        Route::post('check-exists', [StockController::class, 'checkTrackingNoExists']);
     });
 });

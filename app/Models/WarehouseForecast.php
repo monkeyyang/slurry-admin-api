@@ -7,14 +7,16 @@ use Illuminate\Database\Eloquent\Model;
 class WarehouseForecast extends Model
 {
     protected $table = 'warehouse_forecast';
-    
+
     const CREATED_AT = 'create_time';
     const UPDATED_AT = 'update_time';
-    
+
     // 状态常量
     const STATUS_PENDING = 0;   // 待收货
     const STATUS_RECEIVED = 1;  // 已收货
     const STATUS_CANCELLED = 2; // 已取消
+    const STATUS_STORED = 9; // 已入库
+    const STATUS_SETTLED = 10; // 已结算
 
     protected $fillable = [
         'preorder_no',
