@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Services\ForecastCrawlerService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 class ProcessForecastCrawlerQueue extends Command
 {
@@ -12,6 +13,7 @@ class ProcessForecastCrawlerQueue extends Command
 
     public function handle()
     {
+        Log::info('====== 开始执行预报爬虫队列处理命令 ======');
         $this->info('开始处理预报爬虫队列...');
         
         try {
@@ -19,13 +21,18 @@ class ProcessForecastCrawlerQueue extends Command
             
             // 获取待处理数量
             $pendingCount = \DB::table('warehouse_forecast_crawler_queue')
-                ->where('status', 0)
-                ->where('attempt_count', '<', 5)
+                ->join('warehouse_forecast', 'warehouse_forecast_crawler_queue.forecast_id', '=', 'warehouse_forecast.id')
+                ->where('warehouse_forecast_crawler_queue.status', 0)
+                ->where('warehouse_forecast_crawler_queue.attempt_count', '<', 5)
+                ->whereNotIn('warehouse_forecast.status', [-2, 5, 9, 10])
+                ->where('warehouse_forecast.deleted', 0)
                 ->count();
             
+            Log::info("发现 {$pendingCount} 个待处理任务");
             $this->info("发现 {$pendingCount} 个待处理任务");
             
             if ($pendingCount == 0) {
+                Log::info('没有需要处理的任务，命令退出');
                 $this->info('没有需要处理的任务，程序退出');
                 return;
             }
@@ -35,6 +42,7 @@ class ProcessForecastCrawlerQueue extends Command
 
             // 注册进度回调
             $crawler->onProgress(function($message) use ($bar) {
+                // 注意：服务中已经处理了日志记录，这里不需要重复记录
                 $this->info("\n" . $message);
                 $bar->advance();
             });
@@ -46,8 +54,11 @@ class ProcessForecastCrawlerQueue extends Command
             
             $this->newLine();
             $this->info('队列处理完成！');
+            Log::info('====== 预报爬虫队列处理命令执行完成 ======');
             
         } catch (\Exception $e) {
+            Log::error('处理队列时发生错误：' . $e->getMessage());
+            Log::error('错误堆栈: ' . $e->getTraceAsString());
             $this->error('处理队列时发生错误：' . $e->getMessage());
         }
     }

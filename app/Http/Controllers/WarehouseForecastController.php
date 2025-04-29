@@ -189,6 +189,21 @@ class WarehouseForecastController extends Controller
                 ];
             }
 
+            // 新增代码: 立即执行爬虫处理
+            if (!empty($createdForecasts)) {
+                try {
+                    \Illuminate\Support\Facades\Log::info('====== 将预报添加到队列任务 ======');
+                    \Illuminate\Support\Facades\Log::info('添加的预报IDs: ' . implode(',', array_column($createdForecasts, 'id')));
+                    
+                    // 分发任务到队列，不再直接执行
+                    \App\Jobs\ProcessForecastCrawlerJob::dispatch(array_column($createdForecasts, 'id'));
+                } catch (\Exception $e) {
+                    \Illuminate\Support\Facades\Log::error('====== 添加预报到队列任务失败 ======');
+                    \Illuminate\Support\Facades\Log::error('错误信息: ' . $e->getMessage());
+                    // 失败不影响主流程，继续返回预报添加成功
+                }
+            }
+
             DB::commit();
 
             $response = [
