@@ -138,14 +138,22 @@ class ForecastCrawlerService
                             'update_time' => now(),
                         ]);
 
-                    $this->reportProgress("\n成功处理预报ID: {$item->forecast_id}");
-
                     // 最终检查：如果状态为0但有快递信息，则设为已发货
                     if ($result['status'] == 0 && !empty($result['shipment_no'])) {
                         $result['status'] = 4;
                         $result['status_desc'] = '运输中';
                         $this->reportProgress("强制应用规则：有快递单号时设置状态为已发货(4)");
+                        
+                        // 重新更新数据库中的状态
+                        DB::table('warehouse_forecast')
+                            ->where('id', $item->forecast_id)
+                            ->update([
+                                'status' => $result['status'],  // 使用新的状态
+                                'update_time' => now(),
+                            ]);
                     }
+
+                    $this->reportProgress("\n成功处理预报ID: {$item->forecast_id}");
                 } else {
                     throw new Exception('解析数据失败');
                 }
@@ -229,7 +237,12 @@ class ForecastCrawlerService
                 if ($attempt >= $maxAttempts) {
                     throw new Exception('Failed to crawl URL after ' . $maxAttempts . ' attempts: ' . $e->getMessage());
                 }
-                sleep($delay);
+                // 在重试时如果是503错误，尝试不同的代理
+                if ($e instanceof \GuzzleHttp\Exception\ServerException && $e->getResponse()->getStatusCode() == 503) {
+                    $this->reportProgress("检测到503错误，可能需要更换代理或等待更长时间");
+                    // 增加等待时间
+                    sleep($delay * 2 * ($attempt + 1));
+                }
             }
         }
     }
@@ -244,7 +257,7 @@ class ForecastCrawlerService
         $orderNum = $jsonData['orderDetail']['orderHeader']['d']['orderNumber'];
         $this->reportProgress("处理订单: {$orderNum}");
         
-        // 初始化结果数组
+        // 初始化结果数组 - 注意设置默认状态为4(运输中)而不是0
         $result = [
             'order_sn' => $orderNum,
             'status' => 0,
@@ -259,6 +272,7 @@ class ForecastCrawlerService
         $orderItemNames = array_filter(array_keys($jsonData['orderDetail']['orderItems']), function ($item) {
             return strpos($item, 'orderItem') === 0;
         });
+        
         $this->reportProgress("找到订单项: " . implode(", ", $orderItemNames));
 
         if (empty($orderItemNames)) {
@@ -266,17 +280,10 @@ class ForecastCrawlerService
         }
 
         foreach ($orderItemNames as $orderItemName) {
-            $this->reportProgress("处理订单项: {$orderItemName}");
-            
-            // 完整记录订单项结构
-            if (!isset($jsonData['orderDetail']['orderItems'][$orderItemName]['orderItemDetails']['d'])) {
-                $this->reportProgress("警告: 订单项 {$orderItemName} 结构不完整");
-                $this->reportProgress("可用键: " . json_encode(array_keys($jsonData['orderDetail']['orderItems'][$orderItemName]), JSON_UNESCAPED_UNICODE));
-                continue;
-            }
-            
             $orderItem = $jsonData['orderDetail']['orderItems'][$orderItemName]['orderItemDetails']['d'];
-            $this->reportProgress("订单项结构键: " . json_encode(array_keys($orderItem), JSON_UNESCAPED_UNICODE));
+            
+            // 获取状态信息 - 从正确的路径获取
+            $orderItemStatusTracker = $jsonData['orderDetail']['orderItems'][$orderItemName]['orderItemStatusTracker']['d'] ?? null;
             
             // 获取产品名称
             $productName = $orderItem['productName'] ?? '';
@@ -316,26 +323,12 @@ class ForecastCrawlerService
                 'SHIPPED' => 4,
                 'DELIVERED' => 5,
                 'Canceled' => -2,
-                'ORDER_IN_PROGRESS' => -1,
-                'OUT_FOR_DELIVERY' => 2,
-                'ARRIVING_SOON' => 3,
-                'DELIVERS' => 4,
-                'UNDER_REVIEW' => 6,
-                
-                // 添加可能的新状态
-                'PENDING' => 1,
-                'PAYMENT_CONFIRMED' => 1,
-                'IN_PROGRESS' => 2,
-                'IN_TRANSIT' => 4,
-                'COMPLETED' => 5,
                 'CANCELLED' => -2,
-                'RETURN_REQUESTED' => 7,
-                'RETURNED' => 8,
-                'ON_HOLD' => 6,
-                'READY_FOR_PICKUP' => 3,
-                'READY_TO_SHIP' => 3,
-                'AWAITING_SHIPMENT' => 3,
-                'BACKORDERED' => 2,
+                'ORDER_IN_PROGRESS' => 2,  // 修改为2(处理中)
+                'OUT_FOR_DELIVERY' => 4,   // 修改为4(运输中)
+                'ARRIVING_SOON' => 4,      // 修改为4(运输中)
+                'DELIVERS' => 4,           // 已在运输
+                'UNDER_REVIEW' => 6,
             ];
 
             // 状态描述映射
@@ -350,69 +343,23 @@ class ForecastCrawlerService
                 6 => '审核中',
             ];
 
-            // 记录原始订单项数据(仅供调试)
-            $this->reportProgress("订单项关键字段: " . json_encode([
-                'productName' => $orderItem['productName'] ?? 'N/A',
-                'deliveryDate' => $orderItem['deliveryDate'] ?? 'N/A',
-                'hasTrackingURLMap' => isset($orderItem['trackingURLMap']) ? 'yes' : 'no',
-                'trackingNumber' => $tracking ?: 'N/A', 
-            ]));
-
-            // 修改状态检测逻辑，添加更多可能的路径
-            // 以下是可能包含状态的字段路径列表
-            $possibleStatusPaths = [
-                ['orderItemStatusTracker', 'd', 'currentStatus'],
-                ['orderItemStatusTracker', 'd', 'orderStatus'],
-                ['orderItemStatus'],
-                ['status'],
-                ['deliveryStatus'],
-                ['fulfillmentStatus']
-            ];
-
-            $currentStatus = null;
-            $statusSource = '';
-
-            // 检查所有可能的路径
-            foreach ($possibleStatusPaths as $path) {
-                $value = $orderItem;
-                $valid = true;
-                
-                foreach ($path as $key) {
-                    if (!isset($value[$key])) {
-                        $valid = false;
-                        break;
-                    }
-                    $value = $value[$key];
+            // 订单状态检测逻辑
+            $orderStatus = 0;  // 默认设为0
+            
+            // 使用正确的变量检查状态
+            if ($orderItemStatusTracker && isset($orderItemStatusTracker['currentStatus'])) {
+                $currentStatus = $orderItemStatusTracker['currentStatus'];
+                $orderStatus = $statusMap[$currentStatus] ?? 0;
+                $this->reportProgress("原始状态: {$currentStatus}, 映射后状态: {$orderStatus}");
+            } elseif (in_array($deliveryDate, ['Canceled', 'Cancelled'])) {
+                $orderStatus = -2;
+                $this->reportProgress("订单已取消, 状态设为: {$orderStatus}");
+            } else {
+                // 如果没有状态但有快递单号，将状态设置为运输中
+                if (!empty($tracking)) {
+                    $orderStatus = 4;
+                    $this->reportProgress("根据快递单号 {$tracking} 设置状态为运输中(4)");
                 }
-                
-                if ($valid && !empty($value)) {
-                    $currentStatus = $value;
-                    $statusSource = implode('.', $path);
-                    $this->reportProgress("在路径 {$statusSource} 中找到状态: {$currentStatus}");
-                    break;
-                }
-            }
-
-            // 如果找到了状态
-            if ($currentStatus) {
-                // 处理大小写不一致问题
-                $upperStatus = strtoupper($currentStatus);
-                if (isset($statusMap[$upperStatus])) {
-                    $orderStatus = $statusMap[$upperStatus];
-                } elseif (isset($statusMap[$currentStatus])) {
-                    $orderStatus = $statusMap[$currentStatus];
-                } else {
-                    $orderStatus = 0;
-                    $this->reportProgress("警告: 状态 '{$currentStatus}' 未在映射表中找到");
-                }
-                
-                $this->reportProgress("原始状态: {$currentStatus} (来源: {$statusSource}), 映射后状态: {$orderStatus}");
-            }
-
-            // 在状态检测逻辑结束后，如果仍然没有状态但有物流信息
-            if ((!isset($orderStatus) || $orderStatus === 0) && !empty($tracking)) {
-                $orderStatus = 4; // 已发货
-                $this->reportProgress("根据快递单号 {$tracking} 推断状态为已发货(4)");
             }
 
             // 更新结果数组
@@ -426,34 +373,20 @@ class ForecastCrawlerService
             $result['delivery_date'] = $deliveryDate;
         }
 
-        // 验证结果
-        $this->reportProgress("最终处理结果: " . json_encode($result, JSON_UNESCAPED_UNICODE));
+        // 最终状态检查 - 确保有快递单号的订单状态至少为已发货
+        if ($result['status'] < 4 && !empty($result['shipment_no'])) {
+            $oldStatus = $result['status'];
+            $result['status'] = 4;
+            $result['status_desc'] = '运输中';
+            $this->reportProgress("最终检查: 状态从 {$oldStatus} 调整为运输中(4)，因为存在快递单号: {$result['shipment_no']}");
+        }
         
+        // 验证必要字段
         if (empty($result['name'])) {
             throw new Exception('Product name not found');
         }
 
-        // 在应用状态逻辑的部分（修改以下代码段）
-        // 确保无论如何只要有快递号但没状态就设为已发货
-
-        // 初始化 orderStatus 变量，避免未定义错误
-        $orderStatus = 0;
-
-        // ...状态检测代码...
-
-        // 在所有状态检测逻辑后，单独处理快递单号情况 
-        $this->reportProgress("最后检查快递单号推断状态，当前状态: " . ($orderStatus ?? 0) . ", 快递单号: " . ($tracking ?: '无'));
-
-        // 明确使用 == 0 而不是 === 0，以捕获null、false等情况
-        if (empty($orderStatus) || $orderStatus == 0) {
-            if (!empty($tracking)) {
-                $orderStatus = 4; // 已发货
-                $this->reportProgress("！！！根据快递单号 {$tracking} 推断状态为已发货(4)");
-            } else {
-                $this->reportProgress("没有快递单号且状态为0，保持未知状态");
-            }
-        }
-
+        $this->reportProgress("最终处理结果: " . json_encode($result, JSON_UNESCAPED_UNICODE));
         return $result;
     }
 }

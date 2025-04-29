@@ -138,4 +138,6 @@ Route::group(['middleware' => ['auth:api']], function() {
         // 检查快递单号是否存在
         Route::post('check-exists', [StockController::class, 'checkTrackingNoExists']);
     });
+
+    Route::post('/warehouse/forecast/batch-add-to-crawler-queue', [WarehouseForecastController::class, 'batchAddToForecastCrawlerQueue']);
 });

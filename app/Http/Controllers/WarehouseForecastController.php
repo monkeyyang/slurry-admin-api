@@ -6,6 +6,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Http\JsonResponse;
+use App\Jobs\ProcessForecastCrawlerJob;
 
 class WarehouseForecastController extends Controller
 {
@@ -396,5 +398,100 @@ class WarehouseForecastController extends Controller
             DB::rollBack();
             return $this->jsonError('批量删除失败：' . $e->getMessage());
         }
+    }
+
+    /**
+     * 批量添加预报到爬虫队列
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function batchAddToForecastCrawlerQueue(Request $request)
+    {
+        // 同时支持两种参数格式
+        if ($request->has('ids') && !$request->has('forecast_ids')) {
+            $request->merge(['forecast_ids' => $request->input('ids')]);
+        }
+        
+        // 验证请求数据
+        $request->validate([
+            'forecast_ids' => 'required|array',
+            'forecast_ids.*' => 'integer|exists:warehouse_forecast,id,deleted,0',
+        ]);
+
+        $forecastIds = $request->input('forecast_ids');
+        $addedCount = 0;
+        $skippedCount = 0;
+        $errorCount = 0;
+        $errors = [];
+
+        foreach ($forecastIds as $forecastId) {
+            try {
+                // 检查预报是否已在队列中
+                $existingQueue = DB::table('warehouse_forecast_crawler_queue')
+                    ->where('forecast_id', $forecastId)
+                    ->where('status', 0)
+                    ->first();
+
+                if ($existingQueue) {
+                    $skippedCount++;
+                    continue;
+                }
+
+                // 获取预报详情
+                $forecast = DB::table('warehouse_forecast')
+                    ->where('id', $forecastId)
+                    ->where('deleted', 0)
+                    ->first();
+
+                // 检查预报状态 - 跳过系统取消、订单完成、已入库、已结算的预报
+                if (in_array($forecast->status, [-2, 5, 9, 10])) {
+                    $skippedCount++;
+                    continue;
+                }
+
+                // 检查是否有URL
+                if (empty($forecast->goods_url)) {
+                    $skippedCount++;
+                    continue;
+                }
+
+                // 添加到队列
+                DB::table('warehouse_forecast_crawler_queue')->insert([
+                    'forecast_id' => $forecastId,
+                    'goods_url' => $forecast->goods_url,
+                    'status' => 0,
+                    'attempt_count' => 0,
+                    'create_time' => now(),
+                    'update_time' => now(),
+                ]);
+
+                $addedCount++;
+            } catch (\Exception $e) {
+                $errorCount++;
+                $errors[] = [
+                    'forecast_id' => $forecastId,
+                    'message' => $e->getMessage()
+                ];
+            }
+        }
+
+        // 如果有添加成功的预报，立即分发队列任务
+        if ($addedCount > 0) {
+            ProcessForecastCrawlerJob::dispatch();
+        }
+
+        // 返回符合要求格式的响应
+        return response()->json([
+            'code' => 0,
+            'message' => 'ok',
+            'data' => [
+                'total' => count($forecastIds),
+                'added' => $addedCount,
+                'skipped' => $skippedCount,
+                'error' => $errorCount,
+                'errors' => $errors
+            ]
+        ]);
     }
 }

@@ -157,6 +157,9 @@ class AdminWarehouseController extends Controller
             'remark' => 'nullable|string|max:255',
             'goods_ids' => 'nullable|array',
             'goods_ids.*' => 'integer|exists:warehouse_goods,id,deleted,0',
+            'address' => 'nullable|string|max:255',
+            'contact' => 'nullable|string|max:50',
+            'phone' => 'nullable|string|max:20',
         ]);
 
         DB::beginTransaction();
@@ -166,6 +169,9 @@ class AdminWarehouseController extends Controller
                 'name' => $request->name,
                 'status' => $request->status,
                 'remark' => $request->remark,
+                'address' => $request->address,
+                'contact' => $request->contact,
+                'phone' => $request->phone,
                 'create_time' => now(),
                 'update_time' => now(),
                 'deleted' => 0,
@@ -207,6 +213,9 @@ class AdminWarehouseController extends Controller
             'remark' => 'nullable|string|max:255',
             'goods_ids' => 'nullable|array',
             'goods_ids.*' => 'integer|exists:warehouse_goods,id,deleted,0',
+            'address' => 'nullable|string|max:255',
+            'contact' => 'nullable|string|max:50',
+            'phone' => 'nullable|string|max:20',
         ]);
 
         $warehouse = DB::table('admin_warehouse')
@@ -227,6 +236,9 @@ class AdminWarehouseController extends Controller
                     'name' => $request->name,
                     'status' => $request->status,
                     'remark' => $request->remark,
+                    'address' => $request->address,
+                    'contact' => $request->contact,
+                    'phone' => $request->phone,
                     'update_time' => now(),
                 ]);
 
