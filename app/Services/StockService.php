@@ -207,15 +207,29 @@ class StockService
         }
     }
 
+    /**
+     * 获取库存列表
+     * 
+     * @param array $params 查询参数
+     * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator
+     */
     public function getList(array $params)
     {
         $query = WarehouseInventory::query()
             ->with(['warehouse:id,name'])
             ->where('deleted', 0);
 
-        // 仓库筛选
-        if (!empty($params['warehouseId'])) {
-            $query->where('warehouse_id', $params['warehouseId']);
+        // 仓库筛选 - 支持两种参数格式 (warehouseId 或 warehouse_id)
+        if (!empty($params['warehouseId']) || !empty($params['warehouse_id'])) {
+            $warehouseId = $params['warehouseId'] ?? $params['warehouse_id'];
+            $query->where('warehouse_id', $warehouseId);
+        }
+
+        // 仓库名称筛选 (如果需要)
+        if (!empty($params['warehouse_name'])) {
+            $query->whereHas('warehouse', function($q) use ($params) {
+                $q->where('name', 'like', '%' . $params['warehouse_name'] . '%');
+            });
         }
 
         // 商品名称搜索
@@ -249,7 +263,15 @@ class StockService
         // 排序
         $query->orderBy($params['sortField'] ?? 'id', $params['sortOrder'] ?? 'desc');
 
-        return $query->paginate($params['pageSize'] ?? 10);
+        // 支持pageNum替代page参数
+        $page = $params['page'] ?? $params['pageNum'] ?? 1;
+        
+        return $query->paginate(
+            $params['pageSize'] ?? 10,
+            ['*'],
+            'page',
+            $page
+        );
     }
 
     public function batchDelete(array $ids): int
@@ -275,5 +297,64 @@ class StockService
             ->where('deleted', 0)
             ->pluck('tracking_no')
             ->toArray();
+    }
+
+    /**
+     * 获取仓库统计数据
+     * 
+     * 统计指定仓库的入库记录数量、结算状态和库存数量
+     *
+     * @param int|array $warehouseIds 单个仓库ID或仓库ID数组
+     * @return array 包含统计数据的数组，键为仓库ID
+     */
+    public function getWarehouseStats($warehouseIds)
+    {
+        // 确保输入是数组
+        if (!is_array($warehouseIds)) {
+            $warehouseIds = [$warehouseIds];
+        }
+        
+        // 如果是空数组，返回空结果
+        if (empty($warehouseIds)) {
+            return [];
+        }
+        
+        $stats = [];
+        
+        foreach ($warehouseIds as $warehouseId) {
+            // 获取入库总量 - 状态为已入库(2)或已结算(3)的总数
+            $totalCount = WarehouseInventory::where('warehouse_id', $warehouseId)
+                ->whereIn('status', [WarehouseInventory::STATUS_STORED, WarehouseInventory::STATUS_SETTLED])
+                ->where('deleted', 0)
+                ->count();
+                
+            // 获取已结算数量 - 状态为已结算(3)的记录
+            $settledCount = WarehouseInventory::where('warehouse_id', $warehouseId)
+                ->where('status', WarehouseInventory::STATUS_SETTLED)
+                ->where('deleted', 0)
+                ->count();
+                
+            // 获取未结算数量 - 已入库但未结算的记录(或直接用入库总量减去已结算数量)
+            $unsettledCount = WarehouseInventory::where('warehouse_id', $warehouseId)
+                ->where('status', WarehouseInventory::STATUS_STORED)
+                ->where('deleted', 0)
+                ->count();
+            
+            // 或者使用：$unsettledCount = $totalCount - $settledCount;
+                
+            // 获取库存总量 - 保持不变
+            $stockQuantity = WarehouseInventory::where('warehouse_id', $warehouseId)
+            ->where('deleted', 0)
+            ->count();
+            
+            $stats[$warehouseId] = [
+                'total_inbound_count' => $totalCount,
+                'settled_count' => $settledCount,
+                'unsettled_count' => $unsettledCount,
+                'stock_quantity' => $stockQuantity ?? 0
+            ];
+        }
+        
+        return $stats;
     }
 }

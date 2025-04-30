@@ -5,11 +5,41 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Http\JsonResponse;
+use App\Services\StockService;
 
+/**
+ * 仓库管理控制器
+ * 
+ * 负责仓库的增删改查、状态管理和关联货品管理
+ */
 class AdminWarehouseController extends Controller
 {
     /**
-     * 获取仓库列表
+     * 库存服务实例
+     * 
+     * @var StockService
+     */
+    protected $stockService;
+
+    /**
+     * 构造函数
+     * 
+     * @param StockService $stockService 库存服务实例
+     */
+    public function __construct(StockService $stockService)
+    {
+        $this->stockService = $stockService;
+    }
+
+    /**
+     * 获取仓库分页列表
+     *
+     * 返回带分页的仓库列表，支持名称和状态筛选
+     * 包含关联的货品信息和入库/库存统计数据
+     *
+     * @param Request $request 请求对象
+     * @return JsonResponse 仓库列表及分页信息
      */
     public function index(Request $request)
     {
@@ -45,41 +75,8 @@ class AdminWarehouseController extends Controller
             ->get()
             ->groupBy('warehouse_id');
         
-        // 获取所有仓库的入库统计信息
-        $inboundStats = [];
-        foreach ($warehouseIds as $warehouseId) {
-            // 获取入库总量
-            $totalCount = DB::table('warehouse_stock_in')
-                ->where('warehouse_id', $warehouseId)
-                ->where('status', 1) // 只统计正常状态的入库记录
-                ->count();
-                
-            // 获取已结算数量
-            $settledCount = DB::table('warehouse_stock_in')
-                ->where('warehouse_id', $warehouseId)
-                ->where('status', 1) // 只统计正常状态的入库记录
-                ->where('is_settled', 1)
-                ->count();
-                
-            // 获取未结算数量
-            $unsettledCount = DB::table('warehouse_stock_in')
-                ->where('warehouse_id', $warehouseId)
-                ->where('status', 1) // 只统计正常状态的入库记录
-                ->where('is_settled', 0)
-                ->count();
-                
-            // 获取库存总量
-            $stockQuantity = DB::table('warehouse_stock')
-                ->where('warehouse_id', $warehouseId)
-                ->sum('quantity');
-            
-            $inboundStats[$warehouseId] = [
-                'total_inbound_count' => $totalCount,
-                'settled_count' => $settledCount,
-                'unsettled_count' => $unsettledCount,
-                'stock_quantity' => $stockQuantity ?? 0
-            ];
-        }
+        // 获取统计数据
+        $inboundStats = $this->stockService->getWarehouseStats($warehouseIds);
         
         // 将货品信息和入库统计信息添加到每个仓库
         foreach ($warehouses->items() as $warehouse) {
@@ -105,7 +102,11 @@ class AdminWarehouseController extends Controller
     }
 
     /**
-     * 获取所有启用的仓库（用于下拉选择）
+     * 获取所有启用的仓库
+     *
+     * 用于下拉选择框等场景，仅返回启用状态的仓库
+     *
+     * @return JsonResponse 仓库ID和名称的列表
      */
     public function all()
     {
@@ -121,6 +122,11 @@ class AdminWarehouseController extends Controller
 
     /**
      * 获取仓库详情
+     *
+     * 返回指定ID仓库的详细信息，包括关联的货品列表
+     *
+     * @param int $id 仓库ID
+     * @return JsonResponse 仓库详情
      */
     public function show($id)
     {
@@ -147,7 +153,12 @@ class AdminWarehouseController extends Controller
     }
 
     /**
-     * 创建仓库
+     * 创建新仓库
+     *
+     * 支持同时设置仓库基本信息和关联的货品
+     *
+     * @param Request $request 请求对象，包含仓库信息和关联货品ID
+     * @return JsonResponse 创建结果和新仓库ID
      */
     public function store(Request $request)
     {
@@ -203,7 +214,13 @@ class AdminWarehouseController extends Controller
     }
 
     /**
-     * 更新仓库
+     * 更新仓库信息
+     *
+     * 更新指定ID仓库的信息，包括关联的货品列表
+     *
+     * @param Request $request 请求对象，包含更新的仓库信息
+     * @param int $id 仓库ID
+     * @return JsonResponse 更新结果
      */
     public function update(Request $request, $id)
     {
@@ -277,6 +294,11 @@ class AdminWarehouseController extends Controller
 
     /**
      * 更新仓库状态
+     *
+     * 启用或禁用指定ID的仓库
+     *
+     * @param Request $request 包含ID和状态值的请求
+     * @return JsonResponse 更新结果
      */
     public function updateStatus(Request $request)
     {
@@ -306,6 +328,11 @@ class AdminWarehouseController extends Controller
 
     /**
      * 删除仓库
+     *
+     * 软删除指定ID的仓库，同时删除与货品的关联关系
+     *
+     * @param int $id 仓库ID
+     * @return JsonResponse 删除结果
      */
     public function destroy($id)
     {
@@ -343,6 +370,11 @@ class AdminWarehouseController extends Controller
 
     /**
      * 获取仓库可入库货品列表
+     *
+     * 返回指定仓库可以入库的货品列表
+     *
+     * @param int $id 仓库ID
+     * @return JsonResponse 货品列表
      */
     public function getWarehouseGoods($id)
     {
@@ -366,7 +398,13 @@ class AdminWarehouseController extends Controller
     }
 
     /**
-     * 获取仓库列表
+     * 获取仓库列表（含统计信息）
+     * 
+     * 用于前台展示，返回简化的仓库列表，
+     * 包含入库统计和库存统计信息
+     *
+     * @param Request $request 请求对象，包含筛选和分页参数
+     * @return JsonResponse 仓库列表及统计信息
      */
     public function list(Request $request)
     {
@@ -390,44 +428,34 @@ class AdminWarehouseController extends Controller
         $total = $query->count();
         $warehouses = $query->offset($offset)->limit($pageSize)->get();
         
-        // 获取每个仓库的入库统计信息
+        // 从查询结果提取仓库ID
+        $warehouseIds = collect($warehouses)->pluck('id')->toArray();
+        
+        // 获取统计数据
+        $inboundStats = $this->stockService->getWarehouseStats($warehouseIds);
+        
+        // 构建结果
         $result = [];
         foreach ($warehouses as $warehouse) {
-            // 获取入库总量
-            $totalCount = DB::table('warehouse_stock_in')
-                ->where('warehouse_id', $warehouse->id)
-                ->where('status', 1) // 只统计正常状态的入库记录
-                ->count();
-                
-            // 获取已结算数量
-            $settledCount = DB::table('warehouse_stock_in')
-                ->where('warehouse_id', $warehouse->id)
-                ->where('status', 1) // 只统计正常状态的入库记录
-                ->where('is_settled', 1)
-                ->count();
-                
-            // 获取未结算数量
-            $unsettledCount = DB::table('warehouse_stock_in')
-                ->where('warehouse_id', $warehouse->id)
-                ->where('status', 1) // 只统计正常状态的入库记录
-                ->where('is_settled', 0)
-                ->count();
-                
-            // 获取库存总量
-            $stockQuantity = DB::table('warehouse_stock')
-                ->where('warehouse_id', $warehouse->id)
-                ->sum('quantity');
-            
-            // 构建结果
             $warehouseData = (array) $warehouse;
-            $warehouseData['total_inbound_count'] = $totalCount;
-            $warehouseData['settled_count'] = $settledCount;
-            $warehouseData['unsettled_count'] = $unsettledCount;
-            $warehouseData['stock_quantity'] = $stockQuantity ?? 0;
+            
+            // 添加统计数据
+            if (isset($inboundStats[$warehouse->id])) {
+                $warehouseData = array_merge(
+                    $warehouseData, 
+                    $inboundStats[$warehouse->id]
+                );
+            } else {
+                $warehouseData['total_inbound_count'] = 0;
+                $warehouseData['settled_count'] = 0;
+                $warehouseData['unsettled_count'] = 0;
+                $warehouseData['stock_quantity'] = 0;
+            }
             
             $result[] = $warehouseData;
         }
         
+        // 返回结果
         return $this->jsonOk([
             'list' => $result,
             'total' => $total,

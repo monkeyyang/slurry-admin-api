@@ -494,4 +494,48 @@ class WarehouseForecastController extends Controller
             ]
         ]);
     }
+
+    /**
+     * 检查订单号是否已存在
+     * 
+     * 验证给定的订单号列表中哪些已经存在于预报记录中
+     * 
+     * @param Request $request 包含订单号数组的请求
+     * @return JsonResponse 包含已存在订单号的响应
+     */
+    public function checkOrderNoExists(Request $request)
+    {
+        $this->validate($request, [
+            'orderNos' => 'required|array',
+            'orderNos.*' => 'required|string|max:100'
+        ]);
+
+        try {
+            // 查询已存在的订单号
+            $existingNos = DB::table('warehouse_forecast')
+                ->whereIn('order_number', $request->orderNos)
+                ->where('deleted', 0)
+                ->select('order_number', 'preorder_no')
+                ->get()
+                ->map(function($item) {
+                    return [
+                        'orderNo' => $item->order_number,
+                        'preorderNo' => $item->preorder_no
+                    ];
+                });
+
+            return response()->json([
+                'code' => 0,
+                'message' => 'ok',
+                'data' => [
+                    'exists' => $existingNos
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'code' => 500,
+                'message' => '检查失败：' . $e->getMessage()
+            ]);
+        }
+    }
 }

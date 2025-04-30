@@ -107,6 +107,7 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('cancel/{id}', [WarehouseForecastController::class, 'cancel']);
         Route::delete('delete/{id}', [WarehouseForecastController::class, 'destroy']);
         Route::delete('batch/delete', [WarehouseForecastController::class, 'batchDestroy']);
+        Route::post('check-order-no-exists', [WarehouseForecastController::class, 'checkOrderNoExists']);
     });
 
     // 库存管理相关路由
