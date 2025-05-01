@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\WarehouseForecast;
 use DateTime;
 use GuzzleHttp\Client;
 use DOMDocument;
@@ -36,7 +37,7 @@ class ForecastCrawlerService
     {
         // 同时记录到日志文件
         Log::info('[预报爬虫] ' . $message);
-        
+
         // 原有回调通知
         if ($this->progressCallback) {
             call_user_func($this->progressCallback, $message);
@@ -47,7 +48,7 @@ class ForecastCrawlerService
     {
         $logPrefix = !empty($forecastIds) ? "处理指定预报IDs: " . implode(',', $forecastIds) : "处理所有待处理预报";
         $this->reportProgress("开始{$logPrefix}");
-        
+
         // 获取待处理的队列项
         $query = DB::table('warehouse_forecast_crawler_queue')
             ->join('warehouse_forecast', 'warehouse_forecast_crawler_queue.forecast_id', '=', 'warehouse_forecast.id')
@@ -55,18 +56,18 @@ class ForecastCrawlerService
             ->where('warehouse_forecast_crawler_queue.attempt_count', '<', 5)
             ->whereNotIn('warehouse_forecast.status', [-2, 5, 9, 10]) // 跳过系统取消、订单完成、已入库、已结算的预报
             ->where('warehouse_forecast.deleted', 0);
-        
+
         // 如果指定了预报ID，则只处理这些预报
         if (!empty($forecastIds)) {
             $query->whereIn('warehouse_forecast_crawler_queue.forecast_id', $forecastIds);
         }
-        
+
         $queueItems = $query->select('warehouse_forecast_crawler_queue.*')
             ->limit(10)
             ->get();
 
         $this->reportProgress("找到 " . count($queueItems) . " 个待处理队列项");
-
+        $progressResult = false;
         foreach ($queueItems as $item) {
             try {
                 $this->reportProgress("正在处理预报ID: {$item->forecast_id}, URL: {$item->goods_url}");
@@ -76,10 +77,10 @@ class ForecastCrawlerService
                     ->where('id', $item->forecast_id)
                     ->where('deleted', 0)
                     ->first();
-                    
+
                 if (!$forecast || in_array($forecast->status, [-2, 5, 9, 10])) {
                     $this->reportProgress("预报ID: {$item->forecast_id} 状态已变更为终态，跳过处理");
-                    
+
                     // 将队列项标记为已完成
                     DB::table('warehouse_forecast_crawler_queue')
                         ->where('id', $item->id)
@@ -88,7 +89,7 @@ class ForecastCrawlerService
                             'update_time' => now(),
                             'remarks' => '预报已达终态，无需爬取'
                         ]);
-                    
+
                     continue;
                 }
 
@@ -143,7 +144,7 @@ class ForecastCrawlerService
                         $result['status'] = 4;
                         $result['status_desc'] = '运输中';
                         $this->reportProgress("强制应用规则：有快递单号时设置状态为已发货(4)");
-                        
+
                         // 重新更新数据库中的状态
                         DB::table('warehouse_forecast')
                             ->where('id', $item->forecast_id)
@@ -155,11 +156,18 @@ class ForecastCrawlerService
 
                     $this->reportProgress("\n成功处理预报ID: {$item->forecast_id}");
                 } else {
+//                    throw new Exception('解析数据失败');
+                    DB::table('warehouse_forecast')
+                            ->where('id', $item->forecast_id)
+                            ->update([
+                                'status' => WarehouseForecast::STATUS_ERROR,  // 使用新的状态
+                                'update_time' => now(),
+                            ]);
                     throw new Exception('解析数据失败');
                 }
             } catch (Exception $e) {
                 $this->reportProgress("\n处理预报ID: {$item->forecast_id} 失败: " . $e->getMessage());
-                
+
                 // 更新队列状态为失败
                 DB::table('warehouse_forecast_crawler_queue')
                     ->where('id', $item->id)
@@ -213,9 +221,9 @@ class ForecastCrawlerService
                 $dom = new DOMDocument();
                 @$dom->loadHTML($html);
                 $xpath = new DOMXPath($dom);
-                
+
                 $scriptNode = $xpath->query('//script[@type="application/json" and @id="init_data"]')->item(0);
-                
+
                 if (!$scriptNode) {
                     throw new Exception('Init data script not found');
                 }
@@ -252,11 +260,11 @@ class ForecastCrawlerService
         // 记录完整的JSON数据结构（仅用于调试，生产环境请注释掉此行）
         $this->reportProgress("订单完整数据结构:\n" . json_encode(array_keys($jsonData), JSON_PRETTY_PRINT));
         $this->reportProgress("订单头部数据:\n" . json_encode($jsonData['orderDetail']['orderHeader'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        
+
         // 获取订单号
         $orderNum = $jsonData['orderDetail']['orderHeader']['d']['orderNumber'];
         $this->reportProgress("处理订单: {$orderNum}");
-        
+
         // 初始化结果数组 - 注意设置默认状态为4(运输中)而不是0
         $result = [
             'order_sn' => $orderNum,
@@ -272,7 +280,7 @@ class ForecastCrawlerService
         $orderItemNames = array_filter(array_keys($jsonData['orderDetail']['orderItems']), function ($item) {
             return strpos($item, 'orderItem') === 0;
         });
-        
+
         $this->reportProgress("找到订单项: " . implode(", ", $orderItemNames));
 
         if (empty($orderItemNames)) {
@@ -281,19 +289,19 @@ class ForecastCrawlerService
 
         foreach ($orderItemNames as $orderItemName) {
             $orderItem = $jsonData['orderDetail']['orderItems'][$orderItemName]['orderItemDetails']['d'];
-            
+
             // 获取状态信息 - 从正确的路径获取
             $orderItemStatusTracker = $jsonData['orderDetail']['orderItems'][$orderItemName]['orderItemStatusTracker']['d'] ?? null;
-            
+
             // 获取产品名称
             $productName = $orderItem['productName'] ?? '';
-            
+
             // 获取发货状态
             $deliveryDate = $orderItem['deliveryDate'] ?? '';
-            
+
             // 获取商品图片
             $orderImage = $orderItem['imageData']['src'] ?? '';
-            
+
             // 初始化物流信息
             $carrier = '';
             $tracking = '';
@@ -345,7 +353,7 @@ class ForecastCrawlerService
 
             // 订单状态检测逻辑
             $orderStatus = 0;  // 默认设为0
-            
+
             // 使用正确的变量检查状态
             if ($orderItemStatusTracker && isset($orderItemStatusTracker['currentStatus'])) {
                 $currentStatus = $orderItemStatusTracker['currentStatus'];
@@ -380,7 +388,7 @@ class ForecastCrawlerService
             $result['status_desc'] = '运输中';
             $this->reportProgress("最终检查: 状态从 {$oldStatus} 调整为运输中(4)，因为存在快递单号: {$result['shipment_no']}");
         }
-        
+
         // 验证必要字段
         if (empty($result['name'])) {
             throw new Exception('Product name not found');

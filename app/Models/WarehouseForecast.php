@@ -12,6 +12,7 @@ class WarehouseForecast extends Model
     const UPDATED_AT = 'update_time';
 
     // 状态常量
+    const STATUS_ERROR = -1; // 抓取数据失败
     const STATUS_PENDING = 0;   // 待收货
     const STATUS_RECEIVED = 1;  // 已收货
     const STATUS_CANCELLED = 2; // 已取消
