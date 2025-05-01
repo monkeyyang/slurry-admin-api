@@ -44,6 +44,35 @@ class ForecastCrawlerService
         }
     }
 
+    /**
+     * 爬取失败时，更新预报状态并记录详细错误信息
+     */
+    private function handleCrawlFailure($forecastId, $errorMessage, $queueItemId)
+    {
+        $this->reportProgress("爬取失败，预报ID: {$forecastId}，错误: {$errorMessage}");
+
+        // 更新预报记录状态为 ERROR，并记录错误信息
+        DB::table('warehouse_forecast')
+            ->where('id', $forecastId)
+            ->update([
+                'status' => WarehouseForecast::STATUS_ERROR,  // 使用模型常量
+                'crawler_error' => $errorMessage, // 添加字段记录错误详情
+                'update_time' => now(),
+            ]);
+
+        // 更新队列项状态为失败
+        DB::table('warehouse_forecast_crawler_queue')
+            ->where('id', $queueItemId)
+            ->update([
+                'status' => 3, // 失败状态
+                'error_message' => $errorMessage,
+                'update_time' => now(),
+            ]);
+    }
+
+    /**
+     * 处理队列
+     */
     public function processQueue(array $forecastIds = []): void
     {
         $logPrefix = !empty($forecastIds) ? "处理指定预报IDs: " . implode(',', $forecastIds) : "处理所有待处理预报";
@@ -67,7 +96,7 @@ class ForecastCrawlerService
             ->get();
 
         $this->reportProgress("找到 " . count($queueItems) . " 个待处理队列项");
-        $progressResult = false;
+
         foreach ($queueItems as $item) {
             try {
                 $this->reportProgress("正在处理预报ID: {$item->forecast_id}, URL: {$item->goods_url}");
@@ -156,26 +185,25 @@ class ForecastCrawlerService
 
                     $this->reportProgress("\n成功处理预报ID: {$item->forecast_id}");
                 } else {
-//                    throw new Exception('解析数据失败');
-                    DB::table('warehouse_forecast')
-                            ->where('id', $item->forecast_id)
-                            ->update([
-                                'status' => WarehouseForecast::STATUS_ERROR,  // 使用新的状态
-                                'update_time' => now(),
-                            ]);
-                    throw new Exception('解析数据失败');
+                    // 爬取失败，改用专门的方法处理
+                    $this->handleCrawlFailure(
+                        $item->forecast_id,
+                        '爬取商品信息失败，请检查商品链接是否有效',
+                        $item->id
+                    );
+
+                    // 不需要立即抛出异常，让处理继续进行
+                    continue;
                 }
             } catch (Exception $e) {
-                $this->reportProgress("\n处理预报ID: {$item->forecast_id} 失败: " . $e->getMessage());
+                // 捕获异常，记录错误信息并更新状态
+                $this->handleCrawlFailure(
+                    $item->forecast_id,
+                    '处理异常: ' . $e->getMessage(),
+                    $item->id
+                );
 
-                // 更新队列状态为失败
-                DB::table('warehouse_forecast_crawler_queue')
-                    ->where('id', $item->id)
-                    ->update([
-                        'status' => 3,
-                        'error_message' => $e->getMessage(),
-                        'update_time' => now(),
-                    ]);
+                $this->reportProgress("\n处理预报ID: {$item->forecast_id} 失败: " . $e->getMessage());
             }
         }
 
@@ -239,18 +267,14 @@ class ForecastCrawlerService
 
                 return $this->processOrderData($jsonData);
 
+            } catch (RequestException $e) {
+                // 记录详细的网络请求错误
+                $statusCode = $e->hasResponse() ? $e->getResponse()->getStatusCode() : '未知';
+                $this->reportProgress("网络请求失败: HTTP状态码 {$statusCode}, 错误: {$e->getMessage()}");
+                return null;
             } catch (Exception $e) {
-                $this->reportProgress("第 " . ($attempt + 1) . " 次尝试失败: " . $e->getMessage());
-                $attempt++;
-                if ($attempt >= $maxAttempts) {
-                    throw new Exception('Failed to crawl URL after ' . $maxAttempts . ' attempts: ' . $e->getMessage());
-                }
-                // 在重试时如果是503错误，尝试不同的代理
-                if ($e instanceof \GuzzleHttp\Exception\ServerException && $e->getResponse()->getStatusCode() == 503) {
-                    $this->reportProgress("检测到503错误，可能需要更换代理或等待更长时间");
-                    // 增加等待时间
-                    sleep($delay * 2 * ($attempt + 1));
-                }
+                $this->reportProgress("爬取过程异常: " . $e->getMessage());
+                return null;
             }
         }
     }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\WarehouseForecast;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
@@ -196,7 +197,7 @@ class WarehouseForecastController extends Controller
                 try {
                     \Illuminate\Support\Facades\Log::info('====== 将预报添加到队列任务 ======');
                     \Illuminate\Support\Facades\Log::info('添加的预报IDs: ' . implode(',', array_column($createdForecasts, 'id')));
-                    
+
                     // 分发任务到队列，不再直接执行
                     \App\Jobs\ProcessForecastCrawlerJob::dispatch(array_column($createdForecasts, 'id'));
                 } catch (\Exception $e) {
@@ -412,7 +413,7 @@ class WarehouseForecastController extends Controller
         if ($request->has('ids') && !$request->has('forecast_ids')) {
             $request->merge(['forecast_ids' => $request->input('ids')]);
         }
-        
+
         // 验证请求数据
         $request->validate([
             'forecast_ids' => 'required|array',
@@ -456,6 +457,14 @@ class WarehouseForecastController extends Controller
                     continue;
                 }
 
+                // 修改状态为待抓取
+                DB::table('warehouse_forecast')
+                ->where('id', $forecastId)
+                ->update([
+                    'status' => WarehouseForecast::STATUS_PENDING, 
+                    'update_time' => now(),
+                ]);
+
                 // 添加到队列
                 DB::table('warehouse_forecast_crawler_queue')->insert([
                     'forecast_id' => $forecastId,
@@ -497,9 +506,9 @@ class WarehouseForecastController extends Controller
 
     /**
      * 检查订单号是否已存在
-     * 
+     *
      * 验证给定的订单号列表中哪些已经存在于预报记录中
-     * 
+     *
      * @param Request $request 包含订单号数组的请求
      * @return JsonResponse 包含已存在订单号的响应
      */
