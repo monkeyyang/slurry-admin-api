@@ -22,6 +22,7 @@ class WarehouseForecastController extends Controller
         $query = DB::table('warehouse_forecast')
             ->leftJoin('admin_users as customer', 'warehouse_forecast.customer_id', '=', 'customer.id')
             ->leftJoin('admin_warehouse', 'warehouse_forecast.warehouse_id', '=', 'admin_warehouse.id')
+//            ->leftJoin('countries', 'warehouse_forecast.country', '=', 'countries.code')
             ->where('warehouse_forecast.deleted', 0)
             ->select([
                 'warehouse_forecast.*',
@@ -461,7 +462,7 @@ class WarehouseForecastController extends Controller
                 DB::table('warehouse_forecast')
                 ->where('id', $forecastId)
                 ->update([
-                    'status' => WarehouseForecast::STATUS_PENDING, 
+                    'status' => WarehouseForecast::STATUS_PENDING,
                     'update_time' => now(),
                 ]);
 

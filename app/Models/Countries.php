@@ -47,17 +47,38 @@ class Countries extends Model
         return $query->where('status', self::STATUS_ENABLED);
     }
 
-    // 启用
-    public function enable(): bool
+    /**
+     * 禁用国家
+     *
+     * @param int $id 国家ID
+     * @return bool 操作结果
+     */
+    public static function disable(int $id): bool
     {
-        $this->status = self::STATUS_ENABLED;
-        return $this->save();
+        return self::where('id', $id)->update(['status' => self::STATUS_DISABLED]);
     }
 
-    // 禁用
-    public function disable(): bool
+    /**
+     * 启用国家
+     *
+     * @param int $id 国家ID
+     * @return bool 操作结果
+     */
+    public static function enable(int $id): bool
     {
-        $this->status = self::STATUS_DISABLED;
-        return $this->save();
+        return self::where('id', $id)->update(['status' => self::STATUS_ENABLED]);
+    }
+
+    /**
+     * 获取使用该国家的仓库数量
+     * 
+     * @return int 仓库数量
+     */
+    public function getWarehouseCountAttribute()
+    {
+        return \DB::table('admin_warehouse')
+            ->where('country', $this->code)
+            ->where('deleted', 0)
+            ->count();
     }
 }

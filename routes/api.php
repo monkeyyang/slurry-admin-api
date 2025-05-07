@@ -66,9 +66,10 @@ Route::group(['middleware' => ['auth:api']], function() {
     Route::post('/system/invite-code', [InvitationCodeController::class, 'store']);
     Route::post('/system/invite-code/generate', [InvitationCodeController::class, 'generate']);
 
-    // 国家列表
+    // 国家管理
     Route::get('/system/countries/list', [CountriesController::class, 'index']);
-
+    Route::post('/system/countries/disable/{id}', [CountriesController::class, 'disable']);
+    Route::post('/system/countries/enable/{id}', [CountriesController::class, 'enable']);
     // 货品管理路由
     Route::get('/warehouse/goods/list', [WarehouseGoodsController::class, 'index']);
     Route::get('/warehouse/goods/info/{id}', [WarehouseGoodsController::class, 'show']);

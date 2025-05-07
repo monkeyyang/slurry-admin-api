@@ -10,21 +10,21 @@ use App\Services\StockService;
 
 /**
  * 仓库管理控制器
- * 
+ *
  * 负责仓库的增删改查、状态管理和关联货品管理
  */
 class AdminWarehouseController extends Controller
 {
     /**
      * 库存服务实例
-     * 
+     *
      * @var StockService
      */
     protected $stockService;
 
     /**
      * 构造函数
-     * 
+     *
      * @param StockService $stockService 库存服务实例
      */
     public function __construct(StockService $stockService)
@@ -44,24 +44,31 @@ class AdminWarehouseController extends Controller
     public function index(Request $request)
     {
         $query = DB::table('admin_warehouse')
-            ->where('deleted', 0)
-            ->orderBy('id', 'desc');
+            ->leftJoin('countries', 'admin_warehouse.country', '=', 'countries.code')
+            ->select(
+                'admin_warehouse.*',
+                'countries.name_zh as country_name_zh',
+                'countries.name_en as country_name_en'
+            )
+            ->where('admin_warehouse.deleted', 0)
+            ->orderBy('admin_warehouse.id', 'desc');
+
 
         // 仓库名称筛选
-        if ($request->filled('name')) {
-            $query->where('name', 'like', '%' . $request->name . '%');
+        if ($request->filled('admin_warehouse.name')) {
+            $query->where('admin_warehouse.name', 'like', '%' . $request->name . '%');
         }
 
         // 状态筛选
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
+        if ($request->filled('admin_warehouse.status')) {
+            $query->where('admin_warehouse.status', $request->status);
         }
 
         $warehouses = $query->paginate($request->input('pageSize', 10));
-        
+
         // 获取所有仓库ID
-        $warehouseIds = collect($warehouses->items())->pluck('id')->toArray();
-        
+        $warehouseIds = collect($warehouses->items())->pluck('admin_warehouse.id')->toArray();
+
         // 获取所有仓库关联的货品
         $warehouseGoods = DB::table('admin_warehouse_goods')
             ->join('warehouse_goods', 'warehouse_goods.id', '=', 'admin_warehouse_goods.goods_id')
@@ -74,16 +81,16 @@ class AdminWarehouseController extends Controller
             ->where('warehouse_goods.deleted', 0)
             ->get()
             ->groupBy('warehouse_id');
-        
+
         // 获取统计数据
         $inboundStats = $this->stockService->getWarehouseStats($warehouseIds);
-        
+
         // 将货品信息和入库统计信息添加到每个仓库
         foreach ($warehouses->items() as $warehouse) {
-            $warehouse->goods = isset($warehouseGoods[$warehouse->id]) 
-                ? $warehouseGoods[$warehouse->id] 
+            $warehouse->goods = isset($warehouseGoods[$warehouse->id])
+                ? $warehouseGoods[$warehouse->id]
                 : [];
-            
+
             // 添加入库统计信息
             if (isset($inboundStats[$warehouse->id])) {
                 $warehouse->total_inbound_count = $inboundStats[$warehouse->id]['total_inbound_count'];
@@ -97,7 +104,7 @@ class AdminWarehouseController extends Controller
                 $warehouse->stock_quantity = 0;
             }
         }
-        
+
         return $this->jsonOk($warehouses);
     }
 
@@ -165,10 +172,11 @@ class AdminWarehouseController extends Controller
         $this->validate($request, [
             'name' => 'required|string|max:100|unique:admin_warehouse,name,NULL,id,deleted,0',
             'status' => 'required|boolean',
+            'country' => 'required|string|max:100',
+            'address' => 'required|string|max:255',
             'remark' => 'nullable|string|max:255',
             'goods_ids' => 'nullable|array',
             'goods_ids.*' => 'integer|exists:warehouse_goods,id,deleted,0',
-            'address' => 'nullable|string|max:255',
             'contact' => 'nullable|string|max:50',
             'phone' => 'nullable|string|max:20',
         ]);
@@ -180,6 +188,7 @@ class AdminWarehouseController extends Controller
                 'name' => $request->name,
                 'status' => $request->status,
                 'remark' => $request->remark,
+                'country' => $request->country,
                 'address' => $request->address,
                 'contact' => $request->contact,
                 'phone' => $request->phone,
@@ -199,7 +208,7 @@ class AdminWarehouseController extends Controller
                         'update_time' => now(),
                     ];
                 }
-                
+
                 if (!empty($insertData)) {
                     DB::table('admin_warehouse_goods')->insert($insertData);
                 }
@@ -227,10 +236,11 @@ class AdminWarehouseController extends Controller
         $this->validate($request, [
             'name' => 'required|string|max:100|unique:admin_warehouse,name,'.$id.',id,deleted,0',
             'status' => 'required|boolean',
+            'country' => 'required|string|max:100',
+            'address' => 'required|string|max:255',
             'remark' => 'nullable|string|max:255',
             'goods_ids' => 'nullable|array',
             'goods_ids.*' => 'integer|exists:warehouse_goods,id,deleted,0',
-            'address' => 'nullable|string|max:255',
             'contact' => 'nullable|string|max:50',
             'phone' => 'nullable|string|max:20',
         ]);
@@ -253,6 +263,7 @@ class AdminWarehouseController extends Controller
                     'name' => $request->name,
                     'status' => $request->status,
                     'remark' => $request->remark,
+                    'country' => $request->country,
                     'address' => $request->address,
                     'contact' => $request->contact,
                     'phone' => $request->phone,
@@ -277,7 +288,7 @@ class AdminWarehouseController extends Controller
                             'update_time' => now(),
                         ];
                     }
-                    
+
                     if (!empty($insertData)) {
                         DB::table('admin_warehouse_goods')->insert($insertData);
                     }
@@ -399,7 +410,7 @@ class AdminWarehouseController extends Controller
 
     /**
      * 获取仓库列表（含统计信息）
-     * 
+     *
      * 用于前台展示，返回简化的仓库列表，
      * 包含入库统计和库存统计信息
      *
@@ -410,7 +421,7 @@ class AdminWarehouseController extends Controller
     {
         $query = DB::table('admin_warehouse')
             ->where('status', 1);
-            
+
         // 添加搜索条件
         if ($request->filled('keyword')) {
             $keyword = $request->keyword;
@@ -419,7 +430,7 @@ class AdminWarehouseController extends Controller
                   ->orWhere('code', 'like', "%{$keyword}%");
             });
         }
-        
+
         // 获取仓库基本信息（带分页）
         $page = $request->input('page', 1);
         $pageSize = $request->input('pageSize', 10);
@@ -427,22 +438,22 @@ class AdminWarehouseController extends Controller
 
         $total = $query->count();
         $warehouses = $query->offset($offset)->limit($pageSize)->get();
-        
+
         // 从查询结果提取仓库ID
         $warehouseIds = collect($warehouses)->pluck('id')->toArray();
-        
+
         // 获取统计数据
         $inboundStats = $this->stockService->getWarehouseStats($warehouseIds);
-        
+
         // 构建结果
         $result = [];
         foreach ($warehouses as $warehouse) {
             $warehouseData = (array) $warehouse;
-            
+
             // 添加统计数据
             if (isset($inboundStats[$warehouse->id])) {
                 $warehouseData = array_merge(
-                    $warehouseData, 
+                    $warehouseData,
                     $inboundStats[$warehouse->id]
                 );
             } else {
@@ -451,10 +462,10 @@ class AdminWarehouseController extends Controller
                 $warehouseData['unsettled_count'] = 0;
                 $warehouseData['stock_quantity'] = 0;
             }
-            
+
             $result[] = $warehouseData;
         }
-        
+
         // 返回结果
         return $this->jsonOk([
             'list' => $result,
@@ -463,4 +474,4 @@ class AdminWarehouseController extends Controller
             'pageSize' => $pageSize
         ]);
     }
-} 
+}
