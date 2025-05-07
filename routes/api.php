@@ -4,6 +4,7 @@ use App\Http\Controllers\AdminMenuController;
 use App\Http\Controllers\AdminRoleController;
 use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\ConfigController;
+use App\Http\Controllers\CountriesController;
 use App\Http\Controllers\InvitationCodeController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\RegisterController;
@@ -64,6 +65,9 @@ Route::group(['middleware' => ['auth:api']], function() {
     Route::get('/system/invite-code/list', [InvitationCodeController::class, 'index']);
     Route::post('/system/invite-code', [InvitationCodeController::class, 'store']);
     Route::post('/system/invite-code/generate', [InvitationCodeController::class, 'generate']);
+
+    // 国家列表
+    Route::get('/system/countries/list', [CountriesController::class, 'index']);
 
     // 货品管理路由
     Route::get('/warehouse/goods/list', [WarehouseGoodsController::class, 'index']);
