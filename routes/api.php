@@ -5,7 +5,6 @@ use App\Http\Controllers\AdminRoleController;
 use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\CountriesController;
-use App\Http\Controllers\GiftCardController;
 use App\Http\Controllers\InvitationCodeController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\RegisterController;
@@ -159,6 +158,8 @@ Route::group(['middleware' => ['auth:api']], function() {
 
     // 卡密相关路由
     Route::prefix('gift-card')->group(function () {
+        // 设定卡密查询规则
+        Route::post('/set-query-rule', [GiftCardController::class, 'setQueryRule']);
         // 批量查询卡密
         Route::post('/batch-query', [GiftCardController::class, 'batchQuery']);
     });
