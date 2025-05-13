@@ -93,6 +93,26 @@ return [
             // 'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'false'),
         ],
 
+        'mysql_card' => [
+            'driver' => 'mysql',
+            'url' => env('CARD_DATABASE_URL'),
+            'host' => env('CARD_DB_HOST', '127.0.0.1'),
+            'port' => env('CARD_DB_PORT', '3306'),
+            'database' => env('CARD_DB_DATABASE', 'forge'),
+            'username' => env('CARD_DB_USERNAME', 'forge'),
+            'password' => env('CARD_DB_PASSWORD', ''),
+            'unix_socket' => env('CARD_DB_SOCKET', ''),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
     ],
 
     /*

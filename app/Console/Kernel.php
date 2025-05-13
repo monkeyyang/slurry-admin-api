@@ -13,6 +13,9 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule): void
     {
         $schedule->command('forecast:crawl')->hourly();
+        
+        // 每10分钟查询一次卡密
+        $schedule->command('cards:query')->everyTenMinutes();
     }
 
     /**

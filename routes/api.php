@@ -5,6 +5,7 @@ use App\Http\Controllers\AdminRoleController;
 use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\CountriesController;
+use App\Http\Controllers\GiftCardController;
 use App\Http\Controllers\InvitationCodeController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\RegisterController;
@@ -143,10 +144,6 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::get('forecast/{id}', [StockController::class, 'getForecastDetail'])
             ->where('id', '[0-9]+');
 
-//        // 结算库存
-//        Route::post('settle/{id}', [StockController::class, 'settle'])
-//            ->where('id', '[0-9]+');
-
         // 结算库存
         Route::post('settle', [StockController::class, 'settle']);
 
@@ -157,5 +154,18 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('check-exists', [StockController::class, 'checkTrackingNoExists']);
     });
 
+    // 预报队列管理
     Route::post('/warehouse/forecast/batch-add-to-crawler-queue', [WarehouseForecastController::class, 'batchAddToForecastCrawlerQueue']);
+
+    // 卡密相关路由
+    Route::prefix('gift-card')->group(function () {
+        // 批量查询卡密
+        Route::post('/batch-query', [GiftCardController::class, 'batchQuery']);
+    });
+
+    // 微信账单记录
+    Route::prefix('wechat/bill')->group(function () {
+        // 批量查询微信账单记录
+        // Route::post('/batch-query', [WechatBillController::class, 'batchQuery']);
+    });
 });
