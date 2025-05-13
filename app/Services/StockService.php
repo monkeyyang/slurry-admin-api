@@ -26,7 +26,6 @@ class StockService
                     $forecast = WarehouseForecast::where('id', $item['forecastId'])
                         ->where('warehouse_id', $warehouseId)
                         ->where('tracking_no', $item['trackingNo'])
-                        ->where('status', WarehouseForecast::STATUS_PENDING)
                         ->where('deleted', 0)
                         ->first();
 
@@ -56,6 +55,8 @@ class StockService
                     'goods_name' => $item['goodsName'],
                     'tracking_no' => $item['trackingNo'],
                     'product_code' => $item['productCode'] ?? null,
+                    'imei' => $item['imei'] ?? null,
+                    'quantity' => $item['quantity'] ?? 1,
                     'status' => $status,
                     'created_by' => Auth::id(),
                     'updated_by' => Auth::id(),
@@ -114,7 +115,7 @@ class StockService
                     'status' => $forecast->status,
                     'create_time' => $forecast->create_time ? date('Y-m-d H:i:s', strtotime($forecast->create_time)) : null,
                     'receive_time' => $forecast->receive_time ? date('Y-m-d H:i:s', strtotime($forecast->receive_time)) : null,
-                    'settle_time' => $forecast->settle_time ? date('Y-m-d H:i:s', strtotime($forecast->settle_time)) : null    
+                    'settle_time' => $forecast->settle_time ? date('Y-m-d H:i:s', strtotime($forecast->settle_time)) : null
                 ];
             } else {
                 $result[] = [
@@ -174,7 +175,7 @@ class StockService
     /**
      * 结算库存
      */
-    public function settleStock(int $id): bool
+    public function settleStock(int $id, $settleMoney, string $remark = ''): bool
     {
         DB::beginTransaction();
         try {
@@ -184,6 +185,8 @@ class StockService
                 ->firstOrFail();
 
             $inventory->status = WarehouseInventory::STATUS_SETTLED;
+            $inventory->settle_money = $settleMoney;
+            $inventory->remark = $remark;
             $inventory->settle_time = now();
             $inventory->updated_by = Auth::id();
             $inventory->save();
@@ -209,7 +212,7 @@ class StockService
 
     /**
      * 获取库存列表
-     * 
+     *
      * @param array $params 查询参数
      * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator
      */
@@ -265,7 +268,7 @@ class StockService
 
         // 支持pageNum替代page参数
         $page = $params['page'] ?? $params['pageNum'] ?? 1;
-        
+
         return $query->paginate(
             $params['pageSize'] ?? 10,
             ['*'],
@@ -301,7 +304,7 @@ class StockService
 
     /**
      * 获取仓库统计数据
-     * 
+     *
      * 统计指定仓库的入库记录数量、结算状态和库存数量
      *
      * @param int|array $warehouseIds 单个仓库ID或仓库ID数组
@@ -313,40 +316,41 @@ class StockService
         if (!is_array($warehouseIds)) {
             $warehouseIds = [$warehouseIds];
         }
-        
+
         // 如果是空数组，返回空结果
         if (empty($warehouseIds)) {
             return [];
         }
-        
+
+        // 使用原始查询来解决可能的模型问题
         $stats = [];
-        
+
         foreach ($warehouseIds as $warehouseId) {
             // 获取入库总量 - 状态为已入库(2)或已结算(3)的总数
             $totalCount = WarehouseInventory::where('warehouse_id', $warehouseId)
                 ->whereIn('status', [WarehouseInventory::STATUS_STORED, WarehouseInventory::STATUS_SETTLED])
                 ->where('deleted', 0)
                 ->count();
-                
+
             // 获取已结算数量 - 状态为已结算(3)的记录
             $settledCount = WarehouseInventory::where('warehouse_id', $warehouseId)
                 ->where('status', WarehouseInventory::STATUS_SETTLED)
                 ->where('deleted', 0)
                 ->count();
-                
+
             // 获取未结算数量 - 已入库但未结算的记录(或直接用入库总量减去已结算数量)
             $unsettledCount = WarehouseInventory::where('warehouse_id', $warehouseId)
                 ->where('status', WarehouseInventory::STATUS_STORED)
                 ->where('deleted', 0)
                 ->count();
-            
+
             // 或者使用：$unsettledCount = $totalCount - $settledCount;
-                
+
             // 获取库存总量 - 保持不变
             $stockQuantity = WarehouseInventory::where('warehouse_id', $warehouseId)
             ->where('deleted', 0)
             ->count();
-            
+
             $stats[$warehouseId] = [
                 'total_inbound_count' => $totalCount,
                 'settled_count' => $settledCount,
@@ -354,7 +358,7 @@ class StockService
                 'stock_quantity' => $stockQuantity ?? 0
             ];
         }
-        
+
         return $stats;
     }
 }

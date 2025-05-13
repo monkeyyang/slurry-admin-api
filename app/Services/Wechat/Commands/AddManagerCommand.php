@@ -1,9 +1,9 @@
 <?php
 
-namespace app\common\WechatMsg\Commands;
+namespace App\Services\Wechat\Commands;
 
 use app\api\model\RoomManager;
-use app\common\WechatMsg\Common;
+use App\Services\Wechat\Common;
 
 class AddManagerCommand implements CommandStrategy
 {

@@ -1,59 +1,50 @@
 <?php
 
-namespace app\common\WechatMsg;
+namespace App\Services\Wechat;
 
-use app\common\WechatMsg\MessageHandler\ChatroomsMembersMessageHandler;
-use app\common\WechatMsg\MessageHandler\ChatRoomsMessageHandler;
-use app\common\WechatMsg\MessageHandler\ChatroomsNoMembersMessageHandler;
-use app\common\WechatMsg\MessageHandler\ImageMessageHandler;
-use app\common\WechatMsg\MessageHandler\PingMessageHandler;
-use app\common\WechatMsg\MessageHandler\RecvOtherAppMessageHandler;
-use app\common\WechatMsg\MessageHandler\RecvSystemMessageHandler;
-use app\common\WechatMsg\MessageHandler\RoomCreateNotifyMessageHandler;
-use app\common\WechatMsg\MessageHandler\TalkerChangeMessageHandler;
-use app\common\WechatMsg\MessageHandler\TextMessageHandler;
-use app\common\WechatMsg\MessageHandler\UserLoginMessageHandler;
-use app\common\WechatMsg\MessageHandler\WechatLoginHandler;
-use app\common\WechatMsg\MessageHandler\WechatLogoutHandler;
+use App\Services\Wechat\MessageHandler\ChatroomsMembersMessageHandler;
+use App\Services\Wechat\MessageHandler\ChatRoomsMessageHandler;
+use App\Services\Wechat\MessageHandler\ChatroomsNoMembersMessageHandler;
+use App\Services\Wechat\MessageHandler\ImageMessageHandler;
+use App\Services\Wechat\MessageHandler\PingMessageHandler;
+use App\Services\Wechat\MessageHandler\RecvOtherAppMessageHandler;
+use App\Services\Wechat\MessageHandler\RecvSystemMessageHandler;
+use App\Services\Wechat\MessageHandler\RoomCreateNotifyMessageHandler;
+use App\Services\Wechat\MessageHandler\TalkerChangeMessageHandler;
+use App\Services\Wechat\MessageHandler\TextMessageHandler;
+use App\Services\Wechat\MessageHandler\UserLoginMessageHandler;
+use App\Services\Wechat\MessageHandler\WechatLoginHandler;
+use App\Services\Wechat\MessageHandler\WechatLogoutHandler;
 
 class MessageHandlerFactory
 {
-    public static function createHandler($messageType)
+    public static function createHandler($messageType): ImageMessageHandler|RoomCreateNotifyMessageHandler|UserLoginMessageHandler|TextMessageHandler|WechatLoginHandler|ChatRoomsMessageHandler|RecvOtherAppMessageHandler|RecvSystemMessageHandler|PingMessageHandler|ChatroomsMembersMessageHandler|ChatroomsNoMembersMessageHandler|WechatLogoutHandler|TalkerChangeMessageHandler|null
     {
-        switch ($messageType) {
-            case 'MT_RECV_TEXT_MSG': // 文本消息处理
-                return new TextMessageHandler();
-            case 'MT_SEND_IMGMSG': // 图片消息处理
-                return new ImageMessageHandler();
-            case 'MT_TALKER_CHANGE_MSG':// 更改对话群组消息处理
-                return new TalkerChangeMessageHandler();
-            case 'MT_RECV_SYSTEM_MSG':// 系统消息处理(更改群名等)
-                return new RecvSystemMessageHandler();
-            case 'MT_DATA_CHATROOMS_NO_MEMBER_MSG': // 获取群信息（无成员）
-                return new ChatroomsNoMembersMessageHandler();
-            case 'MT_DATA_CHATROOM_MEMBERS_MSG': // 获取群信息（有成员）
-                return new ChatroomsMembersMessageHandler();
-            case 'MT_DATA_CHATROOMS_MSG': // 获取群组列表
-                return new ChatRoomsMessageHandler();
-            case 'MT_ROOM_CREATE_NOTIFY_MSG': // 群创建消息处理
-                return new RoomCreateNotifyMessageHandler();
-            case 'MT_USER_LOGIN': // 登录微信消息处理
-                return new UserLoginMessageHandler();
-            case 'MT_RECV_OTHER_APP_MSG':// 引入消息
-                return new RecvOtherAppMessageHandler();
-            case 'MT_ENTER_WECHAT':// 进入微信
-                return new WechatLoginHandler();
-            case 'MT_QUIT_LOGIN_MSG': // 注销登录
-                return new WechatLogoutHandler();
-            case 'MT_QUIT_WECHAT_MSG':// 退出微信程序
-                return new WechatLogoutHandler();
-            case 'MT_DATA_OWNER_MSG':
-                return new WechatLoginHandler();
-            case 'PING': // 机器人心跳检测
-                return new PingMessageHandler();
-            // 添加更多消息类型的处理器...
-            default:
-                return null; // 返回一个默认处理器或抛出异常
-        }
+
+        /**
+         * 匹配对应消息类型
+         *
+         * MT_RECV_TEXT_MSG 文本消息处理
+         * MT_SEND_IMGMSG 图片处理
+         * MT_TALKER_CHANGE_MSG 更改群组处理
+         * MT_RECV_SYSTEM_MSG 系统消息处理
+         *
+         */
+        return match ($messageType) {
+            'MT_RECV_TEXT_MSG' => new TextMessageHandler(),
+            'MT_SEND_IMGMSG' => new ImageMessageHandler(),
+            'MT_TALKER_CHANGE_MSG' => new TalkerChangeMessageHandler(),
+            'MT_RECV_SYSTEM_MSG' => new RecvSystemMessageHandler(),
+            'MT_DATA_CHATROOMS_NO_MEMBER_MSG' => new ChatroomsNoMembersMessageHandler(),
+            'MT_DATA_CHATROOM_MEMBERS_MSG' => new ChatroomsMembersMessageHandler(),
+            'MT_DATA_CHATROOMS_MSG' => new ChatRoomsMessageHandler(),
+            'MT_ROOM_CREATE_NOTIFY_MSG' => new RoomCreateNotifyMessageHandler(),
+            'MT_USER_LOGIN' => new UserLoginMessageHandler(),
+            'MT_RECV_OTHER_APP_MSG' => new RecvOtherAppMessageHandler(),
+            'MT_ENTER_WECHAT', 'MT_DATA_OWNER_MSG' => new WechatLoginHandler(),
+            'MT_QUIT_LOGIN_MSG', 'MT_QUIT_WECHAT_MSG' => new WechatLogoutHandler(),
+            'PING' => new PingMessageHandler(),
+            default => null,
+        };
     }
 }

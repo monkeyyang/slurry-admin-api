@@ -1,14 +1,14 @@
 <?php
 
-namespace app\common\WechatMsg\Commands;
+namespace App\Services\Wechat\Commands;
 
 use app\common\model\Room;
 use app\common\service\EnhancedMessageParser;
-use app\common\WechatMsg\Common;
+use App\Services\Wechat\Common;
 
 /**
  * 增强版账单命令处理类
- * 
+ *
  * 使用增强版消息解析器处理微信群聊中的账单添加命令
  */
 class EnhancedBillCommand implements CommandStrategy
@@ -26,13 +26,13 @@ class EnhancedBillCommand implements CommandStrategy
             if (!$this->validatePreConditions($input)) {
                 return false;
             }
-            
+
             // 处理消息内容
             $input = $this->processMessageContent($input);
-            
+
             // 创建并配置消息解析器
             $parser = $this->createMessageParser($input);
-            
+
             // 执行账单处理
             return $parser->exec();
         } catch (\Exception $e) {
@@ -49,7 +49,7 @@ class EnhancedBillCommand implements CommandStrategy
             return false;
         }
     }
-    
+
     /**
      * 验证前置条件
      *
@@ -62,12 +62,12 @@ class EnhancedBillCommand implements CommandStrategy
         if (!Room::isOpen($input['data']['room_wxid'])) {
             return false;
         }
-        
+
         // 检查消息是否已经处理过
         if ($this->isMessageAlreadyHandled($input['data']['msgid'])) {
             return false;
         }
-        
+
         return true;
     }
 
@@ -83,7 +83,7 @@ class EnhancedBillCommand implements CommandStrategy
         $record = db('room_event')->where('msgid', $msgId)->find();
         return !empty($record);
     }
-    
+
     /**
      * 处理消息内容
      *
@@ -95,10 +95,10 @@ class EnhancedBillCommand implements CommandStrategy
         // 清理HTML实体和空格
         $input['data']['msg'] = str_replace('&nbsp;', ' ', htmlentities(trim($input['data']['msg'])));
         $input['data']['msg'] = trim($input['data']['msg']);
-        
+
         return $input;
     }
-    
+
     /**
      * 创建并配置消息解析器
      *
@@ -108,30 +108,30 @@ class EnhancedBillCommand implements CommandStrategy
     private function createMessageParser(array $input): EnhancedMessageParser
     {
         $parser = new EnhancedMessageParser(
-            $input['data']['room_wxid'], 
-            $input['data']['from_wxid'], 
-            $input['data']['msgid'], 
+            $input['data']['room_wxid'],
+            $input['data']['from_wxid'],
+            $input['data']['msgid'],
             $input['data']['msg']
         );
-        
+
         // 设置解析器参数
         $parser->setClientId($input['client_id'])
                ->setCreatedAt($input['data']['timestamp'])
                ->setManager();
-        
+
         // 设置账单数据（如果有预设）
         if (!empty($input['data']['bill'])) {
             $parser->setBill($input['data']['bill']);
         }
-        
+
         // 检查是否为补单指令
         if ($this->isSupplementOrder($input['data']['msg'])) {
             $parser->setPatchOrder(true);
         }
-        
+
         return $parser;
     }
-    
+
     /**
      * 判断是否为补单指令
      *
@@ -143,7 +143,7 @@ class EnhancedBillCommand implements CommandStrategy
         $marker = "#补单";
         return substr($message, -strlen($marker)) === $marker;
     }
-    
+
     /**
      * 记录错误信息
      *
@@ -161,14 +161,14 @@ class EnhancedBillCommand implements CommandStrategy
             'msg_id' => $context['data']['msgid'] ?? 'unknown',
             'message' => substr($context['data']['msg'] ?? '', 0, 100) . (strlen($context['data']['msg'] ?? '') > 100 ? '...' : '')
         ];
-        
+
         // 使用Common日志类记录错误
         Common::log('error', 'bill_command', $errorMessage, $logContext);
-        
+
         // 记录详细堆栈跟踪以便调试严重问题
         if (strpos($errorMessage, 'Exception') !== false || strpos($errorMessage, 'Error') !== false) {
-            Common::log('error', 'bill_exception', "详细错误: " . $errorMessage . "\n堆栈跟踪: " . 
+            Common::log('error', 'bill_exception', "详细错误: " . $errorMessage . "\n堆栈跟踪: " .
                 (new \Exception())->getTraceAsString(), $logContext);
         }
     }
-} 
+}

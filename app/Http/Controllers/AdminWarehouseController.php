@@ -67,7 +67,7 @@ class AdminWarehouseController extends Controller
         $warehouses = $query->paginate($request->input('pageSize', 10));
 
         // 获取所有仓库ID
-        $warehouseIds = collect($warehouses->items())->pluck('admin_warehouse.id')->toArray();
+        $warehouseIds = collect($warehouses->items())->pluck('id')->toArray();
 
         // 获取所有仓库关联的货品
         $warehouseGoods = DB::table('admin_warehouse_goods')

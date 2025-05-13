@@ -1,6 +1,6 @@
 <?php
 
-namespace app\common\WechatMsg\MessageHandler;
+namespace App\Services\Wechat\MessageHandler;
 
 interface MessageHandler
 {

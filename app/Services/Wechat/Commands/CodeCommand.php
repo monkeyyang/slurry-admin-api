@@ -1,11 +1,11 @@
 <?php
 
-namespace app\common\WechatMsg\Commands;
+namespace App\Services\Wechat\Commands;
 
 use app\common\model\Room;
 use app\common\model\RoomLogs;
 use app\common\service\StringParser;
-use app\common\WechatMsg\Common;
+use App\Services\Wechat\Common;
 
 /**
  * 识别卡密

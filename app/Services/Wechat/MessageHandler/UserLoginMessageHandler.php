@@ -1,8 +1,8 @@
 <?php
 
-namespace app\common\WechatMsg\MessageHandler;
+namespace App\Services\Wechat\MessageHandler;
 
-use app\common\WechatMsg\Common;
+use App\Services\Wechat\Common;
 use think\facade\Cache;
 
 class UserLoginMessageHandler implements MessageHandler

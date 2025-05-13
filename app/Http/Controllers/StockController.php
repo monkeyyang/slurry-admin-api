@@ -46,6 +46,7 @@ class StockController extends Controller {
             'items.*.goodsName' => 'required|string|max:255',
             'items.*.trackingNo' => 'required|string|max:100',
             'items.*.productCode' => 'nullable|string|max:100',
+            'items.*.imei' => 'nullable|string|max:100',
             'items.*.forecastId' => 'nullable|integer',
         ]);
 
@@ -124,13 +125,17 @@ class StockController extends Controller {
      *
      * 将指定ID的库存记录标记为已结算状态
      *
-     * @param int $id 库存记录ID
      * @return JsonResponse 结算结果
      */
-    public function settle($id)
+    public function settle(Request $request): JsonResponse
     {
         try {
-            if ($this->stockService->settleStock($id)) {
+            $this->validate($request, [
+                'id' => 'required|integer|exists:warehouse_inventory,id',
+                'amount' => ['required', 'regex:/^\d+(\.\d{1,2})?$/'],
+                'remark' => 'nullable|string|max:255',
+            ]);
+            if ($this->stockService->settleStock($request->id, $request->amount, $request->remark)) {
                 return $this->jsonOk();
             }
             return $this->jsonError('结算失败');

@@ -22,12 +22,14 @@ class WarehouseForecastController extends Controller
         $query = DB::table('warehouse_forecast')
             ->leftJoin('admin_users as customer', 'warehouse_forecast.customer_id', '=', 'customer.id')
             ->leftJoin('admin_warehouse', 'warehouse_forecast.warehouse_id', '=', 'admin_warehouse.id')
-//            ->leftJoin('countries', 'warehouse_forecast.country', '=', 'countries.code')
+            ->leftJoin('countries', 'admin_warehouse.country', '=', 'countries.code') // 加入国家关联
             ->where('warehouse_forecast.deleted', 0)
             ->select([
                 'warehouse_forecast.*',
                 'customer.username as customer_username',
-                'admin_warehouse.name as warehouse_name'
+                'admin_warehouse.name as warehouse_name',
+                'countries.name_zh as country_name',
+                'countries.name_en as country_en_name'
             ]);
 
         // 判断用户角色

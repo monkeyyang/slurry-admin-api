@@ -1,11 +1,11 @@
 <?php
 
-namespace app\common\WechatMsg\MessageHandler;
+namespace App\Services\Wechat\MessageHandler;
 
 use app\common\service\MessageParser;
-use app\common\WechatMsg\CommandInvoker;
-use app\common\WechatMsg\Commands\CodeCommand;
-use app\common\WechatMsg\Common;
+use App\Services\Wechat\CommandInvoker;
+use App\Services\Wechat\Commands\CodeCommand;
+use App\Services\Wechat\Common;
 
 class RecvOtherAppMessageHandler implements MessageHandler
 {

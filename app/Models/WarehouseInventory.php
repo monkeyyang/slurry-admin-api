@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class WarehouseInventory extends Model
 {
     protected $table = 'warehouse_inventory';
-    
+
     protected $fillable = [
         'warehouse_id',
         'forecast_id',
@@ -128,7 +128,7 @@ class WarehouseInventory extends Model
     }
 
     // 恢复删除
-    public function restore()
+    public function restore(): bool
     {
         $this->deleted = 0;
         $this->updated_by = auth()->id();

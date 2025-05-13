@@ -1,10 +1,10 @@
 <?php
 
-namespace app\common\WechatMsg\Commands;
+namespace App\Services\Wechat\Commands;
 
 use app\api\model\Room;
 use app\api\model\RoomBill;
-use app\common\WechatMsg\Common;
+use App\Services\Wechat\Common;
 
 class IntegrateCommand implements CommandStrategy
 {

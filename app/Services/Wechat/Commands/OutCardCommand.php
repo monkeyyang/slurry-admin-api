@@ -1,8 +1,8 @@
 <?php
 
-namespace app\common\WechatMsg\Commands;
+namespace App\Services\Wechat\Commands;
 
-use app\common\WechatMsg\Common;
+use App\Services\Wechat\Common;
 
 class OutCardCommand implements CommandStrategy
 {

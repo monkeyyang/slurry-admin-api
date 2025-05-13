@@ -1,11 +1,6 @@
 <?php
 
-namespace app\common\WechatMsg;
-
-use app\common\service\StringParser;
-use app\common\WechatMsg\Commands\BillCommand;
-use app\common\WechatMsg\Commands\CodeCommand;
-use app\common\WechatMsg\Commands\OpenCommand;
+namespace App\Services\Wechat;
 
 class ParseCommand
 {
@@ -13,10 +8,10 @@ class ParseCommand
     /**
      * 解析命令
      *
-     * @param array $input
+     * @param $input
      * @return void
      */
-    public function __construct(array $input)
+    public function __construct($input)
     {
         $handler = MessageHandlerFactory::createHandler($input['type']);
         if ($handler !== null) {
@@ -25,9 +20,6 @@ class ParseCommand
             } catch (\Exception $e) {
 
             }
-        } else {
-            // 没有匹配到对应的处理器，进行默认处理或报错
         }
-
     }
 }

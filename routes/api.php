@@ -13,6 +13,7 @@ use App\Http\Controllers\WarehouseForecastController;
 use App\Http\Controllers\WarehouseGoodsController;
 use App\Http\Controllers\AdminWarehouseController;
 use App\Http\Controllers\WarehouseStockInController;
+use App\Http\Controllers\WechatController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -35,6 +36,14 @@ Route::get('/getConfig', [ConfigController::class, 'getConfig'])->middleware('th
 Route::get('/captchaImage', [LoginController::class, 'captchaImage'])->middleware('throttle:100,30');
 Route::post('/login', [LoginController::class, 'login'])->middleware('throttle:100,30');
 Route::post('/register', [RegisterController::class, 'register'])->middleware('throttle:100,30');
+
+// // 微信机器人接口
+// Route::group(['middleware' => 'auth'], function () {
+//     Route::get('/logout', [LoginController::class, 'logout'])->middleware('throttle:100,30');
+// });
+
+Route::any('/api/wechat/webhook', [WechatController::class, 'index']);
+Route::get('/api/wechat/test', [WechatController::class, 'test']);
 
 Route::group(['middleware' => ['auth:api']], function() {
     Route::get('/admin/user/list', [AdminUserController::class, 'getAdminUserList']);
@@ -134,9 +143,12 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::get('forecast/{id}', [StockController::class, 'getForecastDetail'])
             ->where('id', '[0-9]+');
 
+//        // 结算库存
+//        Route::post('settle/{id}', [StockController::class, 'settle'])
+//            ->where('id', '[0-9]+');
+
         // 结算库存
-        Route::post('settle/{id}', [StockController::class, 'settle'])
-            ->where('id', '[0-9]+');
+        Route::post('settle', [StockController::class, 'settle']);
 
         // 批量删除
         Route::delete('batch', [StockController::class, 'batchDelete']);

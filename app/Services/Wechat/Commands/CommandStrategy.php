@@ -1,6 +1,6 @@
 <?php
 
-namespace app\common\WechatMsg\Commands;
+namespace App\Services\Wechat\Commands;
 
 interface CommandStrategy {
     public function execute(array $input);

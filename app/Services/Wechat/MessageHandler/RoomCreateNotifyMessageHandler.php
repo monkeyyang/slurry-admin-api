@@ -1,6 +1,6 @@
 <?php
 
-namespace app\common\WechatMsg\MessageHandler;
+namespace App\Services\Wechat\MessageHandler;
 
 // 群创建通知
 use app\common\model\Room;

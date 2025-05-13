@@ -126,6 +126,13 @@ return [
         'emergency' => [
             'path' => storage_path('logs/laravel.log'),
         ],
+
+        'wechat' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/wechat.log'),
+            'level' => 'debug',
+            'days' => 14,
+        ],
     ],
 
 ];
