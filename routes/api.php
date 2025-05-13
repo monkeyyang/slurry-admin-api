@@ -5,6 +5,7 @@ use App\Http\Controllers\AdminRoleController;
 use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\CountriesController;
+use App\Http\Controllers\GiftCardController;
 use App\Http\Controllers\InvitationCodeController;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\RegisterController;
