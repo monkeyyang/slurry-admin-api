@@ -4,6 +4,7 @@ namespace App\Console;
 
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
+use App\Jobs\ProcessCardQueryJob;
 
 class Kernel extends ConsoleKernel
 {
@@ -16,6 +17,11 @@ class Kernel extends ConsoleKernel
         
         // 每10分钟查询一次卡密
         $schedule->command('cards:query')->everyTenMinutes();
+        
+        // 每分钟执行卡密查询队列
+        $schedule->job(new ProcessCardQueryJob())->everyMinute()
+                 ->name('card_query_job')
+                 ->withoutOverlapping();
     }
 
     /**

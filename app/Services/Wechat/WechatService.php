@@ -2,6 +2,7 @@
 
 namespace App\Services\Wechat;
 
+use App\Jobs\ProcessBillJob;
 use App\Models\WechatBotUsers;
 use App\Models\WechatRoomLogs;
 use App\Models\WechatRooms;
@@ -61,7 +62,11 @@ class WechatService
         return !empty($this->wechatRoom) ?? false;
     }
 
-
+    /**
+     * 构建订单数据
+     *
+     * @return array
+     */
     private function buildBillData(): array
     {
         // 处理消息内容
@@ -85,9 +90,9 @@ class WechatService
             'room_id' => $context['data']['room_wxid'] ?? $this->roomId ?? 'unknown',
             'from_id' => $context['data']['from_wxid'] ?? $this->wxid ?? 'unknown',
             'msg_id' => $context['data']['msgid'] ?? $this->msgId ?? 'unknown',
-            'message' => isset($context['data']['msg']) ? 
-                         substr($context['data']['msg'], 0, 100) . 
-                         (strlen($context['data']['msg']) > 100 ? '...' : '') : 
+            'message' => isset($context['data']['msg']) ?
+                         substr($context['data']['msg'], 0, 100) .
+                         (strlen($context['data']['msg']) > 100 ? '...' : '') :
                          'no_message'
         ];
 
@@ -95,9 +100,9 @@ class WechatService
         Log::channel($channel)->error($errorMessage, $logContext);
 
         // 记录详细堆栈跟踪以便调试严重问题
-        if (strpos($errorMessage, 'Exception') !== false || strpos($errorMessage, 'Error') !== false) {
+        if (str_contains($errorMessage, 'Exception') || str_contains($errorMessage, 'Error')) {
             Log::channel($channel)->error(
-                "详细错误: " . $errorMessage . "\n堆栈跟踪: " . (new \Exception())->getTraceAsString(), 
+                "详细错误: " . $errorMessage . "\n堆栈跟踪: " . (new \Exception())->getTraceAsString(),
                 $logContext
             );
         }
@@ -106,9 +111,9 @@ class WechatService
     /**
      * 账单处理
      *
-     * @return mixed 处理结果
+     * @return string|bool 处理结果
      */
-    public function billed(): mixed
+    public function billed(): string|bool
     {
         try {
             // 解析账单数据
@@ -159,13 +164,13 @@ class WechatService
 
             // 写入加账队列
             $result = $this->addToBalanceQueue($billData);
-            
+
             // 记录消息处理日志
             $this->logMessageHandled();
-            
+
             // 返回处理结果
-            return $result ? $result : '加账成功';
-            
+            return $result ?: '加账成功';
+
         } catch (\Exception $e) {
             $this->logError('账单处理异常: ' . $e->getMessage());
             return false;
@@ -181,7 +186,7 @@ class WechatService
     private function verifyCardCodeInRoom(array $billData): bool
     {
         // 如果群组类型不是出卡/收卡群，直接通过验证
-        if ($this->wechatRoom->room_type != WechatRooms::ROOM_TYPE_OUT && 
+        if ($this->wechatRoom->room_type != WechatRooms::ROOM_TYPE_OUT &&
             $this->wechatRoom->room_type != WechatRooms::ROOM_TYPE_IN) {
             return true;
         }
@@ -234,17 +239,17 @@ class WechatService
         // 从账单数据中提取卡密和类型
         $cardCode = $billData['code'] ?? '';
         $cardType = $billData['cardType'] ?? '';
-        
+
         if (empty($cardCode) || empty($cardType)) {
             return false;
         }
 
         // 可以通过调用外部API或检查内部数据库来验证卡密
         // 这里仅作示例，实际实现取决于你的业务需求
-        
+
         // 简单验证逻辑 - 可以替换为实际的API调用
         $validFormat = false;
-        
+
         // 根据不同的卡类型验证格式
         switch ($cardType) {
             case 'it': // 苹果卡
@@ -257,7 +262,7 @@ class WechatService
                 // 其他卡类型的验证逻辑
                 $validFormat = strlen($cardCode) >= 8;
         }
-        
+
         return $validFormat;
     }
 
@@ -285,10 +290,10 @@ class WechatService
             ]);
 
             // 可以选择将任务推送到队列进行异步处理
-            // ProcessBillJob::dispatch($billId);
-            
+             ProcessBillJob::dispatch($billId);
+
             // 返回成功信息给用户
-            $this->sendWechatMsg("加账请求已受理，卡密: " . ($billData['code'] ?? 'N/A') . 
+            $this->sendWechatMsg("加账请求已受理，卡密: " . ($billData['code'] ?? 'N/A') .
                 " 金额: " . ($billData['amount'] ?? 0));
 
             return true;

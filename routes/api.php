@@ -170,4 +170,12 @@ Route::group(['middleware' => ['auth:api']], function() {
         // 批量查询微信账单记录
         // Route::post('/batch-query', [WechatBillController::class, 'batchQuery']);
     });
+    // 微信机器人相关路由
+    Route::prefix('wechat-bot')->group(function () {
+       // 检测机器人心跳
+        Route::post('heartbeat', function () {
+            $result = check_bot_heartbeat();
+            var_dump($result);exit;
+        });
+    });
 });
