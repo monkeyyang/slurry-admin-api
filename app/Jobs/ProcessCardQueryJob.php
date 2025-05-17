@@ -161,34 +161,34 @@ class ProcessCardQueryJob implements ShouldQueue
             $records = CardQueryRecord::where('query_count', 0)
                 ->where('is_completed', 0)
                 ->where('created_at', '<=', $cutoffTime)
-                ->limit(50) // 限制每次查询量
-                ->get();
+                ->limit(5) // 限制每次查询量
+                ->pluck('card_code');
 
             if ($records->isEmpty()) {
                 Log::info("没有需要进行第一阶段查询的卡密");
                 return;
             }
+            //$codes = $records->pluck('code');
 
             Log::info("找到 " . $records->count() . " 条记录需要进行第一阶段查询");
 
             // 准备查询参数
             $cardsToQuery = [];
-            foreach ($records as $record) {
-                $cardsToQuery[$record->card_code] = [
+            foreach ($records as $code) {
+                $cardsToQuery[] = [
                     'id' => count($cardsToQuery),
-                    'pin' => $record->card_code
+                    'pin' => $code
                 ];
             }
 
             // 执行查询
             $result = $cardQueryService->queryCards($cardsToQuery);
-
+            Log::info('执行结果：', $result);
             if ($result['code'] === 0 && !empty($result['cards'])) {
                 Log::info("第一阶段查询成功，处理结果");
             } else {
                 Log::error("第一阶段查询失败: " . ($result['message'] ?? '未知错误'));
             }
-
         } catch (\Exception $e) {
             Log::error("处理第一阶段查询失败: " . $e->getMessage());
         }
