@@ -80,6 +80,10 @@ class ProcessCardQueryJob implements ShouldQueue
 
             Log::info("开始同步卡密记录，上次同步ID: {$lastId}");
 
+            // 设置查询的时间范围限制
+            $cutoffDateTime = Carbon::parse('2025-05-17 13:28:00');
+            Log::info("设置查询时间范围限制: {$cutoffDateTime->toDateTimeString()}");
+
             // 从mr_room_bill获取新记录
             $newRecords = DB::connection('mysql_card')
                 ->table('mr_room_bill')

@@ -23,7 +23,7 @@ class CardQueryService
     {
         try {
             // 设置查询的时间范围限制
-            $cutoffDateTime = $cutoffDate ? Carbon::parse($cutoffDate) : Carbon::parse('2025-05-14 01:28:00');
+            $cutoffDateTime = $cutoffDate ? Carbon::parse($cutoffDate) : Carbon::parse('2025-05-17 13:28:00');
             Log::info("设置查询时间范围限制: {$cutoffDateTime->toDateTimeString()}");
 
             // 获取当前活跃的查询规则
@@ -50,7 +50,6 @@ class CardQueryService
                         ->where('is_del', 0);
 
             // 添加日期筛选条件
-            // 根据实际表结构调整时间字段名
             $baseQuery->where('created_at', '>=', $cutoffDateTime);
 
             // 查询总数以供日志记录
