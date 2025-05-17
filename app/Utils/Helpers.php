@@ -44,29 +44,29 @@ function check_bot_heartbeat(): array
         ])->post('http://43.140.224.234:6666/', [
             'type' => 'PING'
         ]);
-        
+
         // 获取完整响应信息
         $statusCode = $response->status();
         $body = $response->body();
         $json = $response->json();
-        
+
         // 记录响应信息到日志
         Log::info('机器人心跳检测响应', [
             'status_code' => $statusCode,
             'response' => $body,
             'parsed_json' => $json
         ]);
-        
+
         // 打印响应内容
         // echo "机器人心跳检测响应状态码: " . $statusCode . PHP_EOL;
         // echo "响应内容: " . $body . PHP_EOL;
-        
+
         // 根据响应判断机器人是否在线
         $isOnline = $statusCode === 200;
         if ($isOnline && isset($json['status']) && $json['status'] === 'ok') {
             $isOnline = true;
         }
-        
+
         return [
             'success' => $isOnline,
             'status_code' => $statusCode,
@@ -79,9 +79,9 @@ function check_bot_heartbeat(): array
             'error' => $e->getMessage(),
             'trace' => $e->getTraceAsString()
         ]);
-        
+
         echo "机器人心跳检测失败: " . $e->getMessage() . PHP_EOL;
-        
+
         return [
             'success' => false,
             'error' => $e->getMessage()
@@ -110,7 +110,7 @@ function send_msg_to_wechat(string $roomId, string $msg, string $type = 'MT_SEND
     ];
     $curl = curl_init();
     curl_setopt_array($curl, [
-        CURLOPT_URL            => 'http://43.140.224.234:6666/',
+        CURLOPT_URL            => 'http://106.52.250.202:6666/',
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_ENCODING       => '',
         CURLOPT_MAXREDIRS      => 10,

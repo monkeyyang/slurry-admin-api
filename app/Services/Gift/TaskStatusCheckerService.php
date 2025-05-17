@@ -19,6 +19,11 @@ class TaskStatusCheckerService
         $this->attemptInterval = $interval;
     }
 
+    public function createTask(array $codes)
+    {
+
+    }
+
     /**
      * 持续检查任务状态直到完成
      *
@@ -41,12 +46,6 @@ class TaskStatusCheckerService
                     if ($this->isTaskCompleted($responseData)) {
                         return $responseData; // 返回完整的响应数据
                     }
-
-//                    logger()->debug('Task in progress', [
-//                        'task_id' => $this->taskId,
-//                        'status' => $responseData['data']['status'] ?? 'unknown',
-//                        'attempt' => $attempts
-//                    ]);
                 }
             } catch (\Exception $e) {
                 $this->logError($e, $attempts);

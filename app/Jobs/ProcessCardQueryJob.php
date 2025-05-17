@@ -92,6 +92,7 @@ class ProcessCardQueryJob implements ShouldQueue
                 ->whereNotNull('code')
                 ->where('code', '!=', '')
                 ->where('is_del', 0)
+                ->where('created_at','>', $cutoffDateTime)
                 ->orderBy('id')
                 ->limit(1000) // 限制处理量
                 ->get();

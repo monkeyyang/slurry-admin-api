@@ -109,7 +109,7 @@ class QueryGiftCards extends Command
                     }
 
                     if (!empty($invalidCards)) {
-                        $this->sendWechatMsg($content);
+                        send_msg_to_wechat('50414550188@chatroom', $content);
                     } else {
                         $this->info("没有发现无效卡密，无需发送微信通知");
                     }
