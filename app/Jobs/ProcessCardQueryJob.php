@@ -81,7 +81,7 @@ class ProcessCardQueryJob implements ShouldQueue
             Log::info("开始同步卡密记录，上次同步ID: {$lastId}");
 
             // 设置查询的时间范围限制
-            $cutoffDateTime = Carbon::parse('2025-05-17 13:28:00');
+            $cutoffDateTime = Carbon::parse('2025-05-18 20:30:00');
             Log::info("设置查询时间范围限制: {$cutoffDateTime->toDateTimeString()}");
 
             // 从mr_room_bill获取新记录
@@ -161,14 +161,13 @@ class ProcessCardQueryJob implements ShouldQueue
             $records = CardQueryRecord::where('query_count', 0)
                 ->where('is_completed', 0)
                 ->where('created_at', '<=', $cutoffTime)
-                ->limit(5) // 限制每次查询量
+                ->limit(100) // 限制每次查询量
                 ->pluck('card_code');
 
             if ($records->isEmpty()) {
                 Log::info("没有需要进行第一阶段查询的卡密");
                 return;
             }
-            //$codes = $records->pluck('code');
 
             Log::info("找到 " . $records->count() . " 条记录需要进行第一阶段查询");
 
@@ -185,6 +184,7 @@ class ProcessCardQueryJob implements ShouldQueue
             $result = $cardQueryService->queryCards($cardsToQuery);
             Log::info('执行结果：', $result);
             if ($result['code'] === 0 && !empty($result['cards'])) {
+                $this->sendMsgToWechat($result['cards']);
                 Log::info("第一阶段查询成功，处理结果");
             } else {
                 Log::error("第一阶段查询失败: " . ($result['message'] ?? '未知错误'));
@@ -210,7 +210,7 @@ class ProcessCardQueryJob implements ShouldQueue
             $records = CardQueryRecord::where('query_count', 1)
                 ->where('is_completed', 0)
                 ->where('first_query_at', '<=', $cutoffTime)
-                ->limit(50) // 限制每次查询量
+                ->limit(100) // 限制每次查询量
                 ->get();
 
             if ($records->isEmpty()) {
@@ -231,23 +231,42 @@ class ProcessCardQueryJob implements ShouldQueue
 
             // 执行查询
             $result = $cardQueryService->queryCards($cardsToQuery);
-
+            // 完成所有第二阶段查询的记录
+            foreach ($records as $record) {
+                if ($record->query_count == 2) {
+                    $record->is_completed = 1;
+                    $record->save();
+                }
+            }
             if ($result['code'] === 0 && !empty($result['cards'])) {
                 Log::info("第二阶段查询成功，处理结果");
+                $this->sendMsgToWechat($result['cards']);
 
-                // 完成所有第二阶段查询的记录
-                foreach ($records as $record) {
-                    if ($record->query_count == 2) {
-                        $record->is_completed = 1;
-                        $record->save();
-                    }
-                }
             } else {
                 Log::error("第二阶段查询失败: " . ($result['message'] ?? '未知错误'));
             }
 
         } catch (\Exception $e) {
             Log::error("处理第二阶段查询失败: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * 发送通知
+     *
+     * @param $cards
+     * @return void
+     */
+    private function sendMsgToWechat($cards): void
+    {
+        if(!empty($cards)) {
+            $content = "⚠️检查卡密异常/被赎回：\n⚠️异常卡密撤回账单：\n";
+            foreach($cards as $k => $item) {
+                $content .= $item['code']."[{$item['balance']}]";
+                if(($k+1) < count($cards)) $content.="\n";
+            }
+            Log::info($content);
+            send_msg_to_wechat('44769140035@chatroom', $content);
         }
     }
 }
