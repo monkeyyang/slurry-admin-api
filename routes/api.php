@@ -178,4 +178,21 @@ Route::group(['middleware' => ['auth:api']], function() {
             var_dump($result);exit;
         });
     });
+
+    // iTunes Trade API Routes
+    Route::prefix('trade/itunes')->group(function () {
+        // 国家配置接口
+        Route::get('/configs', 'App\Http\Controllers\Api\ItunesTradeController@getConfigs');
+        Route::get('/configs/{countryCode}', 'App\Http\Controllers\Api\ItunesTradeController@getConfig');
+        Route::post('/configs', 'App\Http\Controllers\Api\ItunesTradeController@saveConfig');
+        Route::put('/configs/{id}', 'App\Http\Controllers\Api\ItunesTradeController@updateConfig');
+        Route::delete('/configs/{id}', 'App\Http\Controllers\Api\ItunesTradeController@deleteConfig');
+
+        // 模板接口
+        Route::get('/templates', 'App\Http\Controllers\Api\ItunesTradeController@getTemplates');
+        Route::post('/templates', 'App\Http\Controllers\Api\ItunesTradeController@saveTemplate');
+        Route::post('/templates/{id}/apply', 'App\Http\Controllers\Api\ItunesTradeController@applyTemplate');
+    });
 });
+
+
