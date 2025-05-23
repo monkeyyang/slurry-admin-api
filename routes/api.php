@@ -193,6 +193,44 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('/templates', 'App\Http\Controllers\Api\ItunesTradeController@saveTemplate');
         Route::post('/templates/{id}/apply', 'App\Http\Controllers\Api\ItunesTradeController@applyTemplate');
     });
+
+    // Gift Exchange API Routes
+    Route::prefix('trade/gift-exchange')->group(function () {
+        // Plan routes
+        Route::get('/plans', 'App\Http\Controllers\Api\GiftExchangeController@getPlans');
+        Route::get('/plans/{id}', 'App\Http\Controllers\Api\GiftExchangeController@getPlan');
+        Route::post('/plans', 'App\Http\Controllers\Api\GiftExchangeController@savePlan');
+        Route::post('/plans/batch', 'App\Http\Controllers\Api\GiftExchangeController@batchCreatePlans');
+        Route::post('/plans/from-template', 'App\Http\Controllers\Api\GiftExchangeController@createPlanFromTemplate');
+        Route::put('/plans/{id}', 'App\Http\Controllers\Api\GiftExchangeController@updatePlan');
+        Route::put('/plans/{id}/status', 'App\Http\Controllers\Api\GiftExchangeController@updatePlanStatus');
+        Route::delete('/plans/{id}', 'App\Http\Controllers\Api\GiftExchangeController@deletePlan');
+        Route::post('/plans/{id}/execute', 'App\Http\Controllers\Api\GiftExchangeController@executePlan');
+        Route::post('/plans/{id}/pause', 'App\Http\Controllers\Api\GiftExchangeController@pausePlan');
+        Route::post('/plans/{id}/resume', 'App\Http\Controllers\Api\GiftExchangeController@resumePlan');
+        Route::post('/plans/{id}/cancel', 'App\Http\Controllers\Api\GiftExchangeController@cancelPlan');
+        Route::get('/plans/{id}/logs', 'App\Http\Controllers\Api\GiftExchangeController@getPlanLogs');
+        
+        // Template routes
+        Route::get('/templates', 'App\Http\Controllers\Api\GiftExchangeController@getTemplates');
+        Route::post('/templates', 'App\Http\Controllers\Api\GiftExchangeController@savePlanAsTemplate');
+        
+        // Account group routes
+        Route::get('/account-groups', 'App\Http\Controllers\Api\GiftExchangeController@getAccountGroups');
+        Route::get('/account-groups/{id}', 'App\Http\Controllers\Api\GiftExchangeController@getAccountGroup');
+        Route::post('/account-groups', 'App\Http\Controllers\Api\GiftExchangeController@createAccountGroup');
+        Route::put('/account-groups/{id}', 'App\Http\Controllers\Api\GiftExchangeController@updateAccountGroup');
+        Route::delete('/account-groups/{id}', 'App\Http\Controllers\Api\GiftExchangeController@deleteAccountGroup');
+        Route::post('/account-groups/{id}/plans', 'App\Http\Controllers\Api\GiftExchangeController@addPlansToGroup');
+        Route::delete('/account-groups/{id}/plans', 'App\Http\Controllers\Api\GiftExchangeController@removePlansFromGroup');
+        Route::put('/account-groups/{id}/priorities', 'App\Http\Controllers\Api\GiftExchangeController@updatePlanPriorities');
+        Route::post('/account-groups/{id}/start', 'App\Http\Controllers\Api\GiftExchangeController@startAccountGroup');
+        Route::post('/account-groups/{id}/pause', 'App\Http\Controllers\Api\GiftExchangeController@pauseAccountGroup');
+        
+        // Auto execution routes
+        Route::get('/auto-execution/status', 'App\Http\Controllers\Api\GiftExchangeController@getAutoExecutionStatus');
+        Route::put('/auto-execution/settings', 'App\Http\Controllers\Api\GiftExchangeController@updateAutoExecutionSettings');
+    });
 });
 
 

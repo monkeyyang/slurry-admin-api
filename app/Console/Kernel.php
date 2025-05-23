@@ -22,6 +22,9 @@ class Kernel extends ConsoleKernel
         $schedule->job(new ProcessCardQueryJob())->everyMinute()
                  ->name('card_query_job')
                  ->withoutOverlapping();
+
+        // Run the auto execution command every 15 minutes
+        // $schedule->command('plans:execute')->everyFifteenMinutes();
     }
 
     /**
