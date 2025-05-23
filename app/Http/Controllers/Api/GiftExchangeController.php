@@ -118,7 +118,9 @@ class GiftExchangeController extends Controller
                 'code' => 0,
                 'message' => 'ok',
                 'data' => [
-                    'list' => $plans->map->toApiArray(),
+                    'list' => $plans->items() ? collect($plans->items())->map(function($plan) {
+                        return $plan->toApiArray();
+                    }) : [],
                     'total' => $plans->total(),
                 ],
             ]);
@@ -375,7 +377,9 @@ class GiftExchangeController extends Controller
                 'code' => 0,
                 'message' => 'ok',
                 'data' => [
-                    'list' => $logs->map->toApiArray(),
+                    'list' => $logs->map(function($log) {
+                        return $log->toApiArray();
+                    }),
                     'total' => $logs->count(),
                 ],
             ]);
@@ -400,9 +404,44 @@ class GiftExchangeController extends Controller
         try {
             $planId = $request->input('planId');
             $name = $request->input('name');
+            $submittedData = $request->input('planData', []);
             
-            $plan = ChargePlan::with('items')->findOrFail($planId);
-            $template = $this->giftExchangeService->createTemplateFromPlan($name, $plan);
+            // 记录接收到的数据用于调试
+            Log::info('保存模板请求数据: ' . json_encode([
+                'planId' => $planId,
+                'name' => $name,
+                'hasData' => !empty($submittedData)
+            ]));
+            
+            // 检查是否是临时ID
+            if (is_string($planId) && (strpos($planId, 'temp_') === 0 || !is_numeric($planId))) {
+                // 这是一个临时计划
+                Log::info('创建临时计划模板: ' . $planId);
+                
+                // 如果前端没有发送计划数据，使用默认值
+                if (empty($submittedData)) {
+                    Log::warning('未提供临时计划数据，使用默认值');
+                    $submittedData = [
+                        'country' => 'DEFAULT',
+                        'totalAmount' => 100,
+                        'days' => 5,
+                        'multipleBase' => 20,
+                        'floatAmount' => 5,
+                        'intervalHours' => 24,
+                        'items' => []
+                    ];
+                }
+                
+                // 创建模板
+                $template = $this->giftExchangeService->createTemplateFromData($name, $submittedData);
+                Log::info('成功创建模板: ' . $template->id);
+            } else {
+                // 查找现有计划并从中创建模板
+                Log::info('从现有计划创建模板: ' . $planId);
+                $plan = ChargePlan::with('items')->findOrFail($planId);
+                $template = $this->giftExchangeService->createTemplateFromPlan($name, $plan);
+                Log::info('成功创建模板: ' . $template->id);
+            }
             
             return response()->json([
                 'code' => 0,
@@ -413,10 +452,12 @@ class GiftExchangeController extends Controller
                 ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Failed to save plan as template: ' . $e->getMessage());
+            Log::error('保存计划为模板失败: ' . $e->getMessage());
+            // 记录错误的详细信息
+            Log::error('错误详情: ' . $e->getTraceAsString());
             return response()->json([
                 'code' => 500,
-                'message' => $e->getMessage(),
+                'message' => '保存模板失败: ' . $e->getMessage(),
                 'data' => null,
             ]);
         }
@@ -468,7 +509,9 @@ class GiftExchangeController extends Controller
                 'code' => 0,
                 'message' => 'ok',
                 'data' => [
-                    'list' => $templates->map->toApiArray(),
+                    'list' => $templates->map(function($template) {
+                        return $template->toApiArray();
+                    }),
                     'total' => $templates->count(),
                 ],
             ]);
@@ -551,7 +594,9 @@ class GiftExchangeController extends Controller
                 'code' => 0,
                 'message' => 'ok',
                 'data' => [
-                    'list' => $groups->map->toApiArray(),
+                    'list' => $groups->items() ? collect($groups->items())->map(function($group) {
+                        return $group->toApiArray();
+                    }) : [],
                     'total' => $groups->total(),
                 ],
             ]);

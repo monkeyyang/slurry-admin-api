@@ -261,6 +261,32 @@ class GiftExchangeService
     }
 
     /**
+     * Create template from plan data
+     *
+     * @param string $name
+     * @param array $planData
+     * @return ChargePlanTemplate
+     */
+    public function createTemplateFromData(string $name, array $planData)
+    {
+        try {
+            return ChargePlanTemplate::create([
+                'name' => $name,
+                'country' => $planData['country'] ?? '',
+                'total_amount' => $planData['totalAmount'] ?? 0,
+                'days' => $planData['days'] ?? 1,
+                'multiple_base' => $planData['multipleBase'] ?? 0,
+                'float_amount' => $planData['floatAmount'] ?? 0,
+                'interval_hours' => $planData['intervalHours'] ?? 24,
+                'items' => $planData['items'] ?? [],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to create template from data: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
      * Create plans from template
      *
      * @param ChargePlanTemplate $template

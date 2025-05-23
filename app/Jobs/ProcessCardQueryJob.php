@@ -58,7 +58,7 @@ class ProcessCardQueryJob implements ShouldQueue
             $this->processFirstStageQuery($cardQueryService, $rule);
 
             // 4. 执行第二阶段查询 (query_count = 1)
-            $this->processSecondStageQuery($cardQueryService, $rule);
+//            $this->processSecondStageQuery($cardQueryService, $rule);
 
             Log::info("卡密查询队列任务完成");
 
