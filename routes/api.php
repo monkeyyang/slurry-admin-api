@@ -163,6 +163,33 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('/set-query-rule', [GiftCardController::class, 'setQueryRule']);
         // 批量查询卡密
         Route::post('/batch-query', [GiftCardController::class, 'batchQuery']);
+        // 处理兑换消息
+        Route::post('/exchange', 'App\Http\Controllers\Api\GiftCardExchangeController@processExchangeMessage');
+        
+        // 验证礼品卡
+        Route::post('/validate', 'App\Http\Controllers\Api\GiftCardExchangeController@validateGiftCard');
+        
+        // 获取兑换记录
+        Route::get('/records', 'App\Http\Controllers\Api\GiftCardExchangeController@getExchangeRecords');
+        
+        // 获取单个兑换记录详情
+        Route::get('/records/{id}', 'App\Http\Controllers\Api\GiftCardExchangeController@getExchangeRecord');
+        
+        // 账号登录管理
+        Route::post('/login/new', 'App\Http\Controllers\Api\GiftCardExchangeController@createLoginTask');
+        Route::get('/login/status', 'App\Http\Controllers\Api\GiftCardExchangeController@getLoginTaskStatus');
+        Route::post('/login/delete', 'App\Http\Controllers\Api\GiftCardExchangeController@deleteUserLogins');
+        Route::post('/login/refresh', 'App\Http\Controllers\Api\GiftCardExchangeController@refreshUserLogin');
+        
+        // 批量查询卡
+        Route::post('/query/new', 'App\Http\Controllers\Api\GiftCardExchangeController@queryCards');
+        Route::get('/query/status', 'App\Http\Controllers\Api\GiftCardExchangeController@getCardQueryTaskStatus');
+        Route::post('/query/history', 'App\Http\Controllers\Api\GiftCardExchangeController@getCardQueryHistory');
+        
+        // 批量兑换卡
+        Route::post('/redeem/new', 'App\Http\Controllers\Api\GiftCardExchangeController@redeemCards');
+        Route::get('/redeem/status', 'App\Http\Controllers\Api\GiftCardExchangeController@getRedemptionTaskStatus');
+        Route::post('/redeem/history', 'App\Http\Controllers\Api\GiftCardExchangeController@getRedemptionHistory');
     });
 
     // 微信账单记录
@@ -230,6 +257,16 @@ Route::group(['middleware' => ['auth:api']], function() {
         // Auto execution routes
         Route::get('/auto-execution/status', 'App\Http\Controllers\Api\GiftExchangeController@getAutoExecutionStatus');
         Route::put('/auto-execution/settings', 'App\Http\Controllers\Api\GiftExchangeController@updateAutoExecutionSettings');
+        
+        // Account balance limit routes
+        Route::get('/account-limits', 'App\Http\Controllers\Api\AccountBalanceLimitController@getBalanceLimits');
+        Route::get('/account-limits/{id}', 'App\Http\Controllers\Api\AccountBalanceLimitController@getBalanceLimit');
+        Route::post('/account-limits', 'App\Http\Controllers\Api\AccountBalanceLimitController@createBalanceLimit');
+        Route::post('/account-limits/batch', 'App\Http\Controllers\Api\AccountBalanceLimitController@batchCreateBalanceLimits');
+        Route::put('/account-limits/{id}', 'App\Http\Controllers\Api\AccountBalanceLimitController@updateBalanceLimit');
+        Route::post('/account-limits/{id}/reset', 'App\Http\Controllers\Api\AccountBalanceLimitController@resetBalance');
+        Route::put('/account-limits/{id}/status', 'App\Http\Controllers\Api\AccountBalanceLimitController@updateStatus');
+        Route::delete('/account-limits/{id}', 'App\Http\Controllers\Api\AccountBalanceLimitController@deleteBalanceLimit');
     });
 });
 
