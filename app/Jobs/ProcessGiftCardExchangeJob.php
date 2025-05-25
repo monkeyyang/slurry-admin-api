@@ -3,12 +3,14 @@
 namespace App\Jobs;
 
 use App\Services\GiftCardExchangeService;
+use Exception;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ProcessGiftCardExchangeJob implements ShouldQueue
 {
@@ -36,26 +38,26 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
      *
      * @var int
      */
-    public $tries = 3;
+    public int $tries = 3;
 
     /**
      * 任务超时时间（秒）
      *
      * @var int
      */
-    public $timeout = 300;
+    public int $timeout = 300;
 
     /**
      * Create a new job instance.
      *
      * @param string $message 兑换消息
-     * @param string $requestId 请求ID，用于追踪
+     * @param string|null $requestId 请求ID，用于追踪
      */
     public function __construct(string $message, string $requestId = null)
     {
         $this->message = $message;
         $this->requestId = $requestId ?: uniqid('exchange_', true);
-        
+
         // 设置队列连接和队列名称
         $this->connection = config('gift_card.queue.connection');
         $this->queue = config('gift_card.queue.queue_name');
@@ -66,8 +68,9 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
      *
      * @param GiftCardExchangeService $giftCardExchangeService
      * @return void
+     * @throws Exception
      */
-    public function handle(GiftCardExchangeService $giftCardExchangeService)
+    public function handle(GiftCardExchangeService $giftCardExchangeService): void
     {
         try {
             Log::info("开始处理礼品卡兑换队列任务", [
@@ -89,23 +92,23 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                     'request_id' => $this->requestId,
                     'error' => $result['message']
                 ]);
-                
+
                 // 如果是业务逻辑错误（如卡无效、没有合适账户等），不重试
                 if ($this->shouldNotRetry($result['message'])) {
-                    $this->fail(new \Exception($result['message']));
+                    $this->fail(new Exception($result['message']));
                     return;
                 }
-                
-                throw new \Exception($result['message']);
+
+                throw new Exception($result['message']);
             }
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::error("礼品卡兑换队列任务执行异常", [
                 'request_id' => $this->requestId,
                 'message' => $this->message,
                 'error' => $e->getMessage(),
                 'attempt' => $this->attempts()
             ]);
-            
+
             throw $e;
         }
     }
@@ -137,10 +140,10 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
     /**
      * Handle a job failure.
      *
-     * @param \Throwable $exception
+     * @param Throwable $exception
      * @return void
      */
-    public function failed(\Throwable $exception)
+    public function failed(Throwable $exception): void
     {
         Log::error("礼品卡兑换队列任务最终失败", [
             'request_id' => $this->requestId,
@@ -149,4 +152,4 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
             'attempts' => $this->attempts()
         ]);
     }
-} 
+}

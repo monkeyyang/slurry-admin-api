@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessGiftCardExchangeJob;
 use App\Services\GiftCardExchangeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -37,22 +38,39 @@ class GiftCardExchangeController extends Controller
                 ]);
             }
 
-            Log::info('收到兑换请求: ' . $message);
-            $result = $this->giftCardExchangeService->processExchangeMessage($message);
-
-            if ($result['success']) {
+            // 验证消息格式
+            $parseResult = $this->giftCardExchangeService->parseMessage($message);
+            if (!$parseResult) {
                 return response()->json([
-                    'code' => 0,
-                    'message' => 'ok',
-                    'data' => $result['data'],
-                ]);
-            } else {
-                return response()->json([
-                    'code' => 500,
-                    'message' => $result['message'],
+                    'code' => 400,
+                    'message' => '消息格式无效，正确格式：卡号 /类型（如：XQPD5D7KJ8TGZT4L /1）',
                     'data' => null,
                 ]);
             }
+
+            // 生成请求ID用于追踪
+            $requestId = uniqid('exchange_', true);
+
+            Log::info('收到兑换请求，加入队列处理', [
+                'request_id' => $requestId,
+                'message' => $message,
+                'card_number' => $parseResult['card_number'],
+                'card_type' => $parseResult['card_type']
+            ]);
+
+            // 将任务加入队列
+            ProcessGiftCardExchangeJob::dispatch($message, $requestId);
+
+            return response()->json([
+                'code' => 0,
+                'message' => '兑换请求已接收，正在队列中处理',
+                'data' => [
+                    'request_id' => $requestId,
+                    'card_number' => $parseResult['card_number'],
+                    'card_type' => $parseResult['card_type'],
+                    'status' => 'queued'
+                ],
+            ]);
         } catch (\Exception $e) {
             Log::error('处理兑换消息失败: ' . $e->getMessage());
             return response()->json([
@@ -519,6 +537,86 @@ class GiftCardExchangeController extends Controller
             return response()->json([
                 'code' => 500,
                 'message' => '获取兑换历史记录失败: ' . $e->getMessage(),
+                'data' => null,
+            ]);
+        }
+    }
+
+    /**
+     * 查询兑换任务状态
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function getExchangeTaskStatus(Request $request): JsonResponse
+    {
+        try {
+            $requestId = $request->input('request_id');
+            
+            if (empty($requestId)) {
+                return response()->json([
+                    'code' => 400,
+                    'message' => '请求ID不能为空',
+                    'data' => null,
+                ]);
+            }
+
+            // 这里可以通过Redis或数据库查询任务状态
+            // 暂时返回基本信息
+            return response()->json([
+                'code' => 0,
+                'message' => 'ok',
+                'data' => [
+                    'request_id' => $requestId,
+                    'status' => 'processing', // queued, processing, completed, failed
+                    'message' => '任务正在处理中'
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('查询兑换任务状态失败: ' . $e->getMessage());
+            return response()->json([
+                'code' => 500,
+                'message' => '查询兑换任务状态失败: ' . $e->getMessage(),
+                'data' => null,
+            ]);
+        }
+    }
+
+    /**
+     * 测试队列功能
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function testQueue(Request $request): JsonResponse
+    {
+        try {
+            $testMessage = $request->input('message', 'TESTCARD123 /1');
+            $requestId = uniqid('test_', true);
+
+            Log::info('测试队列功能', [
+                'request_id' => $requestId,
+                'message' => $testMessage
+            ]);
+
+            // 分发测试任务到队列
+            ProcessGiftCardExchangeJob::dispatch($testMessage, $requestId);
+
+            return response()->json([
+                'code' => 0,
+                'message' => '测试任务已加入队列',
+                'data' => [
+                    'request_id' => $requestId,
+                    'message' => $testMessage,
+                    'queue_connection' => config('gift_card.queue.connection'),
+                    'queue_name' => config('gift_card.queue.queue_name')
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('测试队列功能失败: ' . $e->getMessage());
+            return response()->json([
+                'code' => 500,
+                'message' => '测试队列功能失败: ' . $e->getMessage(),
                 'data' => null,
             ]);
         }

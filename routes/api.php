@@ -165,6 +165,10 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('/batch-query', [GiftCardController::class, 'batchQuery']);
         // 处理兑换消息
         Route::post('/exchange', 'App\Http\Controllers\Api\GiftCardExchangeController@processExchangeMessage');
+        // 查询兑换任务状态
+        Route::get('/exchange/status', 'App\Http\Controllers\Api\GiftCardExchangeController@getExchangeTaskStatus');
+        // 测试队列功能
+        Route::post('/test-queue', 'App\Http\Controllers\Api\GiftCardExchangeController@testQueue');
 
         // 验证礼品卡
         Route::post('/validate', 'App\Http\Controllers\Api\GiftCardExchangeController@validateGiftCard');

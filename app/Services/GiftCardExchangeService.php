@@ -58,7 +58,7 @@ class GiftCardExchangeService
 
             // 获取国家代码
             $countryCode = $cardInfo['country_code'];
-
+            var_dump($cardInfo);exit;
             // 选择合适的计划，传入卡余额用于检查账号额度上限
             $plan = $this->selectEligiblePlan($countryCode, $cardType, $cardInfo['balance']);
             if (!$plan) {
@@ -114,7 +114,7 @@ class GiftCardExchangeService
      * @param string $message
      * @return array|null
      */
-    protected function parseMessage(string $message): ?array
+    public function parseMessage(string $message): ?array
     {
         // 解析格式为 "卡号 /类型" 的消息
         $message = trim($message);
@@ -367,8 +367,7 @@ class GiftCardExchangeService
             Log::info("选择计划, 国家: {$countryCode}, 卡类型: {$cardType}, 卡余额: {$cardBalance}");
 
             // 获取状态为处理中的相关国家计划
-            $query = ChargePlan::where('status', 'processing')
-                ->where('country', $countryCode);
+            $query = ChargePlan::where('country', $countryCode);
 
             // 可以根据卡类型进行进一步筛选，例如根据优先级或组
             if ($cardType == 1) {
@@ -378,10 +377,7 @@ class GiftCardExchangeService
                 // 默认按创建时间排序
                 $query->orderBy('created_at', 'asc');
             }
-dd(
-    $query->toSql(),
-    $query->getBindings()
-);
+
             // 获取所有可能的计划
             $plans = $query->get();
 
@@ -395,7 +391,6 @@ dd(
                     ->where('action', 'like', '%executed%')
                     ->orderBy('created_at', 'desc')
                     ->first();
-
                 // 是否满足时间间隔要求
                 $timeEligible = false;
                 if (!$lastExecution) {
