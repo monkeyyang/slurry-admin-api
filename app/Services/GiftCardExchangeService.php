@@ -380,7 +380,7 @@ class GiftCardExchangeService
             }
 
             // 获取所有可能的计划
-            $plans = $query->getLastSql();
+            $plans = $query->get();
  var_dump($plans);exit;
             // 过滤出符合执行时间要求的计划
             $now = Carbon::now();
