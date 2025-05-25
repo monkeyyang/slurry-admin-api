@@ -36,28 +36,36 @@ class GiftCardExchangeService
      */
     public function processExchangeMessage(string $message): array
     {
+        Log::channel('gift_card_exchange')
+            ->info('---------------------开始处理队列--------------------');
         try {
             Log::channel('gift_card_exchange')->info('收到兑换消息: ' . $message);
 
-            // 解析消息
-            $parts = $this->parseMessage($message);
-            if (!$parts) {
-                throw new \Exception('消息格式无效');
-            }
-
-            $cardNumber = $parts['card_number'];
-            $cardType = $parts['card_type'];
-
-            // 验证礼品卡
-            $cardInfo = $this->validateGiftCard($cardNumber);
-            if (!$cardInfo['is_valid']) {
-                throw new \Exception('礼品卡无效: ' . ($cardInfo['message'] ?? '未知原因'));
-            }
-            $cardInfo['card_number'] = $cardNumber;
-            $cardInfo['card_type'] = $cardType;
-
-            // 获取国家代码
-            $countryCode = $cardInfo['country_code'];
+//            // 解析消息
+//            $parts = $this->parseMessage($message);
+//            if (!$parts) {
+//                throw new \Exception('消息格式无效');
+//            }
+//
+//            $cardNumber = $parts['card_number'];
+//            $cardType = $parts['card_type'];
+//
+//            // 验证礼品卡
+//            $cardInfo = $this->validateGiftCard($cardNumber);
+//            if (!$cardInfo['is_valid']) {
+//                throw new \Exception('礼品卡无效: ' . ($cardInfo['message'] ?? '未知原因'));
+//            }
+//            $cardInfo['card_number'] = $cardNumber;
+//            $cardInfo['card_type'] = $cardType;
+//
+//            // 获取国家代码
+//            $countryCode = $cardInfo['country_code'];
+            // 临时测试
+            $cardInfo['card_number'] = 'X6FQY9T59J792VPX';
+            $cardInfo['balance'] = 5;
+            $cardType = 1;
+            $countryCode = 'US';
+            Log::channel('gift_card_exchange')->info('查询礼品卡结果：', $cardInfo);
             // 选择合适的计划，传入卡余额用于检查账号额度上限
             $plan = $this->selectEligiblePlan($countryCode, $cardType, $cardInfo['balance']);
             if (!$plan) {
@@ -423,7 +431,7 @@ class GiftCardExchangeService
 
                 // 检查账号余额上限
                 $checkResult = $this->checkAccountBalanceLimit($plan->account, $convertedAmount);
-
+                var_dump($checkResult);exit;
                 if ($checkResult['success']) {
                     // 该账号可以接收此次兑换
                     return $plan;

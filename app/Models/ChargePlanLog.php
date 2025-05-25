@@ -51,7 +51,7 @@ class ChargePlanLog extends Model
             'action' => $this->action,
             'status' => $this->status,
             'details' => $this->details,
-            'createdAt' => $this->created_at->toISOString(),
+            'createdAt' => $this->created_at ? $this->created_at->format('Y-m-d H:i:s') : null,
         ];
     }
 } 

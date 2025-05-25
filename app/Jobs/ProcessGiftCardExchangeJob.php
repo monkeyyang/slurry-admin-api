@@ -59,7 +59,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
         $this->requestId = $requestId ?: uniqid('exchange_', true);
 
         // 设置队列连接和队列名称 - 高优先级
-        $this->connection = config('gift_card.queue.connection', 'redis');
+        $this->connection = 'redis';
         $this->queue = 'gift_card_exchange';
     }
 

@@ -19,20 +19,6 @@ class ProcessCardQueryJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     /**
-     * 队列连接
-     *
-     * @var string
-     */
-    public $connection = 'redis';
-
-    /**
-     * 队列名称
-     *
-     * @var string
-     */
-    public $queue = 'card_query';
-
-    /**
      * 失败尝试次数
      */
     public int $tries = 3;
@@ -47,7 +33,9 @@ class ProcessCardQueryJob implements ShouldQueue
      */
     public function __construct()
     {
-        // 构造函数不需要参数
+        // 设置队列连接和队列名称
+        $this->connection = 'redis';
+        $this->queue = 'card_query';
     }
 
     /**

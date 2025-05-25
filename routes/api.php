@@ -3,6 +3,7 @@
 use App\Http\Controllers\AdminMenuController;
 use App\Http\Controllers\AdminRoleController;
 use App\Http\Controllers\AdminUserController;
+use App\Http\Controllers\Api\GiftCardExchangeController;
 use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\CountriesController;
 use App\Http\Controllers\GiftCardController;
@@ -163,6 +164,8 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('/set-query-rule', [GiftCardController::class, 'setQueryRule']);
         // 批量查询卡密
         Route::post('/batch-query', [GiftCardController::class, 'batchQuery']);
+        // 兑换测试路由
+        Route::post('/exchange-test', [GiftCardExchangeController::class, 'test']);
         // 处理兑换消息
         Route::post('/exchange', 'App\Http\Controllers\Api\GiftCardExchangeController@processExchangeMessage');
         // 查询兑换任务状态

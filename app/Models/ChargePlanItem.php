@@ -62,7 +62,7 @@ class ChargePlanItem extends Model
             'maxAmount' => $this->max_amount,
             'description' => $this->description,
             'status' => $this->status,
-            'executedAt' => $this->executed_at ? $this->executed_at->toISOString() : null,
+            'executedAt' => $this->executed_at ? $this->executed_at->format('Y-m-d H:i:s') : null,
             'result' => $this->result,
         ];
     }

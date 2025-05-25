@@ -44,8 +44,8 @@ class ChargePlanTemplate extends Model
             'floatAmount' => $this->float_amount,
             'intervalHours' => $this->interval_hours,
             'items' => $this->items,
-            'createdAt' => $this->created_at->toISOString(),
-            'updatedAt' => $this->updated_at->toISOString(),
+            'createdAt' => $this->created_at ? $this->created_at->format('Y-m-d H:i:s') : null,
+            'updatedAt' => $this->updated_at ? $this->updated_at->format('Y-m-d H:i:s') : null,
         ];
     }
 

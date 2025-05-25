@@ -89,7 +89,7 @@ class ChargePlan extends Model
             'multipleBase' => $this->multiple_base,
             'floatAmount' => $this->float_amount,
             'intervalHours' => $this->interval_hours,
-            'startTime' => $this->start_time->toISOString(),
+            'startTime' => $this->start_time ? $this->start_time->format('Y-m-d H:i:s') : null,
             'items' => $this->items->map(function ($item) {
                 return $item->toApiArray();
             }),
@@ -99,8 +99,8 @@ class ChargePlan extends Model
             'chargedAmount' => $this->charged_amount,
             'groupId' => $this->group_id ? (string)$this->group_id : null,
             'priority' => $this->priority,
-            'createdAt' => $this->created_at->toISOString(),
-            'updatedAt' => $this->updated_at->toISOString(),
+            'createdAt' => $this->created_at ? $this->created_at->format('Y-m-d H:i:s') : null,
+            'updatedAt' => $this->updated_at ? $this->updated_at->format('Y-m-d H:i:s') : null,
         ];
     }
 

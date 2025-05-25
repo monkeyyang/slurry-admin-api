@@ -11,7 +11,7 @@ class GiftCardApiClient
 
     public function __construct()
     {
-        $this->baseUrl = config('gift_card.api_base_url', 'http://47.76.200.188:8080/api');
+        $this->baseUrl = config('gift_card.api_base_url', 'http://172.16.229.189:8080/api');
     }
 
     /**

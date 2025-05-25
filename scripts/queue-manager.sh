@@ -4,7 +4,7 @@
 # 用法: ./queue-manager.sh [start|stop|restart|status|monitor]
 
 LARAVEL_PATH="/www/wwwroot/slurry-admin-api"
-SUPERVISOR_CONFIG="/etc/supervisor/conf.d/laravel-workers.conf"
+SUPERVISOR_CONFIG="/etc/supervisor/conf.d/laravel-worker.conf"
 
 case "$1" in
     start)

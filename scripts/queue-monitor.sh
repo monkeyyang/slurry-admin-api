@@ -3,13 +3,18 @@
 # 队列监控脚本
 # 用于监控队列性能并提供调优建议
 
+# Redis配置
+REDIS_HOST="127.0.0.1"
+REDIS_PORT="6379"
+REDIS_PASSWORD="123456"
+
 echo "=== Laravel 队列监控报告 ==="
 echo "时间: $(date)"
 echo
 
 # 1. 检查队列积压情况
 echo "1. 队列积压情况:"
-redis-cli -h 127.0.0.1 -p 6379 <<EOF
+redis-cli -h $REDIS_HOST -p $REDIS_PORT -a $REDIS_PASSWORD --no-auth-warning <<EOF
 LLEN queues:gift_card_exchange
 LLEN queues:forecast_crawler  
 LLEN queues:bill_processing
@@ -41,7 +46,7 @@ echo
 
 # 5. 失败任务统计
 echo "5. 失败任务数量:"
-redis-cli -h 127.0.0.1 -p 6379 LLEN queues:failed
+redis-cli -h $REDIS_HOST -p $REDIS_PORT -a $REDIS_PASSWORD --no-auth-warning LLEN queues:failed
 
 echo
 
@@ -49,10 +54,10 @@ echo
 echo "6. 性能建议:"
 
 # 检查队列积压
-GIFT_CARD_QUEUE=$(redis-cli -h 127.0.0.1 -p 6379 LLEN queues:gift_card_exchange)
-FORECAST_QUEUE=$(redis-cli -h 127.0.0.1 -p 6379 LLEN queues:forecast_crawler)
-BILL_QUEUE=$(redis-cli -h 127.0.0.1 -p 6379 LLEN queues:bill_processing)
-CARD_QUERY_QUEUE=$(redis-cli -h 127.0.0.1 -p 6379 LLEN queues:card_query)
+GIFT_CARD_QUEUE=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT -a $REDIS_PASSWORD --no-auth-warning LLEN queues:gift_card_exchange)
+FORECAST_QUEUE=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT -a $REDIS_PASSWORD --no-auth-warning LLEN queues:forecast_crawler)
+BILL_QUEUE=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT -a $REDIS_PASSWORD --no-auth-warning LLEN queues:bill_processing)
+CARD_QUERY_QUEUE=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT -a $REDIS_PASSWORD --no-auth-warning LLEN queues:card_query)
 
 if [ "$GIFT_CARD_QUEUE" -gt 100 ]; then
     echo "⚠️  礼品卡兑换队列积压严重($GIFT_CARD_QUEUE)，建议增加进程数"

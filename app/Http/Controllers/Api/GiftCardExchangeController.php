@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessGiftCardExchangeJob;
+use App\Services\GiftCardApiClient;
 use App\Services\GiftCardExchangeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,6 +18,46 @@ class GiftCardExchangeController extends Controller
     public function __construct(GiftCardExchangeService $giftCardExchangeService)
     {
         $this->giftCardExchangeService = $giftCardExchangeService;
+    }
+
+    public function test(Request $request)
+    {
+        try {
+            $message = $request->input('message');
+
+            if (empty($message)) {
+                return response()->json([
+                    'code' => 400,
+                    'message' => '消息不能为空',
+                    'data' => null,
+                ]);
+            }
+
+            // 验证消息格式
+            $parseResult = $this->giftCardExchangeService->parseMessage($message);
+            if (!$parseResult) {
+                return response()->json([
+                    'code' => 400,
+                    'message' => '消息格式无效，正确格式：卡号 /类型（如：XQPD5D7KJ8TGZT4L /1）',
+                    'data' => null,
+                ]);
+            }
+
+            // 处理兑换消息
+            $giftCardApiClient = new GiftCardApiClient();
+            $giftCardExchangeService = new GiftCardExchangeService($giftCardApiClient);
+            $result = $giftCardExchangeService->processExchangeMessage($message);
+
+            var_dump($result);exit;
+
+        } catch (\Exception $e) {
+            Log::error('处理兑换消息失败: ' . $e->getMessage());
+            return response()->json([
+                'code' => 500,
+                'message' => '处理兑换消息失败: ' . $e->getMessage(),
+                'data' => null,
+            ]);
+        }
     }
 
     /**
