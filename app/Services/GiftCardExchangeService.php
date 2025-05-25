@@ -378,10 +378,13 @@ class GiftCardExchangeService
                 // 默认按创建时间排序
                 $query->orderBy('created_at', 'asc');
             }
-
+dd(
+    $query->toSql(),
+    $query->getBindings()
+);
             // 获取所有可能的计划
             $plans = $query->get();
- var_dump($plans);exit;
+
             // 过滤出符合执行时间要求的计划
             $now = Carbon::now();
             $eligiblePlans = [];
