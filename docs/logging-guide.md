@@ -22,7 +22,11 @@
    - 文件：`storage/logs/queue_jobs-YYYY-MM-DD.log`
    - 保留天数：7天
 
-5. **wechat** - 微信相关日志
+5. **card_query** - 卡密查询日志
+   - 文件：`storage/logs/card_query-YYYY-MM-DD.log`
+   - 保留天数：14天
+
+6. **wechat** - 微信相关日志
    - 文件：`storage/logs/wechat-YYYY-MM-DD.log`
    - 保留天数：14天
 
@@ -60,6 +64,9 @@ Log::channel('forecast_crawler')->info('处理预报IDs: ' . implode(',', $this-
 
 // 在 ProcessBillJob 中
 Log::channel('bill_processing')->info("开始处理账单 {$this->billId}");
+
+// 在 ProcessCardQueryJob 中
+Log::channel('card_query')->info("开始执行卡密查询队列任务");
 ```
 
 ### 在服务类中使用
@@ -129,6 +136,9 @@ tail -f storage/logs/forecast_crawler-$(date +%Y-%m-%d).log
 
 # 查看账单处理日志
 tail -f storage/logs/bill_processing-$(date +%Y-%m-%d).log
+
+# 查看卡密查询日志
+tail -f storage/logs/card_query-$(date +%Y-%m-%d).log
 ```
 
 ### 搜索日志

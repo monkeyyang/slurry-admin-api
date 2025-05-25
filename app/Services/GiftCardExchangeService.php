@@ -37,7 +37,7 @@ class GiftCardExchangeService
     public function processExchangeMessage(string $message): array
     {
         try {
-            Log::info('收到兑换消息: ' . $message);
+            Log::channel('gift_card_exchange')->info('收到兑换消息: ' . $message);
 
             // 解析消息
             $parts = $this->parseMessage($message);
@@ -58,7 +58,6 @@ class GiftCardExchangeService
 
             // 获取国家代码
             $countryCode = $cardInfo['country_code'];
-            var_dump($cardInfo);exit;
             // 选择合适的计划，传入卡余额用于检查账号额度上限
             $plan = $this->selectEligiblePlan($countryCode, $cardType, $cardInfo['balance']);
             if (!$plan) {
@@ -99,7 +98,7 @@ class GiftCardExchangeService
                 ]
             ];
         } catch (\Exception $e) {
-            Log::error('兑换处理失败: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('兑换处理失败: ' . $e->getMessage());
             return [
                 'success' => false,
                 'message' => $e->getMessage(),
@@ -139,7 +138,7 @@ class GiftCardExchangeService
     public function validateGiftCard(string $cardNumber): array
     {
         try {
-            Log::info('验证礼品卡: ' . $cardNumber);
+            Log::channel('gift_card_exchange')->info('验证礼品卡: ' . $cardNumber);
 
             // 创建查卡任务
             $queryTask = $this->createCardQueryTask([$cardNumber]);
@@ -148,7 +147,7 @@ class GiftCardExchangeService
             }
 
             $taskId = $queryTask['data']['task_id'];
-            Log::info('查卡任务创建成功, 任务ID: ' . $taskId);
+            Log::channel('gift_card_exchange')->info('查卡任务创建成功, 任务ID: ' . $taskId);
 
             // 等待任务完成
             $result = $this->waitForCardQueryTaskComplete($taskId);
@@ -174,7 +173,7 @@ class GiftCardExchangeService
                 'card_type' => 1, // 默认卡类型
             ];
         } catch (\Exception $e) {
-            Log::error('礼品卡验证失败: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('礼品卡验证失败: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -224,7 +223,7 @@ class GiftCardExchangeService
 
         $task = GiftCardTask::where('task_id', $taskId)->first();
         if (!$task) {
-            Log::error('查卡任务记录不存在: ' . $taskId);
+            Log::channel('gift_card_exchange')->error('查卡任务记录不存在: ' . $taskId);
             return false;
         }
 
@@ -234,7 +233,7 @@ class GiftCardExchangeService
             $result = $this->giftCardApiClient->getCardQueryTaskStatus($taskId);
 
             if ($result['code'] !== 0) {
-                Log::error('查询查卡任务状态失败: ' . ($result['msg'] ?? '未知错误'));
+                Log::channel('gift_card_exchange')->error('查询查卡任务状态失败: ' . ($result['msg'] ?? '未知错误'));
                 continue;
             }
 
@@ -364,7 +363,7 @@ class GiftCardExchangeService
     public function selectEligiblePlan(string $countryCode, int $cardType, float $cardBalance = 0): ?ChargePlan
     {
         try {
-            Log::info("选择计划, 国家: {$countryCode}, 卡类型: {$cardType}, 卡余额: {$cardBalance}");
+            Log::channel('gift_card_exchange')->info("选择计划, 国家: {$countryCode}, 卡类型: {$cardType}, 卡余额: {$cardBalance}");
 
             // 获取状态为处理中的相关国家计划
             $query = ChargePlan::where('country', $countryCode);
@@ -430,12 +429,12 @@ class GiftCardExchangeService
                     return $plan;
                 } else {
                     // 记录日志：账号已达到额度上限
-                    Log::info("账号 {$plan->account} 已达到额度上限，切换到其他账号");
+                    Log::channel('gift_card_exchange')->info("账号 {$plan->account} 已达到额度上限，切换到其他账号");
 
                     // 尝试获取替代账号
                     $alternativeAccount = $this->getAlternativeAccount($convertedAmount, $countryCode);
                     if ($alternativeAccount) {
-                        Log::info("找到替代账号: {$alternativeAccount->account}");
+                        Log::channel('gift_card_exchange')->info("找到替代账号: {$alternativeAccount->account}");
 
                         // 查找与替代账号关联的计划
                         $altPlan = ChargePlan::where('account', $alternativeAccount->account)
@@ -448,7 +447,7 @@ class GiftCardExchangeService
                         } else {
                             // 如果没有找到替代账号的计划，创建一个新计划
                             // 注意：这里可以根据实际业务逻辑决定是否需要创建新计划
-                            Log::info("替代账号没有关联计划，可以考虑创建新计划");
+                            Log::channel('gift_card_exchange')->info("替代账号没有关联计划，可以考虑创建新计划");
                         }
                     }
                 }
@@ -457,7 +456,7 @@ class GiftCardExchangeService
             // 如果所有符合条件的计划都达到了额度上限，且没有找到替代账号，返回null
             return null;
         } catch (\Exception $e) {
-            Log::error('选择计划失败: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('选择计划失败: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -508,7 +507,7 @@ class GiftCardExchangeService
                 ];
             }
         } catch (\Exception $e) {
-            Log::error("检查账号 {$account} 余额上限失败: " . $e->getMessage());
+            Log::channel('gift_card_exchange')->error("检查账号 {$account} 余额上限失败: " . $e->getMessage());
             return [
                 'success' => false,
                 'message' => '检查账号余额上限异常: ' . $e->getMessage(),
@@ -553,7 +552,7 @@ class GiftCardExchangeService
 
             return $alternativeAccount;
         } catch (\Exception $e) {
-            Log::error("获取替代账号失败: " . $e->getMessage());
+            Log::channel('gift_card_exchange')->error("获取替代账号失败: " . $e->getMessage());
             return null;
         }
     }
@@ -569,7 +568,7 @@ class GiftCardExchangeService
     public function executeExchange(ChargePlan $plan, string $cardNumber, array $cardInfo): array
     {
         try {
-            Log::info("执行兑换, 计划ID: {$plan->id}, 卡号: {$cardNumber}");
+            Log::channel('gift_card_exchange')->info("执行兑换, 计划ID: {$plan->id}, 卡号: {$cardNumber}");
 
             DB::beginTransaction();
 
@@ -606,7 +605,7 @@ class GiftCardExchangeService
             }
 
             $taskId = $redemptionTask['data']['task_id'];
-            Log::info('兑换任务创建成功, 任务ID: ' . $taskId);
+            Log::channel('gift_card_exchange')->info('兑换任务创建成功, 任务ID: ' . $taskId);
 
             // 等待任务完成
             $result = $this->waitForRedemptionTaskComplete($taskId);
@@ -672,7 +671,7 @@ class GiftCardExchangeService
             ];
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('执行兑换失败: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('执行兑换失败: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -718,7 +717,7 @@ class GiftCardExchangeService
 
         $task = GiftCardTask::where('task_id', $taskId)->first();
         if (!$task) {
-            Log::error('兑换任务记录不存在: ' . $taskId);
+            Log::channel('gift_card_exchange')->error('兑换任务记录不存在: ' . $taskId);
             return false;
         }
 
@@ -728,7 +727,7 @@ class GiftCardExchangeService
             $result = $this->giftCardApiClient->getRedemptionTaskStatus($taskId);
 
             if ($result['code'] !== 0) {
-                Log::error('查询兑换任务状态失败: ' . ($result['msg'] ?? '未知错误'));
+                Log::channel('gift_card_exchange')->error('查询兑换任务状态失败: ' . ($result['msg'] ?? '未知错误'));
                 continue;
             }
 
@@ -792,7 +791,7 @@ class GiftCardExchangeService
     public function calculateRate(string $countryCode, int $cardType, float $balance): array
     {
         try {
-            Log::info("计算汇率, 国家: {$countryCode}, 卡类型: {$cardType}, 余额: {$balance}");
+            Log::channel('gift_card_exchange')->info("计算汇率, 国家: {$countryCode}, 卡类型: {$cardType}, 余额: {$balance}");
 
             // 根据国家和卡类型获取汇率配置
             // 这里应该使用实际的汇率配置，可以从数据库获取
@@ -809,7 +808,7 @@ class GiftCardExchangeService
                 'target_currency' => $rateConfig['target_currency'] ?? 'CNY'
             ];
         } catch (\Exception $e) {
-            Log::error('计算汇率失败: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('计算汇率失败: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -876,7 +875,7 @@ class GiftCardExchangeService
 
             // 保存到数据库
             $record = GiftCardExchangeRecord::create($recordData);
-            Log::info('记录兑换信息: ' . $record->id);
+            Log::channel('gift_card_exchange')->info('记录兑换信息: ' . $record->id);
 
             // 如果兑换成功，更新账号余额
             if ($exchangeResult['success']) {
@@ -884,13 +883,13 @@ class GiftCardExchangeService
                 $accountLimit = AccountBalanceLimit::where('account', $plan->account)->first();
                 if ($accountLimit) {
                     $accountLimit->addBalance($rateInfo['converted_amount']);
-                    Log::info("更新账号 {$plan->account} 余额: +{$rateInfo['converted_amount']}");
+                    Log::channel('gift_card_exchange')->info("更新账号 {$plan->account} 余额: +{$rateInfo['converted_amount']}");
                 }
             }
 
             return $record->toArray();
         } catch (\Exception $e) {
-            Log::error('记录兑换信息失败: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('记录兑换信息失败: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -904,7 +903,7 @@ class GiftCardExchangeService
     public function syncData(array $data): array
     {
         try {
-            Log::info('同步数据: ' . json_encode($data));
+            Log::channel('gift_card_exchange')->info('同步数据: ' . json_encode($data));
 
             // 这里应该调用实际的API同步数据
             // $response = Http::post($this->dataSyncApiUrl, $data);
@@ -922,7 +921,7 @@ class GiftCardExchangeService
                 'message' => $mockResponse['message']
             ];
         } catch (\Exception $e) {
-            Log::error('同步数据失败: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('同步数据失败: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -948,7 +947,7 @@ class GiftCardExchangeService
 
             if ($refreshResult['code'] === 0) {
                 // 成功刷新，账号已登录
-                Log::info("账号 {$account} 已登录或刷新成功");
+                Log::channel('gift_card_exchange')->info("账号 {$account} 已登录或刷新成功");
                 return [
                     'success' => true,
                     'message' => $refreshResult['data']['msg'] ?? '账号已登录',
@@ -977,7 +976,7 @@ class GiftCardExchangeService
                 'data' => $loginTask['data']
             ];
         } catch (\Exception $e) {
-            Log::error("确保账号 {$account} 登录失败: " . $e->getMessage());
+            Log::channel('gift_card_exchange')->error("确保账号 {$account} 登录失败: " . $e->getMessage());
             return [
                 'success' => false,
                 'message' => '登录过程异常: ' . $e->getMessage(),
@@ -1009,7 +1008,7 @@ class GiftCardExchangeService
             $result = $this->giftCardApiClient->createLoginTask($accounts);
 
             if ($result['code'] !== 0) {
-                Log::error('创建登录任务失败: ' . ($result['msg'] ?? '未知错误'));
+                Log::channel('gift_card_exchange')->error('创建登录任务失败: ' . ($result['msg'] ?? '未知错误'));
                 return [
                     'success' => false,
                     'message' => '创建登录任务失败: ' . ($result['msg'] ?? '未知错误'),
@@ -1035,7 +1034,7 @@ class GiftCardExchangeService
                 ]
             ];
         } catch (\Exception $e) {
-            Log::error('创建登录任务异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('创建登录任务异常: ' . $e->getMessage());
             return [
                 'success' => false,
                 'message' => '创建登录任务异常: ' . $e->getMessage(),
@@ -1083,7 +1082,7 @@ class GiftCardExchangeService
                 'data' => $result['data']
             ];
         } catch (\Exception $e) {
-            Log::error('查询登录任务状态异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('查询登录任务状态异常: ' . $e->getMessage());
             return [
                 'success' => false,
                 'message' => '查询登录任务状态异常: ' . $e->getMessage(),
@@ -1119,7 +1118,7 @@ class GiftCardExchangeService
                 'data' => $result['data'] ?? null
             ];
         } catch (\Exception $e) {
-            Log::error('删除用户登录异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('删除用户登录异常: ' . $e->getMessage());
             return [
                 'success' => false,
                 'message' => '删除用户登录异常: ' . $e->getMessage(),

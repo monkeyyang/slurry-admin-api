@@ -51,7 +51,7 @@ class GiftCardExchangeController extends Controller
             // 生成请求ID用于追踪
             $requestId = uniqid('exchange_', true);
 
-            Log::info('收到兑换请求，加入队列处理', [
+            Log::channel('gift_card_exchange')->info('收到兑换请求，加入队列处理', [
                 'request_id' => $requestId,
                 'message' => $message,
                 'card_number' => $parseResult['card_number'],
@@ -552,7 +552,7 @@ class GiftCardExchangeController extends Controller
     {
         try {
             $requestId = $request->input('request_id');
-            
+
             if (empty($requestId)) {
                 return response()->json([
                     'code' => 400,
@@ -594,7 +594,7 @@ class GiftCardExchangeController extends Controller
             $testMessage = $request->input('message', 'TESTCARD123 /1');
             $requestId = uniqid('test_', true);
 
-            Log::info('测试队列功能', [
+            Log::channel('gift_card_exchange')->info('测试队列功能', [
                 'request_id' => $requestId,
                 'message' => $testMessage
             ]);

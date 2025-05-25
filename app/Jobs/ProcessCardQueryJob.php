@@ -19,6 +19,20 @@ class ProcessCardQueryJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     /**
+     * 队列连接
+     *
+     * @var string
+     */
+    public $connection = 'redis';
+
+    /**
+     * 队列名称
+     *
+     * @var string
+     */
+    public $queue = 'card_query';
+
+    /**
      * 失败尝试次数
      */
     public int $tries = 3;
@@ -42,7 +56,7 @@ class ProcessCardQueryJob implements ShouldQueue
     public function handle(CardQueryService $cardQueryService): void
     {
         try {
-            Log::info("开始执行卡密查询队列任务");
+            Log::channel('card_query')->info("开始执行卡密查询队列任务");
 
             // 1. 先同步新卡密记录
             $this->syncNewCardRecords();
@@ -50,7 +64,7 @@ class ProcessCardQueryJob implements ShouldQueue
             // 2. 获取查询规则
             $rule = CardQueryRule::getActiveRule();
             if (!$rule) {
-                Log::error("卡密查询任务: 未找到有效的查询规则");
+                Log::channel('card_query')->error("卡密查询任务: 未找到有效的查询规则");
                 return;
             }
 
@@ -60,10 +74,10 @@ class ProcessCardQueryJob implements ShouldQueue
             // 4. 执行第二阶段查询 (query_count = 1)
 //            $this->processSecondStageQuery($cardQueryService, $rule);
 
-            Log::info("卡密查询队列任务完成");
+            Log::channel('card_query')->info("卡密查询队列任务完成");
 
         } catch (\Exception $e) {
-            Log::error("卡密查询队列任务失败: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+            Log::channel('card_query')->error("卡密查询队列任务失败: " . $e->getMessage() . "\n" . $e->getTraceAsString());
         }
     }
 
@@ -78,11 +92,11 @@ class ProcessCardQueryJob implements ShouldQueue
                 ->where('name', 'last_synced_card_bill_id')
                 ->value('value') ?? 0;
 
-            Log::info("开始同步卡密记录，上次同步ID: {$lastId}");
+            Log::channel('card_query')->info("开始同步卡密记录，上次同步ID: {$lastId}");
 
             // 设置查询的时间范围限制
             $cutoffDateTime = Carbon::parse('2025-05-18 20:30:00');
-            Log::info("设置查询时间范围限制: {$cutoffDateTime->toDateTimeString()}");
+            Log::channel('card_query')->info("设置查询时间范围限制: {$cutoffDateTime->toDateTimeString()}");
 
             // 从mr_room_bill获取新记录
             $newRecords = DB::connection('mysql_card')
@@ -98,11 +112,11 @@ class ProcessCardQueryJob implements ShouldQueue
                 ->get();
 
             if ($newRecords->isEmpty()) {
-                Log::info("没有新的卡密记录需要同步");
+                Log::channel('card_query')->info("没有新的卡密记录需要同步");
                 return;
             }
 
-            Log::info("找到 " . $newRecords->count() . " 条新卡密记录需要同步");
+            Log::channel('card_query')->info("找到 " . $newRecords->count() . " 条新卡密记录需要同步");
 
             $insertCount = 0;
             $maxId = $lastId;
@@ -138,10 +152,10 @@ class ProcessCardQueryJob implements ShouldQueue
                     ['value' => $maxId, 'updated_at' => Carbon::now()]
                 );
 
-            Log::info("成功同步 {$insertCount} 条新卡密记录，最新同步ID: {$maxId}");
+            Log::channel('card_query')->info("成功同步 {$insertCount} 条新卡密记录，最新同步ID: {$maxId}");
 
         } catch (\Exception $e) {
-            Log::error("同步卡密记录失败: " . $e->getMessage());
+            Log::channel('card_query')->error("同步卡密记录失败: " . $e->getMessage());
         }
     }
 
@@ -155,7 +169,7 @@ class ProcessCardQueryJob implements ShouldQueue
             $firstIntervalMinutes = $rule->first_interval;
             $cutoffTime = $now->copy()->subMinutes($firstIntervalMinutes);
 
-            Log::info("开始第一阶段查询，查询截止时间: {$cutoffTime->toDateTimeString()}，间隔: {$firstIntervalMinutes} 分钟");
+            Log::channel('card_query')->info("开始第一阶段查询，查询截止时间: {$cutoffTime->toDateTimeString()}，间隔: {$firstIntervalMinutes} 分钟");
 
             // 查找符合条件的记录
             $records = CardQueryRecord::where('query_count', 0)
@@ -165,11 +179,11 @@ class ProcessCardQueryJob implements ShouldQueue
                 ->pluck('card_code');
 
             if ($records->isEmpty()) {
-                Log::info("没有需要进行第一阶段查询的卡密");
+                Log::channel('card_query')->info("没有需要进行第一阶段查询的卡密");
                 return;
             }
 
-            Log::info("找到 " . $records->count() . " 条记录需要进行第一阶段查询");
+            Log::channel('card_query')->info("找到 " . $records->count() . " 条记录需要进行第一阶段查询");
 
             // 准备查询参数
             $cardsToQuery = [];
@@ -182,15 +196,15 @@ class ProcessCardQueryJob implements ShouldQueue
 
             // 执行查询
             $result = $cardQueryService->queryCards($cardsToQuery);
-            Log::info('执行结果：', $result);
+            Log::channel('card_query')->info('执行结果：', $result);
             if ($result['code'] === 0 && !empty($result['cards'])) {
                 $this->sendMsgToWechat($result['cards']);
-                Log::info("第一阶段查询成功，处理结果");
+                Log::channel('card_query')->info("第一阶段查询成功，处理结果");
             } else {
-                Log::error("第一阶段查询失败: " . ($result['message'] ?? '未知错误'));
+                Log::channel('card_query')->error("第一阶段查询失败: " . ($result['message'] ?? '未知错误'));
             }
         } catch (\Exception $e) {
-            Log::error("处理第一阶段查询失败: " . $e->getMessage());
+            Log::channel('card_query')->error("处理第一阶段查询失败: " . $e->getMessage());
         }
     }
 
@@ -204,7 +218,7 @@ class ProcessCardQueryJob implements ShouldQueue
             $secondIntervalMinutes = $rule->second_interval;
             $cutoffTime = $now->copy()->subMinutes($secondIntervalMinutes);
 
-            Log::info("开始第二阶段查询，查询截止时间: {$cutoffTime->toDateTimeString()}，间隔: {$secondIntervalMinutes} 分钟");
+            Log::channel('card_query')->info("开始第二阶段查询，查询截止时间: {$cutoffTime->toDateTimeString()}，间隔: {$secondIntervalMinutes} 分钟");
 
             // 查找符合条件的记录
             $records = CardQueryRecord::where('query_count', 1)
@@ -214,11 +228,11 @@ class ProcessCardQueryJob implements ShouldQueue
                 ->get();
 
             if ($records->isEmpty()) {
-                Log::info("没有需要进行第二阶段查询的卡密");
+                Log::channel('card_query')->info("没有需要进行第二阶段查询的卡密");
                 return;
             }
 
-            Log::info("找到 " . $records->count() . " 条记录需要进行第二阶段查询");
+            Log::channel('card_query')->info("找到 " . $records->count() . " 条记录需要进行第二阶段查询");
 
             // 准备查询参数
             $cardsToQuery = [];
@@ -239,15 +253,15 @@ class ProcessCardQueryJob implements ShouldQueue
                 }
             }
             if ($result['code'] === 0 && !empty($result['cards'])) {
-                Log::info("第二阶段查询成功，处理结果");
+                Log::channel('card_query')->info("第二阶段查询成功，处理结果");
                 $this->sendMsgToWechat($result['cards']);
 
             } else {
-                Log::error("第二阶段查询失败: " . ($result['message'] ?? '未知错误'));
+                Log::channel('card_query')->error("第二阶段查询失败: " . ($result['message'] ?? '未知错误'));
             }
 
         } catch (\Exception $e) {
-            Log::error("处理第二阶段查询失败: " . $e->getMessage());
+            Log::channel('card_query')->error("处理第二阶段查询失败: " . $e->getMessage());
         }
     }
 
@@ -265,7 +279,7 @@ class ProcessCardQueryJob implements ShouldQueue
                 $content .= $item['code']."[{$item['balance']}]";
                 if(($k+1) < count($cards)) $content.="\n";
             }
-            Log::info($content);
+            Log::channel('card_query')->info($content);
             send_msg_to_wechat('44769140035@chatroom', $content);
         }
     }

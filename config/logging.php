@@ -165,6 +165,14 @@ return [
             'level' => 'debug',
             'days' => 7,
         ],
+
+        // 卡密查询日志
+        'card_query' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/card_query.log'),
+            'level' => 'debug',
+            'days' => 14,
+        ],
     ],
 
 ];
