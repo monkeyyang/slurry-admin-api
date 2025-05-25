@@ -8,12 +8,12 @@ use Illuminate\Support\Facades\Log;
 class GiftCardApiClient
 {
     protected $baseUrl;
-    
+
     public function __construct()
     {
         $this->baseUrl = config('gift_card.api_base_url', 'http://47.76.200.188:8080/api');
     }
-    
+
     /**
      * 创建登录任务
      *
@@ -26,11 +26,11 @@ class GiftCardApiClient
             $response = Http::post("{$this->baseUrl}/login_poll/new", [
                 'list' => $accounts
             ]);
-            
+
             if (!$response->successful()) {
                 throw new \Exception('创建登录任务失败: ' . $response->body());
             }
-            
+
             return $response->json();
         } catch (\Exception $e) {
             Log::error('创建登录任务异常: ' . $e->getMessage());
@@ -41,7 +41,7 @@ class GiftCardApiClient
             ];
         }
     }
-    
+
     /**
      * 查询登录任务状态
      *
@@ -54,11 +54,11 @@ class GiftCardApiClient
             $response = Http::get("{$this->baseUrl}/login_poll/status", [
                 'task_id' => $taskId
             ]);
-            
+
             if (!$response->successful()) {
                 throw new \Exception('查询登录任务状态失败: ' . $response->body());
             }
-            
+
             return $response->json();
         } catch (\Exception $e) {
             Log::error('查询登录任务状态异常: ' . $e->getMessage());
@@ -69,7 +69,7 @@ class GiftCardApiClient
             ];
         }
     }
-    
+
     /**
      * 删除用户登录
      *
@@ -82,11 +82,11 @@ class GiftCardApiClient
             $response = Http::post("{$this->baseUrl}/del_users", [
                 'list' => $accounts
             ]);
-            
+
             if (!$response->successful()) {
                 throw new \Exception('删除用户登录失败: ' . $response->body());
             }
-            
+
             return $response->json();
         } catch (\Exception $e) {
             Log::error('删除用户登录异常: ' . $e->getMessage());
@@ -97,7 +97,7 @@ class GiftCardApiClient
             ];
         }
     }
-    
+
     /**
      * 强制刷新用户信息
      *
@@ -108,11 +108,11 @@ class GiftCardApiClient
     {
         try {
             $response = Http::post("{$this->baseUrl}/refresh_login", $account);
-            
+
             if (!$response->successful()) {
                 throw new \Exception('刷新用户登录失败: ' . $response->body());
             }
-            
+
             return $response->json();
         } catch (\Exception $e) {
             Log::error('刷新用户登录异常: ' . $e->getMessage());
@@ -123,7 +123,7 @@ class GiftCardApiClient
             ];
         }
     }
-    
+
     /**
      * 创建查卡任务
      *
@@ -136,11 +136,11 @@ class GiftCardApiClient
             $response = Http::post("{$this->baseUrl}/batch_query/new", [
                 'list' => $cards
             ]);
-            
+
             if (!$response->successful()) {
                 throw new \Exception('创建查卡任务失败: ' . $response->body());
             }
-            
+
             return $response->json();
         } catch (\Exception $e) {
             Log::error('创建查卡任务异常: ' . $e->getMessage());
@@ -151,7 +151,7 @@ class GiftCardApiClient
             ];
         }
     }
-    
+
     /**
      * 查询查卡任务状态
      *
@@ -161,14 +161,15 @@ class GiftCardApiClient
     public function getCardQueryTaskStatus(string $taskId): array
     {
         try {
+
             $response = Http::get("{$this->baseUrl}/batch_query/status", [
                 'task_id' => $taskId
             ]);
-            
+
             if (!$response->successful()) {
                 throw new \Exception('查询查卡任务状态失败: ' . $response->body());
             }
-            
+
             return $response->json();
         } catch (\Exception $e) {
             Log::error('查询查卡任务状态异常: ' . $e->getMessage());
@@ -179,7 +180,7 @@ class GiftCardApiClient
             ];
         }
     }
-    
+
     /**
      * 创建兑换任务
      *
@@ -194,11 +195,11 @@ class GiftCardApiClient
                 'list' => $redemptions,
                 'interval' => $interval
             ]);
-            
+
             if (!$response->successful()) {
                 throw new \Exception('创建兑换任务失败: ' . $response->body());
             }
-            
+
             return $response->json();
         } catch (\Exception $e) {
             Log::error('创建兑换任务异常: ' . $e->getMessage());
@@ -209,7 +210,7 @@ class GiftCardApiClient
             ];
         }
     }
-    
+
     /**
      * 查询兑换任务状态
      *
@@ -222,11 +223,11 @@ class GiftCardApiClient
             $response = Http::get("{$this->baseUrl}/redeem/status", [
                 'task_id' => $taskId
             ]);
-            
+
             if (!$response->successful()) {
                 throw new \Exception('查询兑换任务状态失败: ' . $response->body());
             }
-            
+
             return $response->json();
         } catch (\Exception $e) {
             Log::error('查询兑换任务状态异常: ' . $e->getMessage());
@@ -237,7 +238,7 @@ class GiftCardApiClient
             ];
         }
     }
-    
+
     /**
      * 查询查卡历史记录
      *
@@ -257,7 +258,7 @@ class GiftCardApiClient
             if (empty($endTime)) {
                 $endTime = now()->format('Y-m-d H:i:s');
             }
-            
+
             $response = Http::post("{$this->baseUrl}/query_log", [
                 'keyword' => $keyword,
                 'start_time' => $startTime,
@@ -265,11 +266,11 @@ class GiftCardApiClient
                 'page' => $page,
                 'page_size' => $pageSize
             ]);
-            
+
             if (!$response->successful()) {
                 throw new \Exception('查询查卡历史记录失败: ' . $response->body());
             }
-            
+
             return $response->json();
         } catch (\Exception $e) {
             Log::error('查询查卡历史记录异常: ' . $e->getMessage());
@@ -280,7 +281,7 @@ class GiftCardApiClient
             ];
         }
     }
-    
+
     /**
      * 查询兑换历史记录
      *
@@ -300,7 +301,7 @@ class GiftCardApiClient
             if (empty($endTime)) {
                 $endTime = now()->format('Y-m-d H:i:s');
             }
-            
+
             $response = Http::post("{$this->baseUrl}/redeem_log", [
                 'keyword' => $keyword,
                 'start_time' => $startTime,
@@ -308,11 +309,11 @@ class GiftCardApiClient
                 'page' => $page,
                 'page_size' => $pageSize
             ]);
-            
+
             if (!$response->successful()) {
                 throw new \Exception('查询兑换历史记录失败: ' . $response->body());
             }
-            
+
             return $response->json();
         } catch (\Exception $e) {
             Log::error('查询兑换历史记录异常: ' . $e->getMessage());
@@ -323,4 +324,4 @@ class GiftCardApiClient
             ];
         }
     }
-} 
+}

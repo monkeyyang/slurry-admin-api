@@ -165,27 +165,27 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('/batch-query', [GiftCardController::class, 'batchQuery']);
         // 处理兑换消息
         Route::post('/exchange', 'App\Http\Controllers\Api\GiftCardExchangeController@processExchangeMessage');
-        
+
         // 验证礼品卡
         Route::post('/validate', 'App\Http\Controllers\Api\GiftCardExchangeController@validateGiftCard');
-        
+
         // 获取兑换记录
         Route::get('/records', 'App\Http\Controllers\Api\GiftCardExchangeController@getExchangeRecords');
-        
+
         // 获取单个兑换记录详情
         Route::get('/records/{id}', 'App\Http\Controllers\Api\GiftCardExchangeController@getExchangeRecord');
-        
+
         // 账号登录管理
         Route::post('/login/new', 'App\Http\Controllers\Api\GiftCardExchangeController@createLoginTask');
         Route::get('/login/status', 'App\Http\Controllers\Api\GiftCardExchangeController@getLoginTaskStatus');
         Route::post('/login/delete', 'App\Http\Controllers\Api\GiftCardExchangeController@deleteUserLogins');
         Route::post('/login/refresh', 'App\Http\Controllers\Api\GiftCardExchangeController@refreshUserLogin');
-        
+
         // 批量查询卡
         Route::post('/query/new', 'App\Http\Controllers\Api\GiftCardExchangeController@queryCards');
         Route::get('/query/status', 'App\Http\Controllers\Api\GiftCardExchangeController@getCardQueryTaskStatus');
         Route::post('/query/history', 'App\Http\Controllers\Api\GiftCardExchangeController@getCardQueryHistory');
-        
+
         // 批量兑换卡
         Route::post('/redeem/new', 'App\Http\Controllers\Api\GiftCardExchangeController@redeemCards');
         Route::get('/redeem/status', 'App\Http\Controllers\Api\GiftCardExchangeController@getRedemptionTaskStatus');
@@ -206,7 +206,7 @@ Route::group(['middleware' => ['auth:api']], function() {
         });
     });
 
-    // iTunes Trade API Routes
+    // iTunes交易路由
     Route::prefix('trade/itunes')->group(function () {
         // 国家配置接口
         Route::get('/configs', 'App\Http\Controllers\Api\ItunesTradeController@getConfigs');
@@ -221,9 +221,9 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('/templates/{id}/apply', 'App\Http\Controllers\Api\ItunesTradeController@applyTemplate');
     });
 
-    // Gift Exchange API Routes
+    // 礼品卡兑换路由组
     Route::prefix('trade/gift-exchange')->group(function () {
-        // Plan routes
+        // 计划路由
         Route::get('/plans', 'App\Http\Controllers\Api\GiftExchangeController@getPlans');
         Route::get('/plans/{id}', 'App\Http\Controllers\Api\GiftExchangeController@getPlan');
         Route::post('/plans', 'App\Http\Controllers\Api\GiftExchangeController@savePlan');
@@ -237,12 +237,12 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('/plans/{id}/resume', 'App\Http\Controllers\Api\GiftExchangeController@resumePlan');
         Route::post('/plans/{id}/cancel', 'App\Http\Controllers\Api\GiftExchangeController@cancelPlan');
         Route::get('/plans/{id}/logs', 'App\Http\Controllers\Api\GiftExchangeController@getPlanLogs');
-        
-        // Template routes
+
+        // 模板路由
         Route::get('/templates', 'App\Http\Controllers\Api\GiftExchangeController@getTemplates');
         Route::post('/templates', 'App\Http\Controllers\Api\GiftExchangeController@savePlanAsTemplate');
-        
-        // Account group routes
+
+        // 账号组路由
         Route::get('/account-groups', 'App\Http\Controllers\Api\GiftExchangeController@getAccountGroups');
         Route::get('/account-groups/{id}', 'App\Http\Controllers\Api\GiftExchangeController@getAccountGroup');
         Route::post('/account-groups', 'App\Http\Controllers\Api\GiftExchangeController@createAccountGroup');
@@ -253,12 +253,12 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::put('/account-groups/{id}/priorities', 'App\Http\Controllers\Api\GiftExchangeController@updatePlanPriorities');
         Route::post('/account-groups/{id}/start', 'App\Http\Controllers\Api\GiftExchangeController@startAccountGroup');
         Route::post('/account-groups/{id}/pause', 'App\Http\Controllers\Api\GiftExchangeController@pauseAccountGroup');
-        
-        // Auto execution routes
+
+        // 自动执行路由
         Route::get('/auto-execution/status', 'App\Http\Controllers\Api\GiftExchangeController@getAutoExecutionStatus');
         Route::put('/auto-execution/settings', 'App\Http\Controllers\Api\GiftExchangeController@updateAutoExecutionSettings');
-        
-        // Account balance limit routes
+
+        // 账户限额策略路由
         Route::get('/account-limits', 'App\Http\Controllers\Api\AccountBalanceLimitController@getBalanceLimits');
         Route::get('/account-limits/{id}', 'App\Http\Controllers\Api\AccountBalanceLimitController@getBalanceLimit');
         Route::post('/account-limits', 'App\Http\Controllers\Api\AccountBalanceLimitController@createBalanceLimit');

@@ -28,6 +28,7 @@ class GiftCardExchangeController extends Controller
     {
         try {
             $message = $request->input('message');
+
             if (empty($message)) {
                 return response()->json([
                     'code' => 400,
@@ -106,39 +107,39 @@ class GiftCardExchangeController extends Controller
     {
         try {
             $query = GiftCardExchangeRecord::query();
-            
+
             // 应用过滤
             if ($request->has('cardNumber')) {
                 $query->where('card_number', 'like', '%' . $request->input('cardNumber') . '%');
             }
-            
+
             if ($request->has('countryCode')) {
                 $query->where('country_code', $request->input('countryCode'));
             }
-            
+
             if ($request->has('status')) {
                 $query->where('status', $request->input('status'));
             }
-            
+
             if ($request->has('planId')) {
                 $query->where('plan_id', $request->input('planId'));
             }
-            
+
             // 应用排序
             $sortField = $request->input('sortField', 'exchange_time');
             $sortOrder = $request->input('sortOrder', 'desc');
-            
+
             // 有效排序字段
             $validSortFields = ['card_number', 'country_code', 'original_balance', 'converted_amount', 'exchange_time', 'created_at'];
             if (in_array($sortField, $validSortFields)) {
                 $query->orderBy($sortField, $sortOrder === 'desc' ? 'desc' : 'asc');
             }
-            
+
             // 应用分页
             $page = $request->input('page', 1);
             $pageSize = $request->input('pageSize', 10);
             $records = $query->paginate($pageSize, ['*'], 'page', $page);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -203,7 +204,7 @@ class GiftCardExchangeController extends Controller
             }
 
             $result = $this->giftCardExchangeService->giftCardApiClient->createLoginTask($accounts);
-            
+
             return response()->json($result);
         } catch (\Exception $e) {
             Log::error('创建登录任务失败: ' . $e->getMessage());
@@ -234,7 +235,7 @@ class GiftCardExchangeController extends Controller
             }
 
             $result = $this->giftCardExchangeService->getLoginTaskStatus($taskId);
-            
+
             return response()->json([
                 'code' => $result['success'] ? 0 : 500,
                 'message' => $result['message'],
@@ -269,7 +270,7 @@ class GiftCardExchangeController extends Controller
             }
 
             $result = $this->giftCardExchangeService->deleteUserLogins($accounts);
-            
+
             return response()->json([
                 'code' => $result['success'] ? 0 : 500,
                 'message' => $result['message'],
@@ -300,7 +301,7 @@ class GiftCardExchangeController extends Controller
                 'password' => $request->input('password', ''),
                 'verifyUrl' => $request->input('verifyUrl', '')
             ];
-            
+
             if (empty($account['username'])) {
                 return response()->json([
                     'code' => 400,
@@ -310,7 +311,7 @@ class GiftCardExchangeController extends Controller
             }
 
             $result = $this->giftCardExchangeService->giftCardApiClient->refreshUserLogin($account);
-            
+
             return response()->json($result);
         } catch (\Exception $e) {
             Log::error('刷新用户登录状态失败: ' . $e->getMessage());
@@ -341,7 +342,7 @@ class GiftCardExchangeController extends Controller
             }
 
             $result = $this->giftCardExchangeService->giftCardApiClient->createCardQueryTask($cards);
-            
+
             return response()->json($result);
         } catch (\Exception $e) {
             Log::error('批量查询礼品卡失败: ' . $e->getMessage());
@@ -372,7 +373,7 @@ class GiftCardExchangeController extends Controller
             }
 
             $result = $this->giftCardExchangeService->giftCardApiClient->getCardQueryTaskStatus($taskId);
-            
+
             return response()->json($result);
         } catch (\Exception $e) {
             Log::error('查询卡片查询任务状态失败: ' . $e->getMessage());
@@ -395,7 +396,7 @@ class GiftCardExchangeController extends Controller
         try {
             $redemptions = $request->input('list', []);
             $interval = $request->input('interval', 6);
-            
+
             if (empty($redemptions)) {
                 return response()->json([
                     'code' => 400,
@@ -408,7 +409,7 @@ class GiftCardExchangeController extends Controller
                 $redemptions,
                 $interval
             );
-            
+
             return response()->json($result);
         } catch (\Exception $e) {
             Log::error('批量兑换礼品卡失败: ' . $e->getMessage());
@@ -439,7 +440,7 @@ class GiftCardExchangeController extends Controller
             }
 
             $result = $this->giftCardExchangeService->giftCardApiClient->getRedemptionTaskStatus($taskId);
-            
+
             return response()->json($result);
         } catch (\Exception $e) {
             Log::error('查询兑换任务状态失败: ' . $e->getMessage());
@@ -475,7 +476,7 @@ class GiftCardExchangeController extends Controller
                 $params['page'],
                 $params['page_size']
             );
-            
+
             return response()->json($result);
         } catch (\Exception $e) {
             Log::error('获取查卡历史记录失败: ' . $e->getMessage());
@@ -511,7 +512,7 @@ class GiftCardExchangeController extends Controller
                 $params['page'],
                 $params['page_size']
             );
-            
+
             return response()->json($result);
         } catch (\Exception $e) {
             Log::error('获取兑换历史记录失败: ' . $e->getMessage());
@@ -522,4 +523,4 @@ class GiftCardExchangeController extends Controller
             ]);
         }
     }
-} 
+}
