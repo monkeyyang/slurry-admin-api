@@ -133,6 +133,38 @@ return [
             'level' => 'debug',
             'days' => 14,
         ],
+
+        // 礼品卡兑换日志
+        'gift_card_exchange' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/gift_card_exchange.log'),
+            'level' => 'debug',
+            'days' => 30,
+        ],
+
+        // 预报爬虫日志
+        'forecast_crawler' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/forecast_crawler.log'),
+            'level' => 'debug',
+            'days' => 14,
+        ],
+
+        // 账单处理日志
+        'bill_processing' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/bill_processing.log'),
+            'level' => 'debug',
+            'days' => 14,
+        ],
+
+        // 队列任务日志
+        'queue_jobs' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/queue_jobs.log'),
+            'level' => 'debug',
+            'days' => 7,
+        ],
     ],
 
 ];

@@ -20,6 +20,20 @@ class ProcessBillJob implements ShouldQueue
     protected int $billId;
 
     /**
+     * 队列连接
+     *
+     * @var string
+     */
+    public $connection = 'redis';
+
+    /**
+     * 队列名称
+     *
+     * @var string
+     */
+    public $queue = 'bill_processing';
+
+    /**
      * 失败尝试次数
      */
     public int $tries = 3;
@@ -47,17 +61,17 @@ class ProcessBillJob implements ShouldQueue
             $billRecord = DB::table('wechat_bill_records')->where('id', $this->billId)->first();
             
             if (!$billRecord) {
-                Log::error("ProcessBillJob: 未找到ID为 {$this->billId} 的账单记录");
+                Log::channel('bill_processing')->error("ProcessBillJob: 未找到ID为 {$this->billId} 的账单记录");
                 return;
             }
             
             // 检查是否已处理
             if ($billRecord->status !== 0) {
-                Log::info("ProcessBillJob: 账单记录 {$this->billId} 已处理，状态: {$billRecord->status}");
+                Log::channel('bill_processing')->info("ProcessBillJob: 账单记录 {$this->billId} 已处理，状态: {$billRecord->status}");
                 return;
             }
             
-            Log::info("ProcessBillJob: 开始处理账单 {$this->billId}, 卡密: {$billRecord->card_code}");
+            Log::channel('bill_processing')->info("ProcessBillJob: 开始处理账单 {$this->billId}, 卡密: {$billRecord->card_code}");
             
             // 执行加账逻辑
             $result = $this->processBill($billRecord);
@@ -71,12 +85,12 @@ class ProcessBillJob implements ShouldQueue
                     'processed_at' => now()
                 ]);
             
-            Log::info("ProcessBillJob: 账单 {$this->billId} 处理" . ($result ? '成功' : '失败'));
+            Log::channel('bill_processing')->info("ProcessBillJob: 账单 {$this->billId} 处理" . ($result ? '成功' : '失败'));
             
             // 如果需要，可以在这里发送处理结果通知
             
         } catch (\Exception $e) {
-            Log::error("ProcessBillJob: 处理账单 {$this->billId} 时发生错误: " . $e->getMessage());
+            Log::channel('bill_processing')->error("ProcessBillJob: 处理账单 {$this->billId} 时发生错误: " . $e->getMessage());
             
             // 更新为失败状态
             DB::table('wechat_bill_records')
@@ -108,7 +122,7 @@ class ProcessBillJob implements ShouldQueue
             $isCardValid = $this->validateCard($billRecord->card_code, $billRecord->card_type);
             
             if (!$isCardValid) {
-                Log::warning("ProcessBillJob: 卡密 {$billRecord->card_code} 验证无效");
+                Log::channel('bill_processing')->warning("ProcessBillJob: 卡密 {$billRecord->card_code} 验证无效");
                 return false;
             }
             
@@ -120,7 +134,7 @@ class ProcessBillJob implements ShouldQueue
             
             return true;
         } catch (\Exception $e) {
-            Log::error("ProcessBillJob: 处理账单加账失败: " . $e->getMessage());
+            Log::channel('bill_processing')->error("ProcessBillJob: 处理账单加账失败: " . $e->getMessage());
             return false;
         }
     }
@@ -149,7 +163,7 @@ class ProcessBillJob implements ShouldQueue
     {
         // 实现用户余额更新逻辑
         // 这里只是示例，您需要根据实际需求实现
-        Log::info("ProcessBillJob: 为用户 {$wxid} 增加余额 {$amount}");
+        Log::channel('bill_processing')->info("ProcessBillJob: 为用户 {$wxid} 增加余额 {$amount}");
     }
     
     /**
@@ -179,7 +193,7 @@ class ProcessBillJob implements ShouldQueue
     public function failed(\Exception $exception): void
     {
         // 当任务失败且已达到最大重试次数时执行
-        Log::error("ProcessBillJob: 账单 {$this->billId} 处理最终失败: " . $exception->getMessage());
+        Log::channel('bill_processing')->error("ProcessBillJob: 账单 {$this->billId} 处理最终失败: " . $exception->getMessage());
         
         // 更新为最终失败状态
         DB::table('wechat_bill_records')

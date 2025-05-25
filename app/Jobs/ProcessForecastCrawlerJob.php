@@ -16,6 +16,34 @@ class ProcessForecastCrawlerJob implements ShouldQueue
 
     protected $forecastIds;
 
+    /**
+     * 队列连接
+     *
+     * @var string
+     */
+    public $connection = 'redis';
+
+    /**
+     * 队列名称
+     *
+     * @var string
+     */
+    public $queue = 'forecast_crawler';
+
+    /**
+     * 任务最大尝试次数
+     *
+     * @var int
+     */
+    public int $tries = 3;
+
+    /**
+     * 任务超时时间（秒）
+     *
+     * @var int
+     */
+    public int $timeout = 180;
+
     public function __construct(array $forecastIds = [])
     {
         $this->forecastIds = $forecastIds;
@@ -23,18 +51,18 @@ class ProcessForecastCrawlerJob implements ShouldQueue
 
     public function handle()
     {
-        Log::info('====== 队列任务开始处理预报爬虫 ======');
-        Log::info('处理预报IDs: ' . implode(',', $this->forecastIds));
+        Log::channel('forecast_crawler')->info('====== 队列任务开始处理预报爬虫 ======');
+        Log::channel('forecast_crawler')->info('处理预报IDs: ' . implode(',', $this->forecastIds));
         
         try {
             $crawler = new ForecastCrawlerService();
             $crawler->processQueue($this->forecastIds);
             
-            Log::info('====== 队列任务处理预报爬虫完成 ======');
+            Log::channel('forecast_crawler')->info('====== 队列任务处理预报爬虫完成 ======');
         } catch (\Exception $e) {
-            Log::error('====== 队列任务处理预报爬虫失败 ======');
-            Log::error('错误信息: ' . $e->getMessage());
-            Log::error('错误堆栈: ' . $e->getTraceAsString());
+            Log::channel('forecast_crawler')->error('====== 队列任务处理预报爬虫失败 ======');
+            Log::channel('forecast_crawler')->error('错误信息: ' . $e->getMessage());
+            Log::channel('forecast_crawler')->error('错误堆栈: ' . $e->getTraceAsString());
             
             throw $e; // 重新抛出异常，让队列系统处理重试
         }

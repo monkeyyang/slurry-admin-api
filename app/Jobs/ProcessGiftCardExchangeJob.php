@@ -58,9 +58,9 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
         $this->message = $message;
         $this->requestId = $requestId ?: uniqid('exchange_', true);
 
-        // 设置队列连接和队列名称
-        $this->connection = config('gift_card.queue.connection');
-        $this->queue = config('gift_card.queue.queue_name');
+        // 设置队列连接和队列名称 - 高优先级
+        $this->connection = config('gift_card.queue.connection', 'redis');
+        $this->queue = 'gift_card_exchange';
     }
 
     /**
@@ -73,7 +73,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
     public function handle(GiftCardExchangeService $giftCardExchangeService): void
     {
         try {
-            Log::info("开始处理礼品卡兑换队列任务", [
+            Log::channel('gift_card_exchange')->info("开始处理礼品卡兑换队列任务", [
                 'request_id' => $this->requestId,
                 'message' => $this->message,
                 'attempt' => $this->attempts()
@@ -83,12 +83,12 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
             $result = $giftCardExchangeService->processExchangeMessage($this->message);
 
             if ($result['success']) {
-                Log::info("礼品卡兑换队列任务处理成功", [
+                Log::channel('gift_card_exchange')->info("礼品卡兑换队列任务处理成功", [
                     'request_id' => $this->requestId,
                     'result' => $result['data']
                 ]);
             } else {
-                Log::error("礼品卡兑换队列任务处理失败", [
+                Log::channel('gift_card_exchange')->error("礼品卡兑换队列任务处理失败", [
                     'request_id' => $this->requestId,
                     'error' => $result['message']
                 ]);
@@ -102,7 +102,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                 throw new Exception($result['message']);
             }
         } catch (Exception $e) {
-            Log::error("礼品卡兑换队列任务执行异常", [
+            Log::channel('gift_card_exchange')->error("礼品卡兑换队列任务执行异常", [
                 'request_id' => $this->requestId,
                 'message' => $this->message,
                 'error' => $e->getMessage(),
@@ -145,7 +145,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
      */
     public function failed(Throwable $exception): void
     {
-        Log::error("礼品卡兑换队列任务最终失败", [
+        Log::channel('gift_card_exchange')->error("礼品卡兑换队列任务最终失败", [
             'request_id' => $this->requestId,
             'message' => $this->message,
             'error' => $exception->getMessage(),

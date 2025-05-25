@@ -9,7 +9,7 @@ return [
 
     // 队列配置
     'queue' => [
-        'connection' => env('GIFT_CARD_QUEUE_CONNECTION', 'redis'),
+        'connection' => env('GIFT_CARD_QUEUE_CONNECTION', 'database'),
         'queue_name' => env('GIFT_CARD_QUEUE_NAME', 'gift_card_exchange'),
     ],
 
