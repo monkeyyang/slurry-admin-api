@@ -62,6 +62,26 @@ class ChargePlan extends Model
     }
 
     /**
+     * The wechat room binding for this plan
+     */
+    public function wechatRoomBinding()
+    {
+        return $this->hasOne(ChargePlanWechatRoomBinding::class, 'plan_id');
+    }
+
+    /**
+     * Get the bound wechat room info
+     */
+    public function getBoundWechatRoom()
+    {
+        $binding = $this->wechatRoomBinding;
+        if ($binding) {
+            return $binding->getWechatRoomInfo();
+        }
+        return null;
+    }
+
+    /**
      * Get the plan's current progress as a percentage
      *
      * @return float
@@ -81,6 +101,8 @@ class ChargePlan extends Model
      */
     public function toApiArray()
     {
+        $wechatRoom = $this->getBoundWechatRoom();
+        
         return [
             'id' => (string)$this->id,
             'account' => $this->account,
@@ -101,6 +123,10 @@ class ChargePlan extends Model
             'chargedAmount' => $this->charged_amount,
             'groupId' => $this->group_id ? (string)$this->group_id : null,
             'priority' => $this->priority,
+            'wechatRoom' => $wechatRoom ? [
+                'roomId' => $wechatRoom->room_id,
+                'roomName' => $wechatRoom->room_name ?? '未知群组',
+            ] : null,
             'createdAt' => $this->created_at ? $this->created_at->format('Y-m-d H:i:s') : null,
             'updatedAt' => $this->updated_at ? $this->updated_at->format('Y-m-d H:i:s') : null,
         ];

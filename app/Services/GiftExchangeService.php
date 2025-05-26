@@ -14,6 +14,13 @@ use Illuminate\Support\Facades\Log;
 
 class GiftExchangeService
 {
+    protected $wechatRoomBindingService;
+
+    public function __construct(WechatRoomBindingService $wechatRoomBindingService = null)
+    {
+        $this->wechatRoomBindingService = $wechatRoomBindingService;
+    }
+
     /**
      * Parse account and password from account string
      *
@@ -86,6 +93,16 @@ class GiftExchangeService
                 $this->createCustomItems($plan, $data['items']);
             } else {
                 $plan->generateItems();
+            }
+            
+            // 尝试自动分配微信群组
+            if ($this->wechatRoomBindingService) {
+                try {
+                    $this->wechatRoomBindingService->autoAssignPlanToRoom($plan);
+                } catch (\Exception $e) {
+                    // 自动分配失败不影响计划创建，只记录日志
+                    Log::warning('Failed to auto assign plan to wechat room: ' . $e->getMessage());
+                }
             }
             
             DB::commit();

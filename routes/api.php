@@ -16,6 +16,7 @@ use App\Http\Controllers\WarehouseGoodsController;
 use App\Http\Controllers\AdminWarehouseController;
 use App\Http\Controllers\WarehouseStockInController;
 use App\Http\Controllers\WechatController;
+use App\Http\Controllers\WechatRoomBindingController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -274,6 +275,16 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('/account-limits/{id}/reset', 'App\Http\Controllers\Api\AccountBalanceLimitController@resetBalance');
         Route::put('/account-limits/{id}/status', 'App\Http\Controllers\Api\AccountBalanceLimitController@updateStatus');
         Route::delete('/account-limits/{id}', 'App\Http\Controllers\Api\AccountBalanceLimitController@deleteBalanceLimit');
+
+        // 微信群组绑定路由
+        Route::get('/wechat-room-binding/status', 'App\Http\Controllers\WechatRoomBindingController@getBindingStatus');
+        Route::put('/wechat-room-binding/status', 'App\Http\Controllers\WechatRoomBindingController@updateBindingStatus');
+        Route::get('/wechat-rooms', 'App\Http\Controllers\WechatRoomBindingController@getWechatRooms');
+        Route::post('/plans/{planId}/bind-room', 'App\Http\Controllers\WechatRoomBindingController@bindPlanToRoom');
+        Route::post('/plans/{planId}/unbind-room', 'App\Http\Controllers\WechatRoomBindingController@unbindPlanFromRoom');
+        Route::post('/wechat-room-binding/batch-bind', 'App\Http\Controllers\WechatRoomBindingController@batchBindPlansToRoom');
+        Route::post('/wechat-room-binding/batch-unbind', 'App\Http\Controllers\WechatRoomBindingController@batchUnbindPlansFromRoom');
+        Route::get('/wechat-room-binding/stats', 'App\Http\Controllers\WechatRoomBindingController@getWechatRoomStats');
     });
 });
 
