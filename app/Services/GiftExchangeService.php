@@ -15,6 +15,43 @@ use Illuminate\Support\Facades\Log;
 class GiftExchangeService
 {
     /**
+     * Parse account and password from account string
+     *
+     * @param string $accountString
+     * @return array
+     */
+    protected function parseAccountAndPassword(string $accountString): array
+    {
+        // 账号和密码可能以空格、制表符或其他分隔符连接
+        // 例如: "gordony1982@icloud.com\tzIxHkNvAV0" 或 "gordony1982@icloud.com zIxHkNvAV0"
+        
+        // 尝试不同的分隔符
+        $separators = ['\t', ' ', '|', ','];
+        
+        foreach ($separators as $separator) {
+            if ($separator === '\t') {
+                // 处理制表符
+                $parts = explode("\t", $accountString);
+            } else {
+                $parts = explode($separator, $accountString);
+            }
+            
+            if (count($parts) >= 2) {
+                return [
+                    'account' => trim($parts[0]),
+                    'password' => trim($parts[1])
+                ];
+            }
+        }
+        
+        // 如果没有找到分隔符，返回原始字符串作为账号，密码为空
+        return [
+            'account' => trim($accountString),
+            'password' => ''
+        ];
+    }
+
+    /**
      * Create a new charge plan
      *
      * @param array $data
@@ -25,8 +62,12 @@ class GiftExchangeService
         try {
             DB::beginTransaction();
             
+            // 解析账号和密码
+            $accountData = $this->parseAccountAndPassword($data['account']);
+            
             $plan = ChargePlan::create([
-                'account' => $data['account'],
+                'account' => $accountData['account'],
+                'password' => $accountData['password'],
                 'country' => $data['country'],
                 'total_amount' => $data['totalAmount'],
                 'days' => $data['days'],
@@ -34,14 +75,18 @@ class GiftExchangeService
                 'float_amount' => $data['floatAmount'],
                 'interval_hours' => $data['intervalHours'],
                 'start_time' => $data['startTime'],
-                'status' => 'draft',
+                'status' => $data['status'] ?? 'draft',
                 'charged_amount' => 0,
                 'group_id' => $data['groupId'] ?? null,
                 'priority' => $data['priority'] ?? 0,
             ]);
             
-            // Generate plan items
-            $plan->generateItems();
+            // Create plan items - use custom items if provided, otherwise generate automatically
+            if (isset($data['items']) && is_array($data['items']) && !empty($data['items'])) {
+                $this->createCustomItems($plan, $data['items']);
+            } else {
+                $plan->generateItems();
+            }
             
             DB::commit();
             
@@ -50,6 +95,47 @@ class GiftExchangeService
             DB::rollBack();
             Log::error('Failed to create charge plan: ' . $e->getMessage());
             throw $e;
+        }
+    }
+
+    /**
+     * Create custom plan items from provided data
+     *
+     * @param ChargePlan $plan
+     * @param array $items
+     * @return void
+     */
+    protected function createCustomItems(ChargePlan $plan, array $items)
+    {
+        foreach ($items as $itemData) {
+            // Parse time from the provided time string
+            $timeString = $itemData['time'] ?? '00:00:00';
+            
+            // If time contains date, extract only the time part
+            if (strpos($timeString, ' ') !== false) {
+                $timeParts = explode(' ', $timeString);
+                $timeString = end($timeParts); // Get the last part (time)
+            }
+            
+            // If time is still in datetime format, parse it
+            if (strlen($timeString) > 8) {
+                try {
+                    $timeString = Carbon::parse($timeString)->format('H:i:s');
+                } catch (\Exception $e) {
+                    $timeString = '00:00:00'; // Fallback
+                }
+            }
+            
+            ChargePlanItem::create([
+                'plan_id' => $plan->id,
+                'day' => $itemData['day'],
+                'time' => $timeString,
+                'amount' => $itemData['amount'],
+                'min_amount' => $itemData['minAmount'] ?? $itemData['amount'],
+                'max_amount' => $itemData['maxAmount'] ?? $itemData['amount'],
+                'description' => $itemData['description'] ?? "Day {$itemData['day']} charge",
+                'status' => 'pending',
+            ]);
         }
     }
 
@@ -110,8 +196,12 @@ class GiftExchangeService
                 throw new \Exception('Only draft plans can be updated');
             }
             
+            // 解析账号和密码
+            $accountData = $this->parseAccountAndPassword($data['account']);
+            
             $plan->update([
-                'account' => $data['account'],
+                'account' => $accountData['account'],
+                'password' => $accountData['password'],
                 'country' => $data['country'],
                 'total_amount' => $data['totalAmount'],
                 'days' => $data['days'],
@@ -119,13 +209,20 @@ class GiftExchangeService
                 'float_amount' => $data['floatAmount'],
                 'interval_hours' => $data['intervalHours'],
                 'start_time' => $data['startTime'],
+                'status' => $data['status'] ?? $plan->status,
                 'group_id' => $data['groupId'] ?? $plan->group_id,
                 'priority' => $data['priority'] ?? $plan->priority,
             ]);
             
-            // Remove existing items and regenerate
+            // Remove existing items and create new ones
             $plan->items()->delete();
-            $plan->generateItems();
+            
+            // Create plan items - use custom items if provided, otherwise generate automatically
+            if (isset($data['items']) && is_array($data['items']) && !empty($data['items'])) {
+                $this->createCustomItems($plan, $data['items']);
+            } else {
+                $plan->generateItems();
+            }
             
             DB::commit();
             

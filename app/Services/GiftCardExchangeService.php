@@ -374,7 +374,8 @@ class GiftCardExchangeService
             Log::channel('gift_card_exchange')->info("选择计划, 国家: {$countryCode}, 卡类型: {$cardType}, 卡余额: {$cardBalance}");
 
             // 获取状态为处理中的相关国家计划
-            $query = ChargePlan::where('country', $countryCode);
+            $query = ChargePlan::where('status','processing')
+                ->where('country', $countryCode);
 
             // 可以根据卡类型进行进一步筛选，例如根据优先级或组
             if ($cardType == 1) {

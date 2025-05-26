@@ -12,6 +12,7 @@ class ChargePlan extends Model
 
     protected $fillable = [
         'account',
+        'password',
         'country',
         'total_amount',
         'days',
@@ -83,6 +84,7 @@ class ChargePlan extends Model
         return [
             'id' => (string)$this->id,
             'account' => $this->account,
+            'password' => $this->password,
             'country' => $this->country,
             'totalAmount' => $this->total_amount,
             'days' => $this->days,

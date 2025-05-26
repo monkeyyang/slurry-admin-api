@@ -239,7 +239,7 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::put('/plans/{id}', 'App\Http\Controllers\Api\GiftExchangeController@updatePlan');
         Route::put('/plans/{id}/status', 'App\Http\Controllers\Api\GiftExchangeController@updatePlanStatus');
         Route::delete('/plans/{id}', 'App\Http\Controllers\Api\GiftExchangeController@deletePlan');
-        Route::post('/plans/{id}/execute', 'App\Http\Controllers\Api\GiftExchangeController@executePlan');
+        Route::post('/plans/{id}/start', 'App\Http\Controllers\Api\GiftExchangeController@executePlan');
         Route::post('/plans/{id}/pause', 'App\Http\Controllers\Api\GiftExchangeController@pausePlan');
         Route::post('/plans/{id}/resume', 'App\Http\Controllers\Api\GiftExchangeController@resumePlan');
         Route::post('/plans/{id}/cancel', 'App\Http\Controllers\Api\GiftExchangeController@cancelPlan');
