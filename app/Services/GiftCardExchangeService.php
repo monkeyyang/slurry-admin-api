@@ -4,19 +4,28 @@ namespace App\Services;
 
 use App\Models\ChargePlan;
 use App\Models\AccountGroup;
+use App\Models\ChargePlanItem;
 use App\Models\ChargePlanLog;
+use App\Models\ChargePlanWechatRoomBinding;
 use App\Models\GiftCardExchangeRecord;
 use App\Models\GiftCardTask;
 use App\Models\AccountBalanceLimit;
+use App\Models\MrRoom;
 use Carbon\Carbon;
+use Exception;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Eloquent\Collection;
 
 class GiftCardExchangeService
 {
-    public $giftCardApiClient;
-    protected $dataSyncApiUrl = 'https://api.example.com/sync-data'; // 替换为实际的API地址
+    public GiftCardApiClient $giftCardApiClient;
+    public string $roomId;
+    public MrRoom $roomInfo;
+    public bool $isOpenRoomBind = false;
+    protected string $dataSyncApiUrl = 'http://106.52.250.202/api/add-biil/sync'; // 替换为实际的API地址
+    private int $giftCardAmount = 0;
 
     /**
      * 构造函数
@@ -26,6 +35,19 @@ class GiftCardExchangeService
     public function __construct(GiftCardApiClient $giftCardApiClient)
     {
         $this->giftCardApiClient = $giftCardApiClient;
+    }
+
+    /**
+     * 设置群聊信息
+     *
+     * @param string $roomId
+     * @return MrRoom
+     */
+    public function setRoomId(string $roomId): MrRoom
+    {
+        $this->roomId = $roomId;
+        $this->roomInfo = MrRoom::getByRoomId($roomId);
+        return $this->roomInfo;
     }
 
     /**
@@ -62,20 +84,20 @@ class GiftCardExchangeService
 //            $countryCode = $cardInfo['country_code'];
             // 临时测试
             $cardInfo['card_number'] = 'X6FQY9T59J792VPX';
-            $cardInfo['balance'] = 5;
+            $cardInfo['balance'] = 50;
             $cardType = 1;
             $countryCode = 'US';
             Log::channel('gift_card_exchange')->info('查询礼品卡结果：', $cardInfo);
             // 选择合适的计划，传入卡余额用于检查账号额度上限
             $plan = $this->selectEligiblePlan($countryCode, $cardType, $cardInfo['balance']);
             if (!$plan) {
-                throw new \Exception('没有找到合适的可执行计划，可能所有账号已达额度上限');
+                throw new Exception('没有找到合适的可执行计划，可能所有账号已达额度上限');
             }
-
+            var_dump($plan);exit;
             // 确保账号已登录
             $loginResult = $this->ensureAccountLoggedIn($plan->account);
             if (!$loginResult['success']) {
-                throw new \Exception('账号登录失败: ' . $loginResult['message']);
+                throw new Exception('账号登录失败: ' . $loginResult['message']);
             }
 
             // 加入兑换队列并执行
@@ -105,7 +127,7 @@ class GiftCardExchangeService
                     'task_id' => $exchangeResult['task_id'] ?? null,
                 ]
             ];
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error('兑换处理失败: ' . $e->getMessage());
             return [
                 'success' => false,
@@ -142,6 +164,7 @@ class GiftCardExchangeService
      *
      * @param string $cardNumber
      * @return array
+     * @throws Exception
      */
     public function validateGiftCard(string $cardNumber): array
     {
@@ -151,7 +174,7 @@ class GiftCardExchangeService
             // 创建查卡任务
             $queryTask = $this->createCardQueryTask([$cardNumber]);
             if ($queryTask['code'] !== 0) {
-                throw new \Exception('创建查卡任务失败: ' . ($queryTask['msg'] ?? '未知错误'));
+                throw new Exception('创建查卡任务失败: ' . ($queryTask['msg'] ?? '未知错误'));
             }
 
             $taskId = $queryTask['data']['task_id'];
@@ -161,13 +184,13 @@ class GiftCardExchangeService
             $result = $this->waitForCardQueryTaskComplete($taskId);
 
             if (!$result) {
-                throw new \Exception('查卡任务执行超时或失败');
+                throw new Exception('查卡任务执行超时或失败');
             }
 
             // 解析查卡结果
             $taskResult = $this->getCardQueryResult($taskId, $cardNumber);
             if (!$taskResult) {
-                throw new \Exception('无法获取查卡结果');
+                throw new Exception('无法获取查卡结果');
             }
 
             // 根据查卡结果构造返回数据
@@ -180,7 +203,7 @@ class GiftCardExchangeService
                 'card_number' => $taskResult['cardNumber'],
                 'card_type' => 1, // 默认卡类型
             ];
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error('礼品卡验证失败: ' . $e->getMessage());
             throw $e;
         }
@@ -283,8 +306,7 @@ class GiftCardExchangeService
         foreach ($items as $item) {
             if ($item['data_id'] === $cardNumber && $item['status'] === 'completed') {
                 // 解析结果JSON字符串
-                $resultData = json_decode($item['result'], true) ?? [];
-                return $resultData;
+                return json_decode($item['result'], true) ?? [];
             }
         }
 
@@ -342,22 +364,207 @@ class GiftCardExchangeService
      */
     protected function parseCurrency(string $balanceStr): string
     {
-        if (strpos($balanceStr, '$') === 0) {
+        if (str_starts_with($balanceStr, '$')) {
             return 'USD';
-        } elseif (strpos($balanceStr, '£') === 0) {
+        } elseif (str_starts_with($balanceStr, '£')) {
             return 'GBP';
-        } elseif (strpos($balanceStr, '€') === 0) {
+        } elseif (str_starts_with($balanceStr, '€')) {
             return 'EUR';
-        } elseif (strpos($balanceStr, '¥') === 0) {
+        } elseif (str_starts_with($balanceStr, '¥')) {
             return 'JPY';
-        } elseif (strpos($balanceStr, 'AU$') === 0) {
+        } elseif (str_starts_with($balanceStr, 'AU$')) {
             return 'AUD';
-        } elseif (strpos($balanceStr, 'CAD$') === 0 || strpos($balanceStr, 'C$') === 0) {
+        } elseif (str_starts_with($balanceStr, 'CAD$') || str_starts_with($balanceStr, 'C$')) {
             return 'CAD';
         }
 
         // 默认返回USD
         return 'USD';
+    }
+
+    /**
+     * 获取所有可执行的计划
+     *
+     * @param $countryCode
+     * @param $cardType
+     * @return mixed
+     */
+    private function getProcessingPlans($countryCode, $cardType): mixed
+    {
+        // 获取状态为处理中的相关国家计划
+        $query = ChargePlan::where('status','processing')->where('country', $countryCode);
+        // 可以根据卡类型进行进一步筛选，例如根据优先级或组
+        if ($cardType == 1) {
+            // 例如卡类型1优先选择高优先级的计划
+            $query->orderBy('priority', 'desc');
+        } else {
+            // 默认按创建时间排序
+            $query->orderBy('created_at', 'asc');
+        }
+
+        // 获取所有可能的计划
+        return $query->get();
+    }
+
+    /**
+     * 筛选符合条件的计划
+     *
+     * @param Collection $plans
+     * @return ChargePlan|null
+     */
+    private function filterPlan(Collection $plans): ?ChargePlan
+    {
+        try {
+            // 是否开启绑定群组
+            $wechatRoomBindingService = new WechatRoomBindingService();
+            $bindStatus = $wechatRoomBindingService->getBindingStatus();
+            $this->isOpenRoomBind = !empty($bindStatus) && $bindStatus['enabled'];
+
+            // 如果开启群组绑定，获取当前群组绑定的计划
+            if ($this->isOpenRoomBind) {
+                if (empty($this->roomId)) {
+                    Log::channel('gift_card_exchange')->error('群组绑定已开启，但未设置roomId');
+                    return null;
+                }
+
+                $roomBinds = ChargePlanWechatRoomBinding::where('room_id', $this->roomId)->get();
+                if ($roomBinds->isEmpty()) {
+                    // 未绑定计划到群组，自动绑定第一个符合条件的计划
+                    foreach ($plans as $plan) {
+                        if ($this->isPlanValid($plan)) {
+                            try {
+                                DB::beginTransaction();
+                                $wechatRoomBindingService->bindPlanToRoom($plan->id, $this->roomId);
+                                DB::commit();
+                                Log::channel('gift_card_exchange')->info("自动绑定计划 {$plan->id} 到群组 {$this->roomId}");
+                                return $plan;
+                            } catch (\Exception $e) {
+                                DB::rollBack();
+                                Log::channel('gift_card_exchange')->error("自动绑定计划失败: " . $e->getMessage());
+                                continue;
+                            }
+                        }
+                    }
+                    Log::channel('gift_card_exchange')->info("群组 {$this->roomId} 未找到符合条件的计划可绑定");
+                } else {
+                    // 已绑定计划，检查绑定的计划是否有效
+                    foreach ($roomBinds as $binding) {
+                        $plan = $plans->firstWhere('id', $binding->plan_id);
+                        if ($plan && $this->isPlanValid($plan)) {
+                            Log::channel('gift_card_exchange')->info("使用群组 {$this->roomId} 已绑定的计划 {$plan->id}");
+                            return $plan;
+                        }
+                    }
+                    Log::channel('gift_card_exchange')->info("群组 {$this->roomId} 绑定的计划均不符合条件");
+                }
+                return null;
+            } else {
+                // 未开启群组绑定，直接返回第一个符合条件的计划
+                foreach ($plans as $plan) {
+                    if ($this->isPlanValid($plan)) {
+                        Log::channel('gift_card_exchange')->info("使用未绑定群组的计划 {$plan->id}");
+                        return $plan;
+                    }
+                }
+                Log::channel('gift_card_exchange')->info("未找到符合条件的计划");
+                return null;
+            }
+        } catch (\Exception $e) {
+            Log::channel('gift_card_exchange')->error("筛选计划时发生错误: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 检查计划是否有效
+     *
+     * @param ChargePlan $plan
+     * @return bool
+     */
+    private function isPlanValid(ChargePlan $plan): bool
+    {
+        try {
+            // 1. 检查计划状态和额度
+            if ($plan->status === 'completed') {
+                Log::channel('gift_card_exchange')->info("计划 {$plan->id} 已完成");
+                return false;
+            }
+
+            if ($plan->charged_amount >= $plan->total_amount) {
+                Log::channel('gift_card_exchange')->info("计划 {$plan->id} 已达到总额度");
+                return false;
+            }
+
+            // 2. 检查礼品卡金额是否超出计划剩余额度
+            $remainingAmount = $plan->total_amount - $plan->charged_amount;
+            if ($this->giftCardAmount > $remainingAmount) {
+                Log::channel('gift_card_exchange')->info("计划 {$plan->id} 礼品卡金额 {$this->giftCardAmount} 超出剩余额度 {$remainingAmount}");
+                return false;
+            }
+
+            // 3. 检查面值倍数要求
+            if ($plan->multiple_base > 0) {
+                if ($this->giftCardAmount % $plan->multiple_base !== 0) {
+                    Log::channel('gift_card_exchange')->info("计划 {$plan->id} 礼品卡金额 {$this->giftCardAmount} 不符合倍数要求 {$plan->multiple_base}");
+                    return false;
+                }
+            }
+
+            // 4. 检查最后执行时间
+            $lastExecution = ChargePlanLog::where('plan_id', $plan->id)
+                ->where('action', 'executed')
+                ->orderBy('created_at', 'desc')
+                ->first();
+
+            if ($lastExecution) {
+                $lastExecutionTime = Carbon::parse($lastExecution->created_at);
+                $now = Carbon::now();
+
+                // 如果最后执行时间在5分钟内，跳过该计划
+                if ($now->diffInMinutes($lastExecutionTime) <= 5) {
+                    Log::channel('gift_card_exchange')->info("计划 {$plan->id} 最后执行时间在5分钟内");
+                    return false;
+                }
+
+                // 计算当前属于第几日
+                $firstExecution = ChargePlanLog::where('plan_id', $plan->id)
+                    ->orderBy('created_at', 'asc')
+                    ->first();
+
+                if ($firstExecution) {
+                    $firstExecutionTime = Carbon::parse($firstExecution->created_at);
+                    $currentDay = $now->diffInDays($firstExecutionTime) + 1;
+
+                    // 获取当前日的计划项
+                    $currentDayItem = ChargePlanItem::where('plan_id', $plan->id)
+                        ->where('day', $currentDay)
+                        ->first();
+
+                    if ($currentDayItem) {
+                        // 检查是否超出当日可兑换余额
+                        $executedAmount = ChargePlanLog::where('plan_id', $plan->id)
+                            ->where('created_at', '>=', $firstExecutionTime->copy()->addDays($currentDay - 1)->startOfDay())
+                            ->where('created_at', '<=', $firstExecutionTime->copy()->addDays($currentDay - 1)->endOfDay())
+                            ->sum('amount');
+
+                        $remainingDayAmount = $currentDayItem->max_amount - $executedAmount;
+                        if ($this->giftCardAmount > $remainingDayAmount) {
+                            Log::channel('gift_card_exchange')->info("计划 {$plan->id} 第 {$currentDay} 天礼品卡金额 {$this->giftCardAmount} 超出当日剩余额度 {$remainingDayAmount}");
+                            return false;
+                        }
+                    } else {
+                        Log::channel('gift_card_exchange')->info("计划 {$plan->id} 第 {$currentDay} 天没有对应的计划项");
+                        return false;
+                    }
+                }
+            }
+
+            Log::channel('gift_card_exchange')->info("计划 {$plan->id} 通过所有验证");
+            return true;
+        } catch (\Exception $e) {
+            Log::channel('gift_card_exchange')->error("验证计划 {$plan->id} 时发生错误: " . $e->getMessage());
+            return false;
+        }
     }
 
     /**
@@ -367,29 +574,19 @@ class GiftCardExchangeService
      * @param int $cardType
      * @param float $cardBalance 卡余额
      * @return ChargePlan|null
+     * @throws Exception
      */
     public function selectEligiblePlan(string $countryCode, int $cardType, float $cardBalance = 0): ?ChargePlan
     {
         try {
             Log::channel('gift_card_exchange')->info("选择计划, 国家: {$countryCode}, 卡类型: {$cardType}, 卡余额: {$cardBalance}");
-
-            // 获取状态为处理中的相关国家计划
-            $query = ChargePlan::where('status','processing')
-                ->where('country', $countryCode);
-
-            // 可以根据卡类型进行进一步筛选，例如根据优先级或组
-            if ($cardType == 1) {
-                // 例如卡类型1优先选择高优先级的计划
-                $query->orderBy('priority', 'desc');
-            } else {
-                // 默认按创建时间排序
-                $query->orderBy('created_at', 'asc');
-            }
-
+            $this->giftCardAmount = $cardBalance;
             // 获取所有可能的计划
-            $plans = $query->get();
+            $plans = $this->getProcessingPlans($countryCode, $cardType);
 
             // 过滤出符合执行时间要求的计划
+            $plan = $this->filterPlan($plans);
+            var_dump($plan);exit;
             $now = Carbon::now();
             $eligiblePlans = [];
 
@@ -432,7 +629,6 @@ class GiftCardExchangeService
 
                 // 检查账号余额上限
                 $checkResult = $this->checkAccountBalanceLimit($plan->account, $convertedAmount);
-                var_dump($checkResult);exit;
                 if ($checkResult['success']) {
                     // 该账号可以接收此次兑换
                     return $plan;
@@ -464,7 +660,7 @@ class GiftCardExchangeService
 
             // 如果所有符合条件的计划都达到了额度上限，且没有找到替代账号，返回null
             return null;
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error('选择计划失败: ' . $e->getMessage());
             throw $e;
         }
@@ -515,7 +711,7 @@ class GiftCardExchangeService
                     'amount' => $amount
                 ];
             }
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error("检查账号 {$account} 余额上限失败: " . $e->getMessage());
             return [
                 'success' => false,
@@ -560,7 +756,7 @@ class GiftCardExchangeService
                 ->first();
 
             return $alternativeAccount;
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error("获取替代账号失败: " . $e->getMessage());
             return null;
         }
@@ -573,6 +769,7 @@ class GiftCardExchangeService
      * @param string $cardNumber
      * @param array $cardInfo
      * @return array
+     * @throws Exception
      */
     public function executeExchange(ChargePlan $plan, string $cardNumber, array $cardInfo): array
     {
@@ -590,7 +787,7 @@ class GiftCardExchangeService
                 ->first();
 
             if (!$item) {
-                throw new \Exception("找不到待执行的项目");
+                throw new Exception("找不到待执行的项目");
             }
 
             // 标记为处理中
@@ -610,7 +807,7 @@ class GiftCardExchangeService
             // 创建兑换任务
             $redemptionTask = $this->createRedemptionTask($redemptionData, config('gift_card.redemption.interval', 6));
             if ($redemptionTask['code'] !== 0) {
-                throw new \Exception('创建兑换任务失败: ' . ($redemptionTask['msg'] ?? '未知错误'));
+                throw new Exception('创建兑换任务失败: ' . ($redemptionTask['msg'] ?? '未知错误'));
             }
 
             $taskId = $redemptionTask['data']['task_id'];
@@ -619,13 +816,13 @@ class GiftCardExchangeService
             // 等待任务完成
             $result = $this->waitForRedemptionTaskComplete($taskId);
             if (!$result) {
-                throw new \Exception('兑换任务执行超时或失败');
+                throw new Exception('兑换任务执行超时或失败');
             }
 
             // 解析兑换结果
             $taskResult = $this->getRedemptionResult($taskId, $plan->account, $cardNumber);
             if (!$taskResult) {
-                throw new \Exception('无法获取兑换结果');
+                throw new Exception('无法获取兑换结果');
             }
 
             // 判断兑换是否成功
@@ -678,7 +875,7 @@ class GiftCardExchangeService
                 'message' => $taskResult['msg'] ?? '',
                 'task_id' => $taskId
             ];
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             DB::rollBack();
             Log::channel('gift_card_exchange')->error('执行兑换失败: ' . $e->getMessage());
             throw $e;
@@ -816,7 +1013,7 @@ class GiftCardExchangeService
                 'original_currency' => $rateConfig['original_currency'] ?? 'USD',
                 'target_currency' => $rateConfig['target_currency'] ?? 'CNY'
             ];
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error('计算汇率失败: ' . $e->getMessage());
             throw $e;
         }
@@ -897,7 +1094,7 @@ class GiftCardExchangeService
             }
 
             return $record->toArray();
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error('记录兑换信息失败: ' . $e->getMessage());
             throw $e;
         }
@@ -929,7 +1126,7 @@ class GiftCardExchangeService
                 'sync_id' => $mockResponse['sync_id'],
                 'message' => $mockResponse['message']
             ];
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error('同步数据失败: ' . $e->getMessage());
             throw $e;
         }
@@ -984,7 +1181,7 @@ class GiftCardExchangeService
                 'message' => '登录任务已创建，账号将在后台登录',
                 'data' => $loginTask['data']
             ];
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error("确保账号 {$account} 登录失败: " . $e->getMessage());
             return [
                 'success' => false,
@@ -1042,7 +1239,7 @@ class GiftCardExchangeService
                     'task_id' => $taskId
                 ]
             ];
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error('创建登录任务异常: ' . $e->getMessage());
             return [
                 'success' => false,
@@ -1090,7 +1287,7 @@ class GiftCardExchangeService
                 'message' => 'ok',
                 'data' => $result['data']
             ];
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error('查询登录任务状态异常: ' . $e->getMessage());
             return [
                 'success' => false,
@@ -1126,7 +1323,7 @@ class GiftCardExchangeService
                 'message' => $result['msg'] ?? '',
                 'data' => $result['data'] ?? null
             ];
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error('删除用户登录异常: ' . $e->getMessage());
             return [
                 'success' => false,

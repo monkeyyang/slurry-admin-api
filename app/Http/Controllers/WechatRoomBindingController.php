@@ -22,7 +22,7 @@ class WechatRoomBindingController extends Controller
     {
         try {
             $data = $this->wechatRoomBindingService->getBindingStatus();
-            
+
             return $this->jsonOk($data);
         } catch (\Exception $e) {
             Log::error('Failed to get wechat room binding status: ' . $e->getMessage());
@@ -44,7 +44,7 @@ class WechatRoomBindingController extends Controller
             ]);
 
             $settings = $this->wechatRoomBindingService->updateBindingStatus($data);
-            
+
             return $this->jsonOk($settings->toApiArray());
         } catch (\Exception $e) {
             Log::error('Failed to update wechat room binding status: ' . $e->getMessage());
@@ -58,9 +58,9 @@ class WechatRoomBindingController extends Controller
     public function getWechatRooms(Request $request)
     {
         try {
-            $params = $request->only(['page', 'pageSize', 'search']);
+            $params = $request->only(['page', 'pageSize', 'keyword']);
             $data = $this->wechatRoomBindingService->getWechatRooms($params);
-            
+
             return $this->jsonOk($data);
         } catch (\Exception $e) {
             Log::error('Failed to get wechat rooms: ' . $e->getMessage());
@@ -79,7 +79,7 @@ class WechatRoomBindingController extends Controller
             ]);
 
             $binding = $this->wechatRoomBindingService->bindPlanToRoom($planId, $data['roomId']);
-            
+
             return $this->jsonOk($binding->toApiArray());
         } catch (\Exception $e) {
             Log::error('Failed to bind plan to wechat room: ' . $e->getMessage());
@@ -94,7 +94,7 @@ class WechatRoomBindingController extends Controller
     {
         try {
             $result = $this->wechatRoomBindingService->unbindPlanFromRoom($planId);
-            
+
             return $this->jsonOk(['success' => $result]);
         } catch (\Exception $e) {
             Log::error('Failed to unbind plan from wechat room: ' . $e->getMessage());
@@ -115,10 +115,10 @@ class WechatRoomBindingController extends Controller
             ]);
 
             $result = $this->wechatRoomBindingService->batchBindPlansToRoom(
-                $data['roomId'], 
+                $data['roomId'],
                 $data['planIds']
             );
-            
+
             return $this->jsonOk($result);
         } catch (\Exception $e) {
             Log::error('Failed to batch bind plans to wechat room: ' . $e->getMessage());
@@ -138,7 +138,7 @@ class WechatRoomBindingController extends Controller
             ]);
 
             $result = $this->wechatRoomBindingService->batchUnbindPlansFromRoom($data['planIds']);
-            
+
             return $this->jsonOk($result);
         } catch (\Exception $e) {
             Log::error('Failed to batch unbind plans from wechat room: ' . $e->getMessage());
@@ -154,11 +154,11 @@ class WechatRoomBindingController extends Controller
         try {
             $roomId = $request->query('roomId');
             $data = $this->wechatRoomBindingService->getWechatRoomStats($roomId);
-            
+
             return $this->jsonOk($data);
         } catch (\Exception $e) {
             Log::error('Failed to get wechat room stats: ' . $e->getMessage());
             return $this->jsonError('获取微信群组执行统计失败: ' . $e->getMessage());
         }
     }
-} 
+}

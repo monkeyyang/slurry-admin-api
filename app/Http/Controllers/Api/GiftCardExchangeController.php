@@ -23,7 +23,19 @@ class GiftCardExchangeController extends Controller
     public function test(Request $request)
     {
         try {
-            $message = $request->input('message');
+            // input {"data":{"at_user_list":[],"from_wxid":"wxid_dvxt3biiotfz12","is_pc":0,"msg":"XJL6FNL4XHY5427X+500#擦拭","msgid":"7732359006730393642","room_wxid":"56204186056@chatroom","timestamp":1748189465,"to_wxid":"56204186056@chatroom","wx_type":1},"type":"MT_RECV_TEXT_MSG","client_id":1,"wxid":"wxid_aiv8hxjw87z012"}
+            $roomId = $request->input('room_wxid','');
+            $msgId = $request->input('msgid', '');
+            $wxId = $request->input('from_wxid', '');
+            $message = $request->input('msg', '');
+
+            if(empty($roomId)) {
+                 return response()->json([
+                    'code' => 400,
+                    'message' => '未获取到群聊ID',
+                    'data' => null,
+                ]);
+            }
 
             if (empty($message)) {
                 return response()->json([
@@ -46,6 +58,7 @@ class GiftCardExchangeController extends Controller
             // 处理兑换消息
             $giftCardApiClient = new GiftCardApiClient();
             $giftCardExchangeService = new GiftCardExchangeService($giftCardApiClient);
+            $giftCardExchangeService->setRoomId($roomId);
             $result = $giftCardExchangeService->processExchangeMessage($message);
 
             var_dump($result);exit;

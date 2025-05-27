@@ -15,7 +15,7 @@ class MrRoom extends Model
         'room_id',
         'room_name',
         'member_count',
-        'is_active',
+        'is_del',
         // 根据实际表结构添加其他字段
     ];
 
@@ -50,18 +50,18 @@ class MrRoom extends Model
     public static function getActiveRooms($limit = null, $offset = null)
     {
         $query = self::query();
-        
+
         // 根据实际表结构调整查询条件
-        // $query->where('is_active', 1);
-        
+         $query->where('is_del', 0);
+
         if ($limit) {
             $query->limit($limit);
         }
-        
+
         if ($offset) {
             $query->offset($offset);
         }
-        
+
         return $query->get();
     }
 
@@ -72,4 +72,4 @@ class MrRoom extends Model
     {
         return self::where('room_id', $roomId)->first();
     }
-} 
+}

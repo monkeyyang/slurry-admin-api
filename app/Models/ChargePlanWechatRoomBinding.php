@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
 
 class ChargePlanWechatRoomBinding extends Model
 {
@@ -21,19 +21,19 @@ class ChargePlanWechatRoomBinding extends Model
     ];
 
     /**
-     * 关联充值计划
+     * The charge plan that the binding belongs to
      */
-    public function plan(): BelongsTo
+    public function plan()
     {
         return $this->belongsTo(ChargePlan::class, 'plan_id');
     }
 
     /**
-     * 获取微信群组信息（从moran_ht数据库）
+     * Get the wechat room info from the card database
      */
     public function getWechatRoomInfo()
     {
-        return \DB::connection('mysql_card')
+        return DB::connection('mysql_card')
             ->table('mr_room')
             ->where('room_id', $this->room_id)
             ->first();

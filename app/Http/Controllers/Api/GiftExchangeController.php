@@ -112,7 +112,11 @@ class GiftExchangeController extends Controller
             // Apply pagination
             $page = $request->input('page', 1);
             $pageSize = $request->input('pageSize', 10);
-            $plans = $query->with('items')->paginate($pageSize, ['*'], 'page', $page);
+            
+            // 加载关联数据
+            $query->with(['items', 'wechatRoomBinding']);
+            
+            $plans = $query->paginate($pageSize, ['*'], 'page', $page);
             
             return response()->json([
                 'code' => 0,
@@ -125,7 +129,7 @@ class GiftExchangeController extends Controller
                 ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Failed to get charge plans: ' . $e->getMessage());
+            Log::error('Failed to get plans: ' . $e->getMessage());
             return response()->json([
                 'code' => 500,
                 'message' => $e->getMessage(),
