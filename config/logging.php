@@ -131,7 +131,7 @@ return [
             'driver' => 'daily',
             'path' => storage_path('logs/wechat.log'),
             'level' => 'debug',
-            'days' => 14,
+            'days' => 7,
         ],
 
         // 礼品卡兑换日志

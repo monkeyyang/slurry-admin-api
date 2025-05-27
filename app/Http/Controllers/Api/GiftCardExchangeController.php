@@ -59,6 +59,7 @@ class GiftCardExchangeController extends Controller
             $giftCardApiClient = new GiftCardApiClient();
             $giftCardExchangeService = new GiftCardExchangeService($giftCardApiClient);
             $giftCardExchangeService->setRoomId($roomId);
+
             $result = $giftCardExchangeService->processExchangeMessage($message);
 
             var_dump($result);exit;

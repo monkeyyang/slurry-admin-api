@@ -29,7 +29,7 @@ class CardQueryService
                 ];
             }
 
-            Log::info("准备查询 " . count($cardsToQuery) . " 张卡密");
+             Log::channel('card_query')->info("准备查询 " . count($cardsToQuery) . " 张卡密");
 
             // 准备请求参数
             $requestParams = [
@@ -47,12 +47,12 @@ class CardQueryService
                 $responseData['request_params'] = $requestParams;
                 if (!empty($responseData['data']['task_id'])) {
                     $taskId = $responseData['data']['task_id'];
-                    Log::info("获取到任务ID: {$taskId}，开始检查任务状态");
+                     Log::channel('card_query')->info("获取到任务ID: {$taskId}，开始检查任务状态");
 
                     $checker = new TaskStatusCheckerService($taskId);
                     $taskResult = $checker->checkUntilCompleted();
                     if(!empty($taskResult)) {
-                        Log::info("任务 {$taskId} 完成，开始处理结果");
+                         Log::channel('card_query')->info("任务 {$taskId} 完成，开始处理结果");
 
                         $processedCount = 0;
                         $validCount = 0;
@@ -89,7 +89,7 @@ class CardQueryService
                                         $numericBalance = preg_replace('/[^0-9.]/', '', $balanceStr);
                                         $balanceValue = (float) $numericBalance;
                                         $isValid = ($balanceValue > 0);
-                                        Log::info("卡密余额解析: 原始值=[{$balanceStr}], 提取数值=[{$numericBalance}], 转换结果=[{$balanceValue}], 有效性=[" . ($isValid ? '有效' : '无效') . "]");
+                                        Log::channel('card_query')->info("卡密余额解析: 原始值=[{$balanceStr}], 提取数值=[{$numericBalance}], 转换结果=[{$balanceValue}], 有效性=[" . ($isValid ? '有效' : '无效') . "]");
                                     }
 
                                     $record->is_valid = $isValid;
@@ -110,7 +110,7 @@ class CardQueryService
                                     }
 
                                     $record->save();
-                                    Log::info("保存卡密记录: ID={$record->id}, 卡号={$record->card_code}, 查询次数={$record->query_count}, 有效性=" . ($record->is_valid ? '有效' : '无效'));
+                                     Log::channel('card_query')->info("保存卡密记录: ID={$record->id}, 卡号={$record->card_code}, 查询次数={$record->query_count}, 有效性=" . ($record->is_valid ? '有效' : '无效'));
                                 }
                             }
                         }
@@ -135,9 +135,9 @@ class CardQueryService
 //                        }
 
                         // 保存到日志方便调试
-                        Log::info("卡密详细信息: " . json_encode($cardDetails));
+                         Log::channel('card_query')->info("卡密详细信息: " . json_encode($cardDetails));
 
-                        Log::info("卡密处理完成，总共处理了 {$processedCount} 条记录，有效: {$validCount}，无效: {$invalidCount}");
+                         Log::channel('card_query')->info("卡密处理完成，总共处理了 {$processedCount} 条记录，有效: {$validCount}，无效: {$invalidCount}");
 
                         return [
                             'code' => 0,
@@ -167,7 +167,7 @@ class CardQueryService
                     'data' => $responseData
                 ];
             } else {
-                Log::error('卡密查询API调用失败: ' . $response->body());
+                 Log::channel('card_query')->error('卡密查询API调用失败: ' . $response->body());
                 return [
                     'code' => 500,
                     'message' => '卡密查询API调用失败',
@@ -176,7 +176,7 @@ class CardQueryService
             }
 
         } catch (\Exception $e) {
-            Log::error('查询卡密失败: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+             Log::channel('card_query')->error('查询卡密失败: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
             return [
                 'code' => 500,
                 'message' => '查询卡密失败: ' . $e->getMessage(),

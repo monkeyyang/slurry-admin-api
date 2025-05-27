@@ -230,7 +230,7 @@ class GiftCardApiClient
 
             return $response->json();
         } catch (\Exception $e) {
-            Log::error('查询兑换任务状态异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('查询兑换任务状态异常: ' . $e->getMessage());
             return [
                 'code' => -1,
                 'msg' => $e->getMessage(),

@@ -16,6 +16,7 @@ use App\Services\Wechat\Commands\QueryCodeCommand;
 use App\Services\Wechat\Commands\QueryCommand;
 use App\Services\Wechat\Commands\RecallCommand;
 use App\Services\Wechat\Common;
+use Illuminate\Support\Facades\Log;
 
 class TextMessageHandler implements MessageHandler
 {
@@ -33,8 +34,10 @@ class TextMessageHandler implements MessageHandler
     private const CMD_IN_CARD = '/收卡';
     private const CMD_CODE = '/代码';
     private const CMD_BILL = '/账单';
+    private const CMD_RECALL = '/撤回';
     private const CMD_BILL_TOTAL = '/账单总额';
     private const CMD_BILL_AMOUNT = '/账单金额';
+    private const CMD_GIFT_CHARGE = '/礼品卡兑换';
 
     /**
      * @var CommandInvoker|null
@@ -50,7 +53,7 @@ class TextMessageHandler implements MessageHandler
     public function handle($input): void
     {
         // 记录日志
-//        Common::log($input['data']['room_wxid'], $input['data']['from_wxid'], $input['data']['msg']);
+        Log::channel('card_query')->info("群聊ID: {$input['data']['room_wxid']}，发送人微信ID：{$input['data']['from_wxid']}，消息内容：{$input['data']['msg']}");
 
         // 预处理消息
         $input['data']['msg'] = $this->preprocessMessage($input['data']['msg']);
@@ -71,6 +74,34 @@ class TextMessageHandler implements MessageHandler
     {
         // 将Cyrillic字符P转换成英文字母P并转为大写
         return str_replace('Р', "P", strtoupper($message));
+    }
+
+    /**
+     * 通用前置验证
+     *  todo 群聊是否开启机器人，消息发送者是否拥有对应权限，消息是否已处理
+     * @return void
+     */
+    private function preValidate()
+    {
+
+    }
+
+    /**
+     * 数据合法性校验
+     *
+     * @return void
+     */
+    private function ensureValid()
+    {
+
+    }
+
+    /**
+     * 加账前校验
+     * @return void
+     */
+    private function checkBeforeAddBill() {
+
     }
 
     /**
@@ -108,6 +139,7 @@ class TextMessageHandler implements MessageHandler
             self::CMD_INTEGRATE => new IntegrateCommand(),
             self::CMD_CLEAR => new ClearCommand(),
             self::CMD_ADD => new AddManagerCommand(),
+            self::CMD_GIFT_CHARGE => new BillCommand()
         ];
 
         foreach ($commandMap as $command => $handler) {
@@ -132,6 +164,13 @@ class TextMessageHandler implements MessageHandler
         // 检查是否为添加信息
         if (str_starts_with($input['data']['msg'], '/添加')) {
             return self::CMD_ADD;
+        }
+
+        // 检查是否为礼品卡兑换消息
+        $chargeData = $this->extractChargeData($input['data']['msg']);
+        if(!empty($chargeData)) {
+            $input['data']['extractData'] = $chargeData;
+            return self::CMD_GIFT_CHARGE;
         }
 
         // 检查是否为账单信息
@@ -162,15 +201,43 @@ class TextMessageHandler implements MessageHandler
             self::CMD_CLEAR_ALT,
             self::CMD_ADD,
             self::CMD_OUT_CARD,
-            self::CMD_IN_CARD
+            self::CMD_IN_CARD,
+            self::CMD_RECALL
         ];
 
         return in_array($msg, $directCommands);
     }
 
     /**
+     * 提取礼品卡兑换数据
+     *
+     * @param string $message
+     * @return array|false
+     */
+    private function extractChargeData(string $message): bool|array
+    {
+        // 清理消息内容
+        $cleanMsg = str_replace('&nbsp;', ' ', htmlentities(trim($message)));
+
+        // 定义礼品卡兑换消息的正则匹配模式
+        // 匹配格式: X开头的16位字母数字组合 + 空格 + /1 或 /0
+        $pattern = '/^X[A-Z0-9]{15}\s+\/([01])$/';
+
+        if (preg_match($pattern, $cleanMsg, $matches)) {
+            return [
+                'mode' => 'gift_card_redemption',
+                'card_code' => substr($cleanMsg, 0, 16), // 提取16位卡号
+                'type' => $matches[1], // 提取类型 (0 或 1)
+                'original_message' => $message
+            ];
+        }
+
+        return false;
+    }
+
+    /**
      * 提取账单数据
-     * 
+     *
      * 判断消息是否为加账信息，并提取相关数据
      *
      * @param string $message 消息内容
@@ -180,19 +247,19 @@ class TextMessageHandler implements MessageHandler
     {
         // 清理消息内容
         $cleanMsg = str_replace('&nbsp;', ' ', htmlentities(trim($message)));
-        
+
         // 定义加账信息的正则匹配模式
         $patterns = [
             // 模式1: "加账 xxxx 100" 或 "添加 xxxx 100" 或 "代加 xxxx 100"
             '/^(加账|添加|代加)\s+([^\s]+)\s+(\d+(\.\d+)?)$/i',
-            
+
             // 模式2: "给xxxx加100" 或 "给xxxx添加100"
             '/^给\s*([^\s]+)\s*(加|添加)\s*(\d+(\.\d+)?)$/i',
-            
+
             // 模式3: "xxxx+100" 或 "xxxx 加 100"
             '/^([^\s\+]+)\s*[\+加]\s*(\d+(\.\d+)?)$/i',
         ];
-        
+
         // 遍历匹配模式
         foreach ($patterns as $pattern) {
             if (preg_match($pattern, $cleanMsg, $matches)) {
@@ -201,7 +268,7 @@ class TextMessageHandler implements MessageHandler
                     // 提取账户和金额
                     $account = isset($matches[2]) ? $matches[2] : $matches[1];
                     $amount = isset($matches[3]) ? floatval($matches[3]) : floatval($matches[2]);
-                    
+
                     // 返回结构化数据
                     return [
                         'type' => 'add_balance',
@@ -212,7 +279,7 @@ class TextMessageHandler implements MessageHandler
                 }
             }
         }
-        
+
         // 如果还需要其他方式识别加账格式，可以在这里添加处理逻辑
         // 例如检查是否包含特定关键词组合等
         $keywords = ['加钱', '增加余额', '充值'];
@@ -225,7 +292,7 @@ class TextMessageHandler implements MessageHandler
                     $accountPart = trim($parts[0]);
                     $words = preg_split('/\s+/', $accountPart);
                     $account = end($words);
-                    
+
                     return [
                         'type' => 'add_balance',
                         'account' => $account,
@@ -236,7 +303,7 @@ class TextMessageHandler implements MessageHandler
                 }
             }
         }
-        
+
         // 如果不匹配任何加账模式，返回false
         return false;
     }
