@@ -4,6 +4,7 @@ use App\Http\Controllers\AdminMenuController;
 use App\Http\Controllers\AdminRoleController;
 use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\Api\GiftCardExchangeController;
+use App\Http\Controllers\Api\AppleAccountController;
 use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\CountriesController;
 use App\Http\Controllers\GiftCardController;
@@ -227,6 +228,9 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::get('/templates', 'App\Http\Controllers\Api\ItunesTradeController@getTemplates');
         Route::post('/templates', 'App\Http\Controllers\Api\ItunesTradeController@saveTemplate');
         Route::post('/templates/{id}/apply', 'App\Http\Controllers\Api\ItunesTradeController@applyTemplate');
+
+        // 群组接口
+        Route::get('/groups', 'App\Http\Controllers\Api\MrRoomGroupController@getGroupsList');
     });
 
     // 礼品卡兑换路由组
@@ -286,6 +290,26 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('/wechat-room-binding/batch-unbind', 'App\Http\Controllers\WechatRoomBindingController@batchUnbindPlansFromRoom');
         Route::get('/wechat-room-binding/stats', 'App\Http\Controllers\WechatRoomBindingController@getWechatRoomStats');
     });
+
+    // Apple账户管理路由
+    Route::prefix('apple-account')->group(function () {
+        // 批量查询Apple账户信息（上传txt文件）
+        Route::post('/batch-query', [AppleAccountController::class, 'batchQuery']);
+        // 单个账户查询
+        Route::get('/get', [AppleAccountController::class, 'getAccount']);
+    });
+});
+
+// 礼品卡兑换测试路由
+Route::prefix('test/gift-card')->group(function () {
+    Route::post('exchange', [App\Http\Controllers\Test\GiftCardExchangeTestController::class, 'testExchange']);
+    Route::get('plan', [App\Http\Controllers\Test\GiftCardExchangeTestController::class, 'testPlan']);
+});
+
+// Apple账户测试路由
+Route::prefix('test/apple-account')->group(function () {
+    Route::get('batch-query', [App\Http\Controllers\Test\AppleAccountTestController::class, 'testBatchQuery']);
+    Route::get('sample', [App\Http\Controllers\Test\AppleAccountTestController::class, 'getSampleAccounts']);
 });
 
 

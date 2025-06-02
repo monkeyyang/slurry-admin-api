@@ -31,10 +31,10 @@ class GiftExchangeService
     {
         // 账号和密码可能以空格、制表符或其他分隔符连接
         // 例如: "gordony1982@icloud.com\tzIxHkNvAV0" 或 "gordony1982@icloud.com zIxHkNvAV0"
-        
+
         // 尝试不同的分隔符
         $separators = ['\t', ' ', '|', ','];
-        
+
         foreach ($separators as $separator) {
             if ($separator === '\t') {
                 // 处理制表符
@@ -42,7 +42,7 @@ class GiftExchangeService
             } else {
                 $parts = explode($separator, $accountString);
             }
-            
+
             if (count($parts) >= 2) {
                 return [
                     'account' => trim($parts[0]),
@@ -50,7 +50,7 @@ class GiftExchangeService
                 ];
             }
         }
-        
+
         // 如果没有找到分隔符，返回原始字符串作为账号，密码为空
         return [
             'account' => trim($accountString),
@@ -64,14 +64,14 @@ class GiftExchangeService
      * @param array $data
      * @return ChargePlan
      */
-    public function createPlan(array $data)
+    public function createPlan(array $data): ChargePlan
     {
         try {
             DB::beginTransaction();
-            
+
             // 解析账号和密码
             $accountData = $this->parseAccountAndPassword($data['account']);
-            
+
             $plan = ChargePlan::create([
                 'account' => $accountData['account'],
                 'password' => $accountData['password'],
@@ -82,31 +82,22 @@ class GiftExchangeService
                 'float_amount' => $data['floatAmount'],
                 'interval_hours' => $data['intervalHours'],
                 'start_time' => $data['startTime'],
-                'status' => $data['status'] ?? 'draft',
+                'status' => $data['status'] ?? 'processing',
                 'charged_amount' => 0,
                 'group_id' => $data['groupId'] ?? null,
                 'priority' => $data['priority'] ?? 0,
             ]);
-            
+
             // Create plan items - use custom items if provided, otherwise generate automatically
-            if (isset($data['items']) && is_array($data['items']) && !empty($data['items'])) {
-                $this->createCustomItems($plan, $data['items']);
-            } else {
-                $plan->generateItems();
-            }
-            
-            // 尝试自动分配微信群组
-            if ($this->wechatRoomBindingService) {
-                try {
-                    $this->wechatRoomBindingService->autoAssignPlanToRoom($plan);
-                } catch (\Exception $e) {
-                    // 自动分配失败不影响计划创建，只记录日志
-                    Log::warning('Failed to auto assign plan to wechat room: ' . $e->getMessage());
-                }
-            }
-            
+            $plan->generateItems();
+//            if (is_array($data['items']) && !empty($data['items'])) {
+//                $this->createCustomItems($plan, $data['items']);
+//            } else {
+//                $plan->generateItems();
+//            }
+
             DB::commit();
-            
+
             return $plan;
         } catch (\Exception $e) {
             DB::rollBack();
@@ -127,13 +118,13 @@ class GiftExchangeService
         foreach ($items as $itemData) {
             // Parse time from the provided time string
             $timeString = $itemData['time'] ?? '00:00:00';
-            
+
             // If time contains date, extract only the time part
             if (strpos($timeString, ' ') !== false) {
                 $timeParts = explode(' ', $timeString);
                 $timeString = end($timeParts); // Get the last part (time)
             }
-            
+
             // If time is still in datetime format, parse it
             if (strlen($timeString) > 8) {
                 try {
@@ -142,7 +133,7 @@ class GiftExchangeService
                     $timeString = '00:00:00'; // Fallback
                 }
             }
-            
+
             ChargePlanItem::create([
                 'plan_id' => $plan->id,
                 'day' => $itemData['day'],
@@ -162,12 +153,12 @@ class GiftExchangeService
      * @param array $data
      * @return array
      */
-    public function batchCreatePlans(array $data)
+    public function batchCreatePlans(array $data): array
     {
         $successCount = 0;
         $failCount = 0;
         $plans = [];
-        
+
         foreach ($data['accounts'] as $account) {
             try {
                 $plan = $this->createPlan([
@@ -180,7 +171,7 @@ class GiftExchangeService
                     'intervalHours' => $data['intervalHours'],
                     'startTime' => $data['startTime'],
                 ]);
-                
+
                 $successCount++;
                 $plans[] = $plan->toApiArray();
             } catch (\Exception $e) {
@@ -188,7 +179,7 @@ class GiftExchangeService
                 $failCount++;
             }
         }
-        
+
         return [
             'successCount' => $successCount,
             'failCount' => $failCount,
@@ -207,15 +198,15 @@ class GiftExchangeService
     {
         try {
             DB::beginTransaction();
-            
+
             // Only allow updates for draft plans
             if ($plan->status !== 'draft') {
                 throw new \Exception('Only draft plans can be updated');
             }
-            
+
             // 解析账号和密码
             $accountData = $this->parseAccountAndPassword($data['account']);
-            
+
             $plan->update([
                 'account' => $accountData['account'],
                 'password' => $accountData['password'],
@@ -230,19 +221,19 @@ class GiftExchangeService
                 'group_id' => $data['groupId'] ?? $plan->group_id,
                 'priority' => $data['priority'] ?? $plan->priority,
             ]);
-            
+
             // Remove existing items and create new ones
             $plan->items()->delete();
-            
+
             // Create plan items - use custom items if provided, otherwise generate automatically
             if (isset($data['items']) && is_array($data['items']) && !empty($data['items'])) {
                 $this->createCustomItems($plan, $data['items']);
             } else {
                 $plan->generateItems();
             }
-            
+
             DB::commit();
-            
+
             return $plan;
         } catch (\Exception $e) {
             DB::rollBack();
@@ -267,14 +258,14 @@ class GiftExchangeService
             'completed' => [],
             'cancelled' => [],
         ];
-        
+
         if (!in_array($status, $validTransitions[$plan->status] ?? [])) {
             throw new \Exception("Invalid status transition from {$plan->status} to {$status}");
         }
-        
+
         $plan->status = $status;
         $plan->save();
-        
+
         // Create log entry
         ChargePlanLog::create([
             'plan_id' => $plan->id,
@@ -283,7 +274,7 @@ class GiftExchangeService
             'status' => 'success',
             'details' => 'Status updated manually',
         ]);
-        
+
         return $plan;
     }
 
@@ -300,11 +291,11 @@ class GiftExchangeService
             if (!in_array($plan->status, ['draft', 'paused'])) {
                 throw new \Exception("Plan cannot be executed in current status: {$plan->status}");
             }
-            
+
             // Update plan status
             $plan->status = 'processing';
             $plan->save();
-            
+
             // Create log entry
             ChargePlanLog::create([
                 'plan_id' => $plan->id,
@@ -313,10 +304,10 @@ class GiftExchangeService
                 'status' => 'success',
                 'details' => 'Execution triggered manually',
             ]);
-            
+
             // In a real system, this would trigger a background job for actual execution
             // For now, we'll just simulate starting the execution
-            
+
             return $plan;
         } catch (\Exception $e) {
             Log::error('Failed to execute charge plan: ' . $e->getMessage());
@@ -413,7 +404,7 @@ class GiftExchangeService
         $successCount = 0;
         $failCount = 0;
         $plans = [];
-        
+
         foreach ($accounts as $account) {
             try {
                 $plan = ChargePlan::create([
@@ -428,7 +419,7 @@ class GiftExchangeService
                     'status' => 'draft',
                     'charged_amount' => 0,
                 ]);
-                
+
                 // Create items based on template items
                 foreach ($template->items as $itemData) {
                     ChargePlanItem::create([
@@ -442,7 +433,7 @@ class GiftExchangeService
                         'status' => 'pending',
                     ]);
                 }
-                
+
                 $successCount++;
                 $plans[] = $plan->toApiArray();
             } catch (\Exception $e) {
@@ -450,7 +441,7 @@ class GiftExchangeService
                 $failCount++;
             }
         }
-        
+
         return [
             'successCount' => $successCount,
             'failCount' => $failCount,
@@ -477,7 +468,7 @@ class GiftExchangeService
                 'auto_switch' => $data['autoSwitch'] ?? false,
                 'switch_threshold' => $data['switchThreshold'] ?? null,
             ]);
-            
+
             return $group;
         } catch (\Exception $e) {
             Log::error('Failed to create account group: ' . $e->getMessage());
@@ -496,18 +487,18 @@ class GiftExchangeService
     {
         try {
             DB::beginTransaction();
-            
+
             // Update all plans
             ChargePlan::whereIn('id', $planIds)
                 ->where('status', '!=', 'completed')
                 ->where('status', '!=', 'cancelled')
                 ->update(['group_id' => $group->id]);
-            
+
             // Update account count
             $group->updateAccountCount();
-            
+
             DB::commit();
-            
+
             return $group;
         } catch (\Exception $e) {
             DB::rollBack();
@@ -527,17 +518,17 @@ class GiftExchangeService
     {
         try {
             DB::beginTransaction();
-            
+
             // Update all plans
             ChargePlan::whereIn('id', $planIds)
                 ->where('group_id', $group->id)
                 ->update(['group_id' => null]);
-            
+
             // Update account count
             $group->updateAccountCount();
-            
+
             DB::commit();
-            
+
             return $group;
         } catch (\Exception $e) {
             DB::rollBack();
@@ -557,15 +548,15 @@ class GiftExchangeService
     {
         try {
             DB::beginTransaction();
-            
+
             foreach ($planPriorities as $planPriority) {
                 ChargePlan::where('id', $planPriority['planId'])
                     ->where('group_id', $group->id)
                     ->update(['priority' => $planPriority['priority']]);
             }
-            
+
             DB::commit();
-            
+
             return $group;
         } catch (\Exception $e) {
             DB::rollBack();
@@ -584,17 +575,17 @@ class GiftExchangeService
     {
         try {
             DB::beginTransaction();
-            
+
             $group->status = 'active';
             $group->save();
-            
+
             // Update all plans in the group
             ChargePlan::where('group_id', $group->id)
                 ->whereIn('status', ['draft', 'paused'])
                 ->update(['status' => 'processing']);
-            
+
             DB::commit();
-            
+
             return $group;
         } catch (\Exception $e) {
             DB::rollBack();
@@ -613,17 +604,17 @@ class GiftExchangeService
     {
         try {
             DB::beginTransaction();
-            
+
             $group->status = 'paused';
             $group->save();
-            
+
             // Update all processing plans in the group
             ChargePlan::where('group_id', $group->id)
                 ->where('status', 'processing')
                 ->update(['status' => 'paused']);
-            
+
             DB::commit();
-            
+
             return $group;
         } catch (\Exception $e) {
             DB::rollBack();
@@ -640,10 +631,10 @@ class GiftExchangeService
     public function getAutoExecutionStatus()
     {
         $settings = AutoExecutionSetting::getSettings();
-        
+
         $activeGroups = AccountGroup::where('status', 'active')->count();
         $activePlans = ChargePlan::where('status', 'processing')->count();
-        
+
         return [
             'isRunning' => $settings->enabled,
             'activeGroups' => $activeGroups,
@@ -663,19 +654,19 @@ class GiftExchangeService
     {
         try {
             $settings = AutoExecutionSetting::getSettings();
-            
+
             $settings->update([
                 'enabled' => $data['enabled'],
                 'execution_interval' => $data['executionInterval'],
                 'max_concurrent_plans' => $data['maxConcurrentPlans'],
                 'log_level' => $data['logLevel'],
             ]);
-            
+
             if ($settings->enabled) {
                 $settings->next_execution_time = now()->addMinutes($settings->execution_interval);
                 $settings->save();
             }
-            
+
             return $settings;
         } catch (\Exception $e) {
             Log::error('Failed to update auto execution settings: ' . $e->getMessage());

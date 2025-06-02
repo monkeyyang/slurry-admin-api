@@ -157,7 +157,7 @@ class ProcessCardQueryJob implements ShouldQueue
             $firstIntervalMinutes = $rule->first_interval;
             $cutoffTime = $now->copy()->subMinutes($firstIntervalMinutes);
 
-            Log::channel('card_query')->info("开始第一阶段查询，查询截止时间: {$cutoffTime->toDateTimeString()}，间隔: {$firstIntervalMinutes} 分钟");
+            Log::channel('card_query')->info("开始第一阶段查询new，查询截止时间: {$cutoffTime->toDateTimeString()}，间隔: {$firstIntervalMinutes} 分钟");
 
             // 查找符合条件的记录
             $records = CardQueryRecord::where('query_count', 0)
@@ -185,9 +185,13 @@ class ProcessCardQueryJob implements ShouldQueue
             // 执行查询
             $result = $cardQueryService->queryCards($cardsToQuery);
             Log::channel('card_query')->info('执行结果：', $result);
-            if ($result['code'] === 0 && !empty($result['cards'])) {
-                $this->sendMsgToWechat($result['cards']);
-                Log::channel('card_query')->info("第一阶段查询成功，处理结果");
+            if ($result['code'] === 0) {
+                if(!empty($result['cards'])) {
+                    $this->sendMsgToWechat($result['cards']);
+                    Log::channel('card_query')->info("第一阶段查询成功，处理结果");
+                } else {
+                    Log::channel('card_query')->info("第一阶段查询成功，不存在已赎回卡");
+                }
             } else {
                 Log::channel('card_query')->error("第一阶段查询失败: " . ($result['message'] ?? '未知错误'));
             }

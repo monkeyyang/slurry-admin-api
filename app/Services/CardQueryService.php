@@ -37,8 +37,8 @@ class CardQueryService
             ];
 
             // 调用外部API查询卡密
-            $response = Http::post('http://47.76.200.188:8080/api/batch_query/new', $requestParams);
-
+            $response = Http::post('http://172.16.229.189:8080/api/batch_query/new', $requestParams);
+            Log::channel('card_query')->info("请求地址 172.16.229.189");
             // 处理API响应
             if ($response->successful()) {
                 $responseData = $response->json();

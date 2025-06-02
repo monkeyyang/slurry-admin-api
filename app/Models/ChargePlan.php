@@ -102,7 +102,7 @@ class ChargePlan extends Model
     public function toApiArray()
     {
         $wechatRoom = $this->getBoundWechatRoom();
-        
+
         return [
             'id' => (string)$this->id,
             'account' => $this->account,
@@ -141,7 +141,7 @@ class ChargePlan extends Model
     {
         $completedItems = $this->items()->where('status', 'completed')->count();
         $totalItems = $this->items()->count();
-        
+
         if ($completedItems === $totalItems) {
             $this->status = 'completed';
             $this->save();
@@ -152,7 +152,7 @@ class ChargePlan extends Model
     }
 
     /**
-     * Generate plan items based on the plan configuration
+     * 根据计划配置生成计划项
      *
      * @return void
      */
@@ -163,54 +163,62 @@ class ChargePlan extends Model
         $multipleBase = $this->multiple_base;
         $floatAmount = $this->float_amount;
         $days = $this->days;
+
+        // 计算基础天数（总金额/面值倍数）
+        $baseDays = floor($totalAmount / $multipleBase);
         
-        // Calculate item amounts based on multiple base and days
-        $itemAmounts = [];
+        // 计算每天需要完成的基础天数（向下取整）
+        $daysPerDay = floor($baseDays / $days);
+        
+        // 计算每天的基础金额（基础天数 * 面值倍数）
+        $baseAmountPerDay = $daysPerDay * $multipleBase;
+        
+        // 为每一天创建计划项
         $remainingAmount = $totalAmount;
         
         for ($day = 1; $day <= $days; $day++) {
-            // For the last day, use remaining amount
-            if ($day == $days) {
-                $itemAmounts[$day] = $remainingAmount;
-                continue;
-            }
-            
-            // Calculate amount as a multiple of the base amount
-            $multiplier = mt_rand(1, 3); // Random multiplier between 1 and 3
-            $baseAmount = $multipleBase * $multiplier;
-            
-            // Add some float amount within range
-            $randomFloat = mt_rand(-100, 100) / 100 * $floatAmount;
-            $amount = $baseAmount + $randomFloat;
-            
-            // Ensure we don't exceed total amount
-            $amount = min($amount, $remainingAmount * 0.9); // Don't use more than 90% of remaining
-            $amount = max($amount, 0.01); // Ensure positive amount
-            
-            // Round to 2 decimal places
-            $amount = round($amount, 2);
-            
-            $itemAmounts[$day] = $amount;
-            $remainingAmount -= $amount;
-        }
-        
-        // Create items for each day
-        foreach ($itemAmounts as $day => $amount) {
-            // Calculate time based on interval hours
+            // 根据间隔小时数计算时间
             $hourOffset = ($day - 1) * $this->interval_hours;
             $itemDate = $startDate->copy()->addHours($hourOffset);
-            
-            // Create plan item
+
+            // 最后一天使用剩余金额
+            if ($day == $days) {
+                $amount = $remainingAmount;
+            } else {
+                // 使用计算出的基础金额
+                $amount = $baseAmountPerDay;
+                
+                // 添加浮动范围内的随机浮动金额，确保是5的倍数
+                $randomFloat = mt_rand(-100, 100) / 100 * $floatAmount;
+                $randomFloat = round($randomFloat / $multipleBase) * $multipleBase; // 确保是5的倍数
+                $amount += $randomFloat;
+
+                // 确保不超过剩余金额
+                $amount = min($amount, $remainingAmount);
+                $amount = max($amount, $multipleBase); // 确保金额至少是5的倍数
+
+                // 确保是5的倍数
+                $amount = floor($amount / $multipleBase) * $multipleBase;
+            }
+
+            // 更新剩余金额
+            $remainingAmount -= $amount;
+
+            // 计算最小和最大金额（确保是5的倍数）
+            $minAmount = $day == $days ? $amount : floor(($amount - $floatAmount) / $multipleBase) * $multipleBase;
+            $maxAmount = $day == $days ? $amount : ceil(($amount + $floatAmount) / $multipleBase) * $multipleBase;
+
+            // 创建计划项
             ChargePlanItem::create([
                 'plan_id' => $this->id,
                 'day' => $day,
                 'time' => $itemDate->format('H:i:s'),
                 'amount' => $amount,
-                'min_amount' => max(0, $amount - $floatAmount),
-                'max_amount' => $amount + $floatAmount,
-                'description' => "Day $day charge",
+                'min_amount' => max($multipleBase, $minAmount),
+                'max_amount' => $maxAmount,
+                'description' => $day == $days ? "最后一天充值剩余金额" : "第{$day}天充值",
                 'status' => 'pending',
             ]);
         }
     }
-} 
+}

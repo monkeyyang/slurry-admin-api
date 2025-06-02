@@ -64,7 +64,7 @@ class TaskStatusCheckerService
     {
         return Http::timeout(5)
             ->retry(3, 500) // 添加重试机制
-            ->get('http://47.76.200.188:8080/api/batch_query/status', [
+            ->get('http://172.16.229.189:8080/api/batch_query/status', [
                 'task_id' => $this->taskId
             ]);
     }
