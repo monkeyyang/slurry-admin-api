@@ -96,14 +96,78 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
             // 处理兑换消息
             $result = $giftCardExchangeService->processExchangeMessage($this->message);
 
+            // 立即调试结果结构
+            Log::channel('gift_card_exchange')->info("调试：processExchangeMessage返回结果", [
+                'request_id' => $this->requestId,
+                'result_type' => gettype($result),
+                'result_is_array' => is_array($result),
+                'result_keys' => is_array($result) ? array_keys($result) : 'not_array',
+                'success_exists' => isset($result['success']),
+                'success_value' => $result['success'] ?? 'not_set',
+                'data_exists' => isset($result['data']),
+                'data_type' => isset($result['data']) ? gettype($result['data']) : 'not_set',
+                'data_is_array' => isset($result['data']) ? is_array($result['data']) : false,
+                'data_keys' => (isset($result['data']) && is_array($result['data'])) ? array_keys($result['data']) : 'not_array'
+            ]);
+
+            // 如果data存在，记录其内容
+            if (isset($result['data']) && is_array($result['data'])) {
+                Log::channel('gift_card_exchange')->info("调试：data数组内容", [
+                    'request_id' => $this->requestId,
+                    'data_content' => $result['data'],
+                    'status_in_data' => $result['data']['status'] ?? 'not_set',
+                    'amount_in_data' => $result['data']['amount'] ?? 'not_set'
+                ]);
+            }
+
             if ($result['success']) {
                 Log::channel('gift_card_exchange')->info("礼品卡兑换队列任务处理成功", [
                     'request_id' => $this->requestId,
-                    'result' => $result['data']
+                    'result' => $result
                 ]);
-
-                // 加账处理
-                $this->processAccountBilling($result['data']);
+                
+                // 检查兑换是否真正成功（不仅仅是没有异常）
+                $exchangeData = $result['data'] ?? [];
+                $exchangeStatus = $exchangeData['status'] ?? '';
+                $amount = floatval($exchangeData['amount'] ?? 0);
+                
+                // 添加调试日志
+                Log::channel('gift_card_exchange')->info("调试：提取的兑换数据", [
+                    'request_id' => $this->requestId,
+                    'exchangeData' => $exchangeData,
+                    'extractedStatus' => $exchangeStatus,
+                    'extractedAmount' => $amount,
+                    'statusCheck' => $exchangeStatus === 'success',
+                    'amountCheck' => $amount > 0
+                ]);
+                
+                if ($exchangeStatus === 'success' && $amount > 0) {
+                    // 兑换真正成功且有金额，执行加账处理
+                    $this->processAccountBilling($result['data']);
+                    Log::channel('gift_card_exchange')->info("兑换成功，已执行加账处理", [
+                        'request_id' => $this->requestId,
+                        'amount' => $amount
+                    ]);
+                } else {
+                    // 兑换失败或金额为0，不执行加账
+                    Log::channel('gift_card_exchange')->warning("兑换未成功或金额为0，跳过加账处理", [
+                        'request_id' => $this->requestId,
+                        'status' => $exchangeStatus,
+                        'amount' => $amount,
+                        'message' => $exchangeData['msg'] ?? ''
+                    ]);
+                    
+                    // 发送失败消息到微信群
+                    $failMessage = sprintf(
+                        "[叉]兑换失败\n" .
+                        "--------------------------------------\n" .
+                        "卡号：%s\n" .
+                        "失败原因：%s",
+                        $this->extractCardNumber(),
+                        $exchangeData['msg'] ?? '未知原因'
+                    );
+                    send_msg_to_wechat($this->input['room_id'], $failMessage);
+                }
             } else {
                 Log::channel('gift_card_exchange')->error("礼品卡兑换队列任务处理失败1", [
                     'request_id' => $this->requestId,

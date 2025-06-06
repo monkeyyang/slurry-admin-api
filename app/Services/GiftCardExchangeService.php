@@ -1013,7 +1013,7 @@ class GiftCardExchangeService
             ChargePlanLog::create($logData);
 
             return [
-                'success' => true,
+                'success' => $isSuccess,
                 'message' => $result,
                 'data' => $logData ?? []
             ];
