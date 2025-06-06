@@ -14,9 +14,18 @@ class MrRoom extends Model
     protected $fillable = [
         'room_id',
         'room_name',
-        'member_count',
+        'room_avatar',
+        'room_mark',
+        'type',
+        'unsettled', // 待结算金额
+        'status',
+        'open_exchange',
+        'is_integrate',
         'is_del',
-        // 根据实际表结构添加其他字段
+        'version',
+        'remark',
+        'changed_at',
+        'integrate_at'
     ];
 
     /**

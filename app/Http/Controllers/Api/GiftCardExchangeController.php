@@ -28,6 +28,12 @@ class GiftCardExchangeController extends Controller
             $msgId = $request->input('msgid', '');
             $wxId = $request->input('from_wxid', '');
             $message = $request->input('msg', '');
+            Log::channel('gift_card_exchange')->error('获取到兑换消息2：'.json_encode([
+                'room_id' => $roomId,
+                'wxid' => $wxId,
+                'msgid' => $msgId,
+                'msg' => $message
+            ]));
 
             if(empty($roomId)) {
                  return response()->json([
@@ -85,7 +91,25 @@ class GiftCardExchangeController extends Controller
     public function processExchangeMessage(Request $request): JsonResponse
     {
         try {
-            $message = $request->input('message');
+            $roomId = $request->input('room_wxid','');
+            $msgId = $request->input('msgid', '');
+            $wxId = $request->input('from_wxid', '');
+            $message = $request->input('message', '');
+
+            Log::channel('gift_card_exchange')->error('获取到兑换消息1：'.json_encode([
+                'room_id' => $roomId,
+                'wxid' => $wxId,
+                'msgid' => $msgId,
+                'msg' => $message
+            ]));
+
+            if(empty($roomId)) {
+                 return response()->json([
+                    'code' => 400,
+                    'message' => '未获取到群聊ID',
+                    'data' => null,
+                ]);
+            }
 
             if (empty($message)) {
                 return response()->json([
@@ -116,7 +140,12 @@ class GiftCardExchangeController extends Controller
             ]);
 
             // 将任务加入队列
-            ProcessGiftCardExchangeJob::dispatch($message, $requestId);
+            ProcessGiftCardExchangeJob::dispatch([
+                'room_id' => $roomId,
+                'wxid' => $wxId,
+                'msgid' => $msgId,
+                'msg' => $message
+            ], $requestId);
 
             return response()->json([
                 'code' => 0,

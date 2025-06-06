@@ -141,9 +141,9 @@ class GiftCardExchangeService
      * 处理兑换消息
      *
      * @param string $message 消息内容 (例如 "XQPD5D7KJ8TGZT4L /1")
-     * @return bool|array
+     * @return array
      */
-    public function processExchangeMessage(string $message): bool|array
+    public function processExchangeMessage(string $message): array
     {
         Log::channel('gift_card_exchange')->info('---------------------开始处理兑换--------------------');
         try {
@@ -201,8 +201,12 @@ class GiftCardExchangeService
                 $msg = "兑换成功\n---------------\n";
                 $msg .= $exchangeResult['message'];
                 Log::channel('gift_card_exchange')->info('兑换结果：'. $msg);
-                send_msg_to_wechat('44769140035@chatroom', $msg);
-
+//                send_msg_to_wechat('44769140035@chatroom', $msg);
+                return [
+                    'success' => true,
+                    'message' => '兑换处理成功',
+                    'data' => $exchangeResult
+                ];
             } catch (Exception $e) {
                 // 回滚事务
                 DB::rollBack();
@@ -210,14 +214,12 @@ class GiftCardExchangeService
             }
         } catch (Exception $e) {
             Log::channel('gift_card_exchange')->error('兑换处理失败: ' . $e->getMessage());
-//            send_msg_to_wechat('44769140035@chatroom', $e->getMessage());
             return [
                 'success' => false,
                 'message' => $e->getMessage(),
                 'data' => null
             ];
         }
-        return true;
     }
 
     /**
@@ -268,7 +270,7 @@ class GiftCardExchangeService
             if (!$result) {
                 throw new Exception('查卡任务执行超时或失败');
             }
-
+            Log::channel('gift_card_exchange')->info('查询原始结果：'. json_encode($result));
             // 解析查卡结果
             $taskResult = $this->parseResult($result, $cardNumber);
             if (!$taskResult) {
@@ -535,57 +537,40 @@ class GiftCardExchangeService
                     return null;
                 }
 
-                // 先找出所有符合条件的计划
-                $validPlans = $plans->filter(function ($plan) {
-                    return $this->isPlanValid($plan);
-                });
-
-                if ($validPlans->isEmpty()) {
-                    Log::channel('gift_card_exchange')->info("未找到符合条件的计划");
-                    return null;
-                }
-
                 // 检查群组是否已绑定计划
                 $roomBinds = ChargePlanWechatRoomBinding::where('room_id', $this->roomId)->get();
 
-                if ($roomBinds->isEmpty()) {
-                    // 未绑定计划到群组，自动绑定第一个符合条件的计划
-                    $plan = $validPlans->first();
-                    try {
-                        DB::beginTransaction();
-                        $wechatRoomBindingService->bindPlanToRoom($plan->id, $this->roomId);
-                        DB::commit();
-                        Log::channel('gift_card_exchange')->info("自动绑定计划 {$plan->id} 到群组 {$this->roomId}");
-                        return $plan;
-                    } catch (\Exception $e) {
-                        DB::rollBack();
-                        Log::channel('gift_card_exchange')->error("自动绑定计划失败: " . $e->getMessage());
-                        return null;
+                if ($roomBinds->isNotEmpty()) {
+                    // 已绑定计划，检查绑定的计划是否有效且在计划列表中
+                    foreach ($roomBinds as $binding) {
+                        $plan = $plans->firstWhere('id', $binding->plan_id);
+                        if ($plan && $this->isPlanValid($plan)) {
+                            Log::channel('gift_card_exchange')->info("使用群组 {$this->roomId} 已绑定的计划 {$plan->id}");
+                            return $plan;
+                        }
                     }
                 }
 
-                // 已绑定计划，检查绑定的计划是否在有效计划列表中
-                foreach ($roomBinds as $binding) {
-                    $plan = $validPlans->firstWhere('id', $binding->plan_id);
-                    if ($plan) {
-                        Log::channel('gift_card_exchange')->info("使用群组 {$this->roomId} 已绑定的计划 {$plan->id}");
-                        return $plan;
+                // 没有绑定计划或绑定的计划无效，找第一个符合条件的计划并绑定
+                foreach ($plans as $plan) {
+                    if ($this->isPlanValid($plan)) {
+                        try {
+                            DB::beginTransaction();
+                            $wechatRoomBindingService->bindPlanToRoom($plan->id, $this->roomId);
+                            DB::commit();
+                            Log::channel('gift_card_exchange')->info("自动绑定计划 {$plan->id} 到群组 {$this->roomId}");
+                            return $plan;
+                        } catch (\Exception $e) {
+                            DB::rollBack();
+                            Log::channel('gift_card_exchange')->error("自动绑定计划失败: " . $e->getMessage());
+                            // 绑定失败不影响使用该计划，继续返回
+                            return $plan;
+                        }
                     }
                 }
 
-                // 如果绑定的计划都不在有效计划列表中，自动绑定第一个有效计划
-                $plan = $validPlans->first();
-                try {
-                    DB::beginTransaction();
-                    $wechatRoomBindingService->bindPlanToRoom($plan->id, $this->roomId);
-                    DB::commit();
-                    Log::channel('gift_card_exchange')->info("自动绑定新的有效计划 {$plan->id} 到群组 {$this->roomId}");
-                    return $plan;
-                } catch (\Exception $e) {
-                    DB::rollBack();
-                    Log::channel('gift_card_exchange')->error("自动绑定计划失败: " . $e->getMessage());
-                    return null;
-                }
+                Log::channel('gift_card_exchange')->info("未找到符合条件的计划");
+                return null;
             } else {
                 // 未开启群组绑定，直接返回第一个符合条件的计划
                 foreach ($plans as $plan) {

@@ -62,4 +62,4 @@ class ProcessGiftCardExchange extends Command
             return 1;
         }
     }
-} 
+}

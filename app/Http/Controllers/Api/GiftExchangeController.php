@@ -81,43 +81,43 @@ class GiftExchangeController extends Controller
     {
         try {
             $query = ChargePlan::query();
-            
+
             // Apply filters
             if ($request->has('account')) {
                 $query->where('account', 'like', '%' . $request->input('account') . '%');
             }
-            
+
             if ($request->has('country')) {
                 $query->where('country', $request->input('country'));
             }
-            
+
             if ($request->has('status')) {
                 $query->where('status', $request->input('status'));
             }
-            
+
             if ($request->has('groupId')) {
                 $query->where('group_id', $request->input('groupId'));
             }
-            
+
             // Apply sorting
             $sortField = $request->input('sortField', 'created_at');
             $sortOrder = $request->input('sortOrder', 'desc');
-            
+
             // Valid sort fields
             $validSortFields = ['account', 'country', 'total_amount', 'days', 'status', 'created_at', 'start_time'];
             if (in_array($sortField, $validSortFields)) {
                 $query->orderBy($sortField, $sortOrder === 'desc' ? 'desc' : 'asc');
             }
-            
+
             // Apply pagination
             $page = $request->input('page', 1);
             $pageSize = $request->input('pageSize', 10);
-            
+
             // 加载关联数据
             $query->with(['items', 'wechatRoomBinding']);
-            
+
             $plans = $query->paginate($pageSize, ['*'], 'page', $page);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -200,17 +200,17 @@ class GiftExchangeController extends Controller
     {
         try {
             $plan = ChargePlan::findOrFail($id);
-            
+
             // Only allow deleting draft plans
-            if ($plan->status !== 'draft') {
-                throw new \Exception('Only draft plans can be deleted');
-            }
-            
+//            if ($plan->status !== 'draft') {
+//                throw new \Exception('Only draft plans can be deleted');
+//            }
+
             DB::beginTransaction();
             $plan->items()->delete();
             $plan->delete();
             DB::commit();
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -239,9 +239,9 @@ class GiftExchangeController extends Controller
         try {
             $plan = ChargePlan::findOrFail($id);
             $status = $request->input('status');
-            
+
             $updatedPlan = $this->giftExchangeService->updatePlanStatus($plan, $status);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -268,7 +268,7 @@ class GiftExchangeController extends Controller
         try {
             $plan = ChargePlan::findOrFail($id);
             $updatedPlan = $this->giftExchangeService->executePlan($plan);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -295,7 +295,7 @@ class GiftExchangeController extends Controller
         try {
             $plan = ChargePlan::findOrFail($id);
             $updatedPlan = $this->giftExchangeService->pausePlan($plan);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -322,7 +322,7 @@ class GiftExchangeController extends Controller
         try {
             $plan = ChargePlan::findOrFail($id);
             $updatedPlan = $this->giftExchangeService->resumePlan($plan);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -349,7 +349,7 @@ class GiftExchangeController extends Controller
         try {
             $plan = ChargePlan::findOrFail($id);
             $updatedPlan = $this->giftExchangeService->cancelPlan($plan);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -376,7 +376,7 @@ class GiftExchangeController extends Controller
         try {
             $plan = ChargePlan::findOrFail($planId);
             $logs = $plan->logs()->orderBy('created_at', 'desc')->get();
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -409,19 +409,19 @@ class GiftExchangeController extends Controller
             $planId = $request->input('planId');
             $name = $request->input('name');
             $submittedData = $request->input('planData', []);
-            
+
             // 记录接收到的数据用于调试
             Log::info('保存模板请求数据: ' . json_encode([
                 'planId' => $planId,
                 'name' => $name,
                 'hasData' => !empty($submittedData)
             ]));
-            
+
             // 检查是否是临时ID
             if (is_string($planId) && (strpos($planId, 'temp_') === 0 || !is_numeric($planId))) {
                 // 这是一个临时计划
                 Log::info('创建临时计划模板: ' . $planId);
-                
+
                 // 如果前端没有发送计划数据，使用默认值
                 if (empty($submittedData)) {
                     Log::warning('未提供临时计划数据，使用默认值');
@@ -435,7 +435,7 @@ class GiftExchangeController extends Controller
                         'items' => []
                     ];
                 }
-                
+
                 // 创建模板
                 $template = $this->giftExchangeService->createTemplateFromData($name, $submittedData);
                 Log::info('成功创建模板: ' . $template->id);
@@ -446,7 +446,7 @@ class GiftExchangeController extends Controller
                 $template = $this->giftExchangeService->createTemplateFromPlan($name, $plan);
                 Log::info('成功创建模板: ' . $template->id);
             }
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -479,11 +479,11 @@ class GiftExchangeController extends Controller
             $templateId = $request->input('templateId');
             $accounts = $request->input('accounts');
             $startTime = $request->input('startTime');
-            
+
             $template = ChargePlanTemplate::findOrFail($templateId);
-            
+
             $result = $this->giftExchangeService->createPlansFromTemplate($template, $accounts, $startTime);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -508,7 +508,7 @@ class GiftExchangeController extends Controller
     {
         try {
             $templates = ChargePlanTemplate::orderBy('created_at', 'desc')->get();
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -539,7 +539,7 @@ class GiftExchangeController extends Controller
     {
         try {
             $group = $this->giftExchangeService->createAccountGroup($request->all());
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -565,35 +565,35 @@ class GiftExchangeController extends Controller
     {
         try {
             $query = AccountGroup::query();
-            
+
             // Apply filters
             if ($request->has('name')) {
                 $query->where('name', 'like', '%' . $request->input('name') . '%');
             }
-            
+
             if ($request->has('country')) {
                 $query->where('country', $request->input('country'));
             }
-            
+
             if ($request->has('status')) {
                 $query->where('status', $request->input('status'));
             }
-            
+
             // Apply sorting
             $sortField = $request->input('sortField', 'created_at');
             $sortOrder = $request->input('sortOrder', 'desc');
-            
+
             // Valid sort fields
             $validSortFields = ['name', 'country', 'status', 'created_at'];
             if (in_array($sortField, $validSortFields)) {
                 $query->orderBy($sortField, $sortOrder === 'desc' ? 'desc' : 'asc');
             }
-            
+
             // Apply pagination
             $page = $request->input('page', 1);
             $pageSize = $request->input('pageSize', 10);
             $groups = $query->paginate($pageSize, ['*'], 'page', $page);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -624,7 +624,7 @@ class GiftExchangeController extends Controller
     {
         try {
             $group = AccountGroup::with('plans.items')->findOrFail($id);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -651,7 +651,7 @@ class GiftExchangeController extends Controller
     {
         try {
             $group = AccountGroup::findOrFail($id);
-            
+
             $group->update([
                 'name' => $request->input('name'),
                 'description' => $request->input('description'),
@@ -660,7 +660,7 @@ class GiftExchangeController extends Controller
                 'auto_switch' => $request->input('autoSwitch'),
                 'switch_threshold' => $request->input('switchThreshold'),
             ]);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -686,13 +686,13 @@ class GiftExchangeController extends Controller
     {
         try {
             $group = AccountGroup::findOrFail($id);
-            
+
             // Reset group_id for all plans
             $group->plans()->update(['group_id' => null]);
-            
+
             // Delete the group
             $group->delete();
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -720,9 +720,9 @@ class GiftExchangeController extends Controller
         try {
             $group = AccountGroup::findOrFail($groupId);
             $planIds = $request->input('planIds');
-            
+
             $updatedGroup = $this->giftExchangeService->addPlansToGroup($group, $planIds);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -750,9 +750,9 @@ class GiftExchangeController extends Controller
         try {
             $group = AccountGroup::findOrFail($groupId);
             $planIds = $request->input('planIds');
-            
+
             $updatedGroup = $this->giftExchangeService->removePlansFromGroup($group, $planIds);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -780,9 +780,9 @@ class GiftExchangeController extends Controller
         try {
             $group = AccountGroup::findOrFail($groupId);
             $planPriorities = $request->input('planPriorities');
-            
+
             $updatedGroup = $this->giftExchangeService->updatePlanPriorities($group, $planPriorities);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -809,7 +809,7 @@ class GiftExchangeController extends Controller
         try {
             $group = AccountGroup::findOrFail($groupId);
             $updatedGroup = $this->giftExchangeService->startAccountGroup($group);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -836,7 +836,7 @@ class GiftExchangeController extends Controller
         try {
             $group = AccountGroup::findOrFail($groupId);
             $updatedGroup = $this->giftExchangeService->pauseAccountGroup($group);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -861,7 +861,7 @@ class GiftExchangeController extends Controller
     {
         try {
             $status = $this->giftExchangeService->getAutoExecutionStatus();
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -887,7 +887,7 @@ class GiftExchangeController extends Controller
     {
         try {
             $settings = $this->giftExchangeService->updateAutoExecutionSettings($request->all());
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -902,4 +902,4 @@ class GiftExchangeController extends Controller
             ]);
         }
     }
-} 
+}
