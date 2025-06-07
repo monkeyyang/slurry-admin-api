@@ -128,8 +128,8 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                 
                 // 检查兑换是否真正成功（不仅仅是没有异常）
                 $exchangeData = $result['data'] ?? [];
-                $exchangeStatus = $exchangeData['status'] ?? '';
-                $amount = floatval($exchangeData['amount'] ?? 0);
+                $exchangeStatus = $exchangeData['data']['status'] ?? '';
+                $amount = floatval($exchangeData['data']['amount'] ?? 0);
                 
                 // 添加调试日志
                 Log::channel('gift_card_exchange')->info("调试：提取的兑换数据", [
@@ -143,7 +143,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                 
                 if ($exchangeStatus === 'success' && $amount > 0) {
                     // 兑换真正成功且有金额，执行加账处理
-                    $this->processAccountBilling($result['data']);
+                    $this->processAccountBilling($exchangeData['data']);
                     Log::channel('gift_card_exchange')->info("兑换成功，已执行加账处理", [
                         'request_id' => $this->requestId,
                         'amount' => $amount
@@ -154,7 +154,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                         'request_id' => $this->requestId,
                         'status' => $exchangeStatus,
                         'amount' => $amount,
-                        'message' => $exchangeData['msg'] ?? ''
+                        'message' => $exchangeData['data']['msg'] ?? ''
                     ]);
                     
                     // 发送失败消息到微信群
@@ -164,7 +164,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                         "卡号：%s\n" .
                         "失败原因：%s",
                         $this->extractCardNumber(),
-                        $exchangeData['msg'] ?? '未知原因'
+                        $exchangeData['data']['msg'] ?? '未知原因'
                     );
                     send_msg_to_wechat($this->input['room_id'], $failMessage);
                 }
