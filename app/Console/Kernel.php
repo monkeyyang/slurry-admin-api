@@ -25,6 +25,11 @@ class Kernel extends ConsoleKernel
 
         // Run the auto execution command every 15 minutes
         // $schedule->command('plans:execute')->everyFifteenMinutes();
+
+        // 每10分钟检查计划天数进度
+        $schedule->command('plan:check-day-progress')->everyTenMinutes()
+                 ->name('check_plan_day_progress')
+                 ->withoutOverlapping();
     }
 
     /**

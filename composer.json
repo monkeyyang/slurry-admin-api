@@ -13,7 +13,8 @@
         "laravel/sanctum": "^3.3",
         "laravel/tinker": "^2.8",
         "ext-dom": "*",
-        "ext-curl": "*"
+        "ext-curl": "*",
+        "ext-bcmath": "*"
     },
     "require-dev": {
         "fakerphp/faker": "^1.9.1",

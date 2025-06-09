@@ -23,12 +23,12 @@ class GiftCardExchangeController extends Controller
     public function test(Request $request)
     {
         try {
-            // input {"data":{"at_user_list":[],"from_wxid":"wxid_dvxt3biiotfz12","is_pc":0,"msg":"XJL6FNL4XHY5427X+500#擦拭","msgid":"7732359006730393642","room_wxid":"56204186056@chatroom","timestamp":1748189465,"to_wxid":"56204186056@chatroom","wx_type":1},"type":"MT_RECV_TEXT_MSG","client_id":1,"wxid":"wxid_aiv8hxjw87z012"}
             $roomId = $request->input('room_wxid','');
             $msgId = $request->input('msgid', '');
             $wxId = $request->input('from_wxid', '');
-            $message = $request->input('msg', '');
-            Log::channel('gift_card_exchange')->error('获取到兑换消息2：'.json_encode([
+            $message = $request->input('message', '');
+
+            Log::channel('gift_card_exchange')->error('获取到兑换消息1：'.json_encode([
                 'room_id' => $roomId,
                 'wxid' => $wxId,
                 'msgid' => $msgId,
@@ -61,17 +61,34 @@ class GiftCardExchangeController extends Controller
                 ]);
             }
 
-            // 处理兑换消息
-            $giftCardApiClient = new GiftCardApiClient();
-            $giftCardExchangeService = new GiftCardExchangeService($giftCardApiClient);
-            $giftCardExchangeService->setRoomId($roomId);
-            $giftCardExchangeService->setWxId($wxId);
-            $giftCardExchangeService->setMsgid($msgId);
+            // 生成请求ID用于追踪
+            $requestId = uniqid('exchange_', true);
 
-            $result = $giftCardExchangeService->processExchangeMessage($message);
+            Log::channel('gift_card_exchange')->info('收到兑换请求，加入队列处理', [
+                'request_id' => $requestId,
+                'message' => $message,
+                'card_number' => $parseResult['card_number'],
+                'card_type' => $parseResult['card_type']
+            ]);
 
-            var_dump($result);exit;
+            // 将任务加入队列
+            ProcessGiftCardExchangeJob::dispatch([
+                'room_id' => $roomId,
+                'wxid' => $wxId,
+                'msgid' => $msgId,
+                'msg' => $message
+            ], $requestId);
 
+            return response()->json([
+                'code' => 0,
+                'message' => '兑换请求已接收，正在队列中处理',
+                'data' => [
+                    'request_id' => $requestId,
+                    'card_number' => $parseResult['card_number'],
+                    'card_type' => $parseResult['card_type'],
+                    'status' => 'queued'
+                ],
+            ]);
         } catch (\Exception $e) {
             Log::error('处理兑换消息失败: ' . $e->getMessage());
             return response()->json([

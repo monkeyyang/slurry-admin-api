@@ -18,6 +18,7 @@ class ChargePlanItem extends Model
         'max_amount',
         'description',
         'status',
+        'executed_amount',
         'executed_at',
         'result',
     ];
@@ -26,6 +27,7 @@ class ChargePlanItem extends Model
         'amount' => 'decimal:2',
         'min_amount' => 'decimal:2',
         'max_amount' => 'decimal:2',
+        'executed_amount' => 'decimal:2',
         'executed_at' => 'datetime',
     ];
 
@@ -62,8 +64,9 @@ class ChargePlanItem extends Model
             'maxAmount' => $this->max_amount,
             'description' => $this->description,
             'status' => $this->status,
+            'executedAmount' => $this->executed_amount,
             'executedAt' => $this->executed_at ? $this->executed_at->format('Y-m-d H:i:s') : null,
             'result' => $this->result,
         ];
     }
-} 
+}

@@ -15,8 +15,13 @@ class ChargePlanLog extends Model
         'day',
         'time',
         'action',
+        'amount',
         'status',
         'details',
+    ];
+
+    protected $casts = [
+        'amount' => 'decimal:2',
     ];
 
     /**
@@ -49,6 +54,7 @@ class ChargePlanLog extends Model
             'day' => $this->day,
             'time' => $this->time,
             'action' => $this->action,
+            'amount' => $this->amount,
             'status' => $this->status,
             'details' => $this->details,
             'createdAt' => $this->created_at ? $this->created_at->format('Y-m-d H:i:s') : null,
