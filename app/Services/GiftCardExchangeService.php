@@ -241,37 +241,60 @@ class GiftCardExchangeService
     {
         try {
             Log::channel('gift_card_exchange')->info('验证礼品卡: ' . $cardNumber);
-            $originalData = '{"code":0,"data":{"task_id":"2f0dce91-8106-49be-87d1-ace329e2e448","status":"completed","items":[{"data_id":"XMWT5GL9KJ9CHM8K","status":"completed","msg":"\u67e5\u8be2\u6210\u529f","result":"{\"code\":0,\"msg\":\"\u67e5\u8be2\u6210\u529f\",\"country\":\"CA-\u52a0\u62ff\u5927\",\"balance\":\"$500.00\",\"cardNumber\":\"5243\",\"validation\":\"\u6709\u6548\u5361\u00b7Good Card\"}","update_time":"2025-06-07 03:05:59"}],"msg":"\u5df2\u5b8c\u6210","update_time":"2025-06-07 03:05:59"},"msg":"\u67e5\u8be2\u6210\u529f"}';
-            $result = json_decode($originalData, true);
+//            $originalData = '{"code":0,"data":{"task_id":"025fcb72-3e15-4ce7-bc6e-06eccaf2332d","status":"completed","items":[{"data_id":"XV9T2PXQFCVNDG5G","status":"completed","msg":"\u67e5\u8be2\u6210\u529f","result":"{\"code\":0,\"msg\":\"\u67e5\u8be2\u6210\u529f\",\"country\":\"Canada\",\"countryCode\":\"ca\",\"balance\":\"$50.00\",\"cardNumber\":\"8082\",\"validation\":\"Good card\"}","update_time":"2025-06-10 02:13:51"}],"msg":"\u5df2\u5b8c\u6210","update_time":"2025-06-10 02:13:51"},"msg":"\u67e5\u8be2\u6210\u529f"}';
+//            $result = json_decode($originalData, true);
             // 创建查卡任务
-//            $queryTask = $this->createCardQueryTask([$cardNumber]);
-//            if ($queryTask['code'] !== 0) {
-//                throw new Exception('创建查卡任务失败: ' . ($queryTask['msg'] ?? '未知错误'));
-//            }
-//
-//            $taskId = $queryTask['data']['task_id'];
-//            Log::channel('gift_card_exchange')->info('查卡任务创建成功, 任务ID: ' . $taskId);
-//
-//            // 等待任务完成
-//            $result = $this->waitForCardQueryTaskComplete($taskId);
+            $queryTask = $this->createCardQueryTask([$cardNumber]);
+            if ($queryTask['code'] !== 0) {
+                throw new Exception('创建查卡任务失败: ' . ($queryTask['msg'] ?? '未知错误'));
+            }
+
+            $taskId = $queryTask['data']['task_id'];
+            Log::channel('gift_card_exchange')->info('查卡任务创建成功, 任务ID: ' . $taskId);
+
+            // 等待任务完成
+            $result = $this->waitForCardQueryTaskComplete($taskId);
+            Log::channel('gift_card_exchange')->info('查询原始结果：'. json_encode($result));
             if (!$result) {
                 throw new Exception('查卡任务执行超时或失败');
             }
-            Log::channel('gift_card_exchange')->info('查询原始结果：'. json_encode($result));
+
             // 解析查卡结果
             $taskResult = $this->parseResult($result, $cardNumber);
             if (!$taskResult) {
-                throw new Exception('无法获取查卡结果');
+                throw new Exception('无法获取查卡结果', -1);
+            }
+
+            // 检查查卡结果是否包含错误
+            if (isset($taskResult['code']) && $taskResult['code'] !== 0) {
+                throw new Exception('查卡失败: ' . ($taskResult['msg'] ?? '未知错误'));
+            }
+
+            // 处理国家代码，确保它是有效的国家代码格式
+            $countryCode = $taskResult['countryCode'] ?? 'UNKNOWN';
+
+            // 验证国家代码格式（应该是2-3位字母，不区分大小写）
+            if (!preg_match('/^[A-Za-z]{2,3}$/i', $countryCode)) {
+                // 如果不是标准格式，尝试从country字段提取
+                if (!empty($taskResult['country'])) {
+                    $countryCode = $this->mapCountryNameToCode($taskResult['country']);
+                } else {
+                    Log::channel('gift_card_exchange')->warning('无效的国家代码格式: ' . $countryCode);
+                    $countryCode = 'UNKNOWN';
+                }
+            } else {
+                // 确保国家代码是大写格式
+                $countryCode = strtoupper($countryCode);
             }
 
             // 根据查卡结果构造返回数据
             return [
-                'is_valid' => str_contains($taskResult['validation'], '有效卡'),
-                'country_code' => $taskResult['countryCode'],
-                'balance' => $this->parseBalance($taskResult['balance']),
-                'currency' => $this->parseCurrency($taskResult['balance']),
-                'message' => $taskResult['msg'],
-                'card_number' => $taskResult['cardNumber'],
+                'is_valid' => isset($taskResult['validation']) && stripos($taskResult['validation'], 'Good') !== false,
+                'country_code' => $countryCode,
+                'balance' => $this->parseBalance($taskResult['balance'] ?? '0'),
+                'currency' => $this->parseCurrency($taskResult['balance'] ?? '$0'),
+                'message' => $taskResult['msg'] ?? '查询成功',
+                'card_number' => $taskResult['cardNumber'] ?? $cardNumber,
                 'card_type' => 1, // 默认卡类型
             ];
         } catch (Exception $e) {
@@ -349,7 +372,8 @@ class GiftCardExchangeService
             }
 
             // 等待一段时间后继续查询
-            sleep($interval);
+//            sleep($interval);
+            usleep(200*1000);
         }
 
         // 如果达到最大尝试次数仍未完成，则标记为失败
@@ -364,15 +388,25 @@ class GiftCardExchangeService
                 if ($item['data_id'] === $cardNumber && $item['status'] === 'completed') {
                     // 解析结果JSON字符串
                     $itemJson = json_decode($item['result'], true);
-                    if(empty($itemJson['countryCode'])) {
-                        $countryInfo = explode('-', $itemJson['country']);
-                        $itemJson['countryCode'] = array_shift($countryInfo);
+
+                    // 确保解析成功
+                    if (!$itemJson || !is_array($itemJson)) {
+                        Log::channel('gift_card_exchange')->error('解析查卡结果JSON失败: ' . $item['result']);
+                        return null;
                     }
+
+                    // 处理国家代码
+                    if (empty($itemJson['countryCode']) && !empty($itemJson['country'])) {
+                        // 从country字段提取国家代码
+                        $countryInfo = explode('-', $itemJson['country']);
+                        $itemJson['countryCode'] = trim($countryInfo[0]);
+                    }
+
                     return $itemJson;
                 }
             }
         }
-        return [];
+        return null;
     }
 
     /**
@@ -408,6 +442,14 @@ class GiftCardExchangeService
      */
     protected function mapCountryNameToCode(string $countryName): string
     {
+        // 先清理输入，移除多余的空白字符
+        $countryName = trim($countryName);
+
+        // 检查是否已经是国家代码格式（不区分大小写）
+        if (preg_match('/^[A-Za-z]{2,3}$/i', $countryName)) {
+            return strtoupper($countryName);
+        }
+
         $countryMap = [
             '美国' => 'US',
             '加拿大' => 'CA',
@@ -428,7 +470,19 @@ class GiftCardExchangeService
             // 可以根据需要添加更多映射
         ];
 
-        return $countryMap[$countryName] ?? 'UNKNOWN';
+        // 检查是否包含无效字符（可能是错误信息）
+        if (preg_match('/[\[\]0-9]+/', $countryName)) {
+            Log::channel('gift_card_exchange')->error('尝试映射无效的国家名称（可能是错误信息）: ' . $countryName);
+            return 'UNKNOWN';
+        }
+
+        $result = $countryMap[$countryName] ?? 'UNKNOWN';
+
+        if ($result === 'UNKNOWN') {
+            Log::channel('gift_card_exchange')->warning('未找到国家映射: ' . $countryName);
+        }
+
+        return $result;
     }
 
     /**
@@ -525,7 +579,6 @@ class GiftCardExchangeService
 
                 // 检查群组是否已绑定计划
                 $roomBinds = ChargePlanWechatRoomBinding::where('room_id', $this->roomId)->get();
-
                 if ($roomBinds->isNotEmpty()) {
                     // 已绑定计划，检查绑定的计划是否有效且在计划列表中
                     foreach ($roomBinds as $binding) {
@@ -535,27 +588,27 @@ class GiftCardExchangeService
                             return $plan;
                         }
                     }
-                } else {
-                    // 没有绑定计划或绑定的计划无效，找第一个符合条件的计划并绑定
-                    foreach ($plans as $plan) {
-                        if ($this->isPlanValid($plan)) {
-                            try {
-                                DB::beginTransaction();
-                                $wechatRoomBindingService->bindPlanToRoom($plan->id, $this->roomId);
-                                DB::commit();
-                                Log::channel('gift_card_exchange')->info("自动绑定计划 {$plan->id} 到群组 {$this->roomId}");
-                                return $plan;
-                            } catch (\Exception $e) {
-                                DB::rollBack();
-                                Log::channel('gift_card_exchange')->error("自动绑定计划失败: " . $e->getMessage());
-                                // 绑定失败不影响使用该计划，继续返回
-                                return $plan;
-                            }
+                }
+                // 没有绑定计划或绑定的计划无效，找第一个符合条件的计划并绑定
+                foreach ($plans as $plan) {
+                    if ($this->isPlanValid($plan)) {
+                        try {
+                            DB::beginTransaction();
+                            $wechatRoomBindingService->bindPlanToRoom($plan->id, $this->roomId);
+                            DB::commit();
+                            Log::channel('gift_card_exchange')->info("自动绑定计划 {$plan->id} 到群组 {$this->roomId}");
+                            return $plan;
+                        } catch (\Exception $e) {
+                            DB::rollBack();
+                            Log::channel('gift_card_exchange')->error("自动绑定计划失败: " . $e->getMessage());
+                            // 绑定失败不影响使用该计划，继续返回
+                            return $plan;
                         }
                     }
                 }
 
-                Log::channel('gift_card_exchange')->info("未找到符合条件的计划");
+
+                Log::channel('gift_card_exchange')->info("未找到符合条件的计划1");
                 return null;
             } else {
                 // 未开启群组绑定，直接返回第一个符合条件的计划
@@ -565,7 +618,7 @@ class GiftCardExchangeService
                         return $plan;
                     }
                 }
-                Log::channel('gift_card_exchange')->info("未找到符合条件的计划");
+                Log::channel('gift_card_exchange')->info("未找到符合条件的计划2");
                 return null;
             }
         } catch (\Exception $e) {
@@ -726,6 +779,7 @@ class GiftCardExchangeService
     public function selectEligiblePlan(string $countryCode, int $cardType, float $cardBalance = 0): ?ChargePlan
     {
         try {
+
             Log::channel('gift_card_exchange')->info("选择计划, 国家: {$countryCode}, 卡类型: {$cardType}, 卡余额: {$cardBalance}");
             $this->giftCardAmount = $cardBalance;
             // 获取所有可能的计划
@@ -736,6 +790,13 @@ class GiftCardExchangeService
 
             // 没有符合要求的计划返回NULL
             if(empty($plan)) return null;
+
+            // 解密密码
+            $service = new GiftExchangeService();
+            $decryptedAccountInfo = $service->getDecryptedAccountInfo($plan);
+
+            // 将解密后的密码设置回计划对象（临时修改，不保存到数据库）
+            $plan->password = $decryptedAccountInfo['password'];
 
             return $plan;
         } catch (Exception $e) {
@@ -868,21 +929,23 @@ class GiftCardExchangeService
             $redemptionData = [
                 [
                     'username' => $plan->account ?? '',
-                    'password' => $plan->password ?? '',
+                    //'password' => $plan->password ?? '',
+                    'password' => '',
                     'verify_url' => $plan->verify_url ?? '',
                     'pin' => $cardNumber
                 ]
             ];
 
             // 创建兑换任务
-//            $redemptionTask = $this->giftCardApiClient->createRedemptionTask($redemptionData, config('gift_card.redemption.interval', 6));
-//            if ($redemptionTask['code'] !== 0) {
-//                throw new Exception('创建兑换任务失败: ' . ($redemptionTask['msg'] ?? '未知错误'));
-//            }
-//
-//            $taskId = $redemptionTask['data']['task_id'];
-//            Log::channel('gift_card_exchange')->info('兑换任务创建成功, 任务ID: ' . $taskId);
-            $taskId = 'test';
+            $redemptionTask = $this->giftCardApiClient->createRedemptionTask($redemptionData, config('gift_card.redemption.interval', 6));
+            if ($redemptionTask['code'] !== 0) {
+                throw new Exception('创建兑换任务失败: ' . ($redemptionTask['msg'] ?? '未知错误'));
+            }
+
+            $taskId = $redemptionTask['data']['task_id'];
+//            $taskId = 'ttt';
+            Log::channel('gift_card_exchange')->info('兑换任务创建成功, 任务ID: ' . $taskId);
+//            $taskId = 'test';
             // 等待任务完成
             $result = $this->waitForRedemptionTaskComplete($taskId);
             if (empty($result)) {
@@ -998,9 +1061,9 @@ class GiftCardExchangeService
         $interval = config('gift_card.polling.interval', 3);
 
         for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
-//            $result = $this->giftCardApiClient->getRedemptionTaskStatus($taskId);
-            $original = '{"code":0,"data":{"task_id":"5cc6e4c0-aa37-4d1e-a92f-a966c3293848","status":"completed","items":[{"data_id":"susanM1830@icloud.com:XMWT5GL9KJ9CHM8K","status":"completed","msg":"\u5151\u6362\u6210\u529f,\u52a0\u8f7d\u91d1\u989d:$500.00,ID\u603b\u91d1\u989d:$500.00","result":"{\"code\":0,\"msg\":\"\u5151\u6362\u6210\u529f,\u52a0\u8f7d\u91d1\u989d:$500.00,ID\u603b\u91d1\u989d:$500.00\",\"username\":\"croadG1429@icloud.com\",\"total\":\"$500.00\",\"fund\":\"$500.00\",\"available\":\"\"}","update_time":"2025-06-07 03:06:07"}],"msg":"\u4efb\u52a1\u5df2\u5b8c\u6210","update_time":"2025-06-07 03:06:07"},"msg":"\u6267\u884c\u6210\u529f"}';
-            $result = json_decode($original, true);
+            $result = $this->giftCardApiClient->getRedemptionTaskStatus($taskId);
+//            $original = '{"code":0,"data":{"task_id":"5cc6e4c0-aa37-4d1e-a92f-a966c3293848","status":"completed","items":[{"data_id":"greenE1502@icloud.com:XV9T2PXQFCVNDG5G","status":"completed","msg":"\u5151\u6362\u6210\u529f,\u52a0\u8f7d\u91d1\u989d:$500.00,ID\u603b\u91d1\u989d:$500.00","result":"{\"code\":0,\"msg\":\"\u5151\u6362\u6210\u529f,\u52a0\u8f7d\u91d1\u989d:$500.00,ID\u603b\u91d1\u989d:$500.00\",\"username\":\"croadG1429@icloud.com\",\"total\":\"$500.00\",\"fund\":\"$500.00\",\"available\":\"\"}","update_time":"2025-06-07 03:06:07"}],"msg":"\u4efb\u52a1\u5df2\u5b8c\u6210","update_time":"2025-06-07 03:06:07"},"msg":"\u6267\u884c\u6210\u529f"}';
+//            $result = json_decode($original, true);
             // 记录原始响应
             Log::channel('gift_card_exchange')->info('原始响应数据: ' . json_encode($result));
 
@@ -1046,8 +1109,8 @@ class GiftCardExchangeService
                 return false;
             }
 
-            // 等待一段时间后继续查询
-            sleep($interval);
+            // 等待一段时间后继续查询 200毫秒刷新
+            usleep(200 * 1000);
         }
 
         Log::channel('gift_card_exchange')->error('任务执行超时');

@@ -11,7 +11,41 @@ use App\Models\ChargePlanTemplate;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Crypt;
 
+/**
+ * Gift Exchange Service
+ * 
+ * 礼品兑换服务，处理充值计划的创建、管理和执行
+ * 
+ * 新增功能：
+ * 1. 账号去重：创建计划时自动检查账号是否已存在于活跃计划中
+ * 2. 密码加密：使用Laravel对称加密存储密码，确保数据安全
+ * 3. API链接解析：支持解析账号字符串中的验证URL链接
+ * 
+ * 账号字符串格式支持：
+ * - "account password"
+ * - "account password http://verify.example.com"  
+ * - "account password https://verify.example.com"
+ * - "account\tpassword\thttp://verify.example.com" (制表符分隔)
+ * 
+ * 使用示例：
+ * ```php
+ * $service = new GiftExchangeService();
+ * 
+ * // 创建计划（自动去重和加密）
+ * $plan = $service->createPlan([
+ *     'account' => 'user@example.com password123 https://verify.example.com',
+ *     'country' => 'US',
+ *     'totalAmount' => 100.00,
+ *     // ... 其他参数
+ * ]);
+ * 
+ * // 获取解密后的账号信息
+ * $accountInfo = $service->getDecryptedAccountInfo($plan);
+ * // $accountInfo = ['account' => 'user@example.com', 'password' => 'password123', 'verify_url' => 'https://verify.example.com']
+ * ```
+ */
 class GiftExchangeService
 {
     protected $wechatRoomBindingService;
@@ -22,39 +56,140 @@ class GiftExchangeService
     }
 
     /**
-     * Parse account and password from account string
+     * Parse account, password and api from account string
      *
      * @param string $accountString
      * @return array
      */
     protected function parseAccountAndPassword(string $accountString): array
     {
-        // 账号和密码可能以空格、制表符或其他分隔符连接
-        // 例如: "gordony1982@icloud.com\tzIxHkNvAV0" 或 "gordony1982@icloud.com zIxHkNvAV0"
+        // 账号、密码和API可能以空格、制表符或其他分隔符连接
+        // 例如: 
+        // "gordony1982@icloud.com\tzIxHkNvAV0" 
+        // "gordony1982@icloud.com zIxHkNvAV0"
+        // "gordony1982@icloud.com zIxHkNvAV0 http://api.example.com"
+        // "gordony1982@icloud.com zIxHkNvAV0    https://api.example.com"
 
-        // 尝试不同的分隔符
+        // 使用正则表达式来解析账号、密码和可选的API链接
+        // 匹配模式：账号 + 空白字符 + 密码 + 可选的(空白字符 + API链接)
+        $pattern = '/^([^\s\t]+)[\s\t]+([^\s\t]+)(?:[\s\t]+(https?:\/\/[^\s\t]+))?/';
+        
+        if (preg_match($pattern, trim($accountString), $matches)) {
+            return [
+                'account' => trim($matches[1]),
+                'password' => trim($matches[2]),
+                'verify_url' => isset($matches[3]) ? trim($matches[3]) : null
+            ];
+        }
+
+        // 如果正则匹配失败，尝试传统的分隔符方式
         $separators = ['\t', ' ', '|', ','];
-
+        
         foreach ($separators as $separator) {
             if ($separator === '\t') {
-                // 处理制表符
                 $parts = explode("\t", $accountString);
             } else {
                 $parts = explode($separator, $accountString);
             }
 
             if (count($parts) >= 2) {
-                return [
+                $result = [
                     'account' => trim($parts[0]),
-                    'password' => trim($parts[1])
+                    'password' => trim($parts[1]),
+                    'verify_url' => null
                 ];
+                
+                // 检查是否有第三部分且是API链接
+                if (count($parts) >= 3) {
+                    $potentialApi = trim($parts[2]);
+                    if (preg_match('/^https?:\/\//', $potentialApi)) {
+                        $result['verify_url'] = $potentialApi;
+                    }
+                }
+                
+                return $result;
             }
         }
 
-        // 如果没有找到分隔符，返回原始字符串作为账号，密码为空
+        // 如果没有找到分隔符，返回原始字符串作为账号，密码和API为空
         return [
             'account' => trim($accountString),
-            'password' => ''
+            'password' => '',
+            'verify_url' => null
+        ];
+    }
+
+    /**
+     * Encrypt password using Laravel's encryption
+     *
+     * @param string $password
+     * @return string
+     */
+    protected function encryptPassword(string $password): string
+    {
+        if (empty($password)) {
+            return '';
+        }
+        
+        try {
+            return Crypt::encryptString($password);
+        } catch (\Exception $e) {
+            Log::error('Failed to encrypt password: ' . $e->getMessage());
+            throw new \Exception('Password encryption failed');
+        }
+    }
+
+    /**
+     * Decrypt password using Laravel's decryption
+     *
+     * @param string $encryptedPassword
+     * @return string
+     */
+    public function decryptPassword(string $encryptedPassword): string
+    {
+        if (empty($encryptedPassword)) {
+            return '';
+        }
+        
+        try {
+            return Crypt::decryptString($encryptedPassword);
+        } catch (\Exception $e) {
+            Log::error('Failed to decrypt password: ' . $e->getMessage());
+            return '';
+        }
+    }
+
+    /**
+     * Check if account already exists in active plans
+     *
+     * @param string $account
+     * @param int|null $excludePlanId
+     * @return bool
+     */
+    protected function isAccountDuplicate(string $account, int $excludePlanId = null): bool
+    {
+        $query = ChargePlan::where('account', $account)
+            ->whereNotIn('status', ['completed', 'cancelled']);
+            
+        if ($excludePlanId) {
+            $query->where('id', '!=', $excludePlanId);
+        }
+        
+        return $query->exists();
+    }
+
+    /**
+     * Get decrypted account information from a plan
+     *
+     * @param ChargePlan $plan
+     * @return array
+     */
+    public function getDecryptedAccountInfo(ChargePlan $plan): array
+    {
+        return [
+            'account' => $plan->account,
+            'password' => $this->decryptPassword($plan->password),
+            'verify_url' => $plan->verify_url,
         ];
     }
 
@@ -69,12 +204,21 @@ class GiftExchangeService
         try {
             DB::beginTransaction();
 
-            // 解析账号和密码
+            // 解析账号、密码和API
             $accountData = $this->parseAccountAndPassword($data['account']);
+            
+            // 检查账号是否重复
+            if ($this->isAccountDuplicate($accountData['account'])) {
+                throw new \Exception("Account '{$accountData['account']}' already exists in active plans");
+            }
+
+            // 加密密码
+            $encryptedPassword = $this->encryptPassword($accountData['password']);
 
             $plan = ChargePlan::create([
                 'account' => $accountData['account'],
-                'password' => $accountData['password'],
+                'password' => $encryptedPassword,
+                'verify_url' => $accountData['verify_url'],
                 'country' => $data['country'],
                 'total_amount' => $data['totalAmount'],
                 'days' => $data['days'],
@@ -158,9 +302,20 @@ class GiftExchangeService
         $successCount = 0;
         $failCount = 0;
         $plans = [];
+        $duplicateAccounts = [];
 
         foreach ($data['accounts'] as $account) {
             try {
+                // 解析账号信息
+                $accountData = $this->parseAccountAndPassword($account);
+                
+                // 检查是否重复
+                if ($this->isAccountDuplicate($accountData['account'])) {
+                    $duplicateAccounts[] = $accountData['account'];
+                    $failCount++;
+                    continue;
+                }
+
                 $plan = $this->createPlan([
                     'account' => $account,
                     'country' => $data['country'],
@@ -184,6 +339,7 @@ class GiftExchangeService
             'successCount' => $successCount,
             'failCount' => $failCount,
             'plans' => $plans,
+            'duplicateAccounts' => $duplicateAccounts,
         ];
     }
 
@@ -204,12 +360,21 @@ class GiftExchangeService
                 throw new \Exception('Only draft plans can be updated');
             }
 
-            // 解析账号和密码
+            // 解析账号、密码和API
             $accountData = $this->parseAccountAndPassword($data['account']);
+            
+            // 检查账号是否重复（排除当前计划）
+            if ($this->isAccountDuplicate($accountData['account'], $plan->id)) {
+                throw new \Exception("Account '{$accountData['account']}' already exists in other active plans");
+            }
+
+            // 加密密码
+            $encryptedPassword = $this->encryptPassword($accountData['password']);
 
             $plan->update([
                 'account' => $accountData['account'],
-                'password' => $accountData['password'],
+                'password' => $encryptedPassword,
+                'verify_url' => $accountData['verify_url'],
                 'country' => $data['country'],
                 'total_amount' => $data['totalAmount'],
                 'days' => $data['days'],
@@ -404,11 +569,27 @@ class GiftExchangeService
         $successCount = 0;
         $failCount = 0;
         $plans = [];
+        $duplicateAccounts = [];
 
         foreach ($accounts as $account) {
             try {
+                // 解析账号、密码和API
+                $accountData = $this->parseAccountAndPassword($account);
+                
+                // 检查是否重复
+                if ($this->isAccountDuplicate($accountData['account'])) {
+                    $duplicateAccounts[] = $accountData['account'];
+                    $failCount++;
+                    continue;
+                }
+
+                // 加密密码
+                $encryptedPassword = $this->encryptPassword($accountData['password']);
+
                 $plan = ChargePlan::create([
-                    'account' => $account,
+                    'account' => $accountData['account'],
+                    'password' => $encryptedPassword,
+                    'verify_url' => $accountData['verify_url'],
                     'country' => $template->country,
                     'total_amount' => $template->total_amount,
                     'days' => $template->days,
@@ -446,6 +627,7 @@ class GiftExchangeService
             'successCount' => $successCount,
             'failCount' => $failCount,
             'plans' => $plans,
+            'duplicateAccounts' => $duplicateAccounts,
         ];
     }
 

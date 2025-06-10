@@ -176,10 +176,10 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                         $this->extractCardNumber(),
                         $exchangeData['data']['msg'] ?? '未知原因'
                     );
-//                    send_msg_to_wechat($this->input['room_id'], $failMessage);
+                    send_msg_to_wechat($this->input['room_id'], $failMessage);
                 }
             } else {
-                Log::channel('gift_card_exchange')->error("礼品卡兑换队列任务处理失败1", [
+                Log::channel('gift_card_exchange')->error("礼品卡兑换队列任务处理失败", [
                     'request_id' => $this->requestId,
                     'error' => $result['message']
                 ]);
@@ -193,13 +193,13 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                 throw new Exception($result['message']);
             }
         } catch (Exception $e) {
-            Log::channel('gift_card_exchange')->error("礼品卡兑换队列任务执行异常2", [
+            Log::channel('gift_card_exchange')->error("礼品卡兑换队列任务执行异常", [
                 'request_id' => $this->requestId,
                 'message' => $this->message,
                 'error' => $e->getMessage(),
                 'attempt' => $this->attempts()
             ]);
-
+//            send_msg_to_wechat($this->input['room_id'], $e->getMessage());
             throw $e;
         }
     }
@@ -246,6 +246,21 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
             'error' => $exception->getMessage(),
             'attempts' => $this->attempts()
         ]);
+        $error = [
+            '礼品卡无效: 该礼品卡已经被兑换-AlreadyRedeemed' => 'err1'
+        ];
+        $date = date('Y-m-d H:i:s');
+        $errorMsg['err1'] = "该代码已经被兑换";
+        $failMessage = sprintf(
+            "❌失败：%s\n" .
+            "--------------------------------------\n" .
+            "加载卡号：%s\n" .
+            "执行时间：%s",
+            $errorMsg[$error[$exception->getMessage()]],
+            $this->extractCardNumber(),
+            $date
+        );
+        send_msg_to_wechat($this->input['room_id'], $failMessage);
     }
 
     /**
@@ -365,7 +380,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                 ]);
 
                 // 发送微信消息
-                // send_msg_to_wechat($roomId, $successMessage);
+                send_msg_to_wechat($roomId, $successMessage);
 
                 Log::channel('gift_card_exchange')->info("群组 {$roomId} 加账处理完成", [
                     'card_number' => $cardNumber,
@@ -556,12 +571,12 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
             // 更新当日计划的基本数据
             $currentDayItem->executed_amount = ($currentDayItem->executed_amount ?? 0) + $amount;
             $currentDayItem->executed_at = now();
-            
+
             // 根据是否达到当日计划设置状态和结果
             // 判断条件：达到目标金额或超出最大金额都算完成
-            $isCompleted = ($dailyExecutedAmount >= $currentDayItem->amount) || 
+            $isCompleted = ($dailyExecutedAmount >= $currentDayItem->amount) ||
                           ($dailyExecutedAmount >= $currentDayItem->max_amount);
-            
+
             Log::channel('gift_card_exchange')->info("计划 {$plan->id} 第 {$currentDay} 天完成判断", [
                 'dailyExecutedAmount' => $dailyExecutedAmount,
                 'targetAmount' => $currentDayItem->amount,
@@ -570,7 +585,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                 'exceededMax' => $dailyExecutedAmount >= $currentDayItem->max_amount,
                 'isCompleted' => $isCompleted
             ]);
-            
+
             if ($isCompleted) {
                 // 当日计划已完成
                 $currentDayItem->status = 'completed';
@@ -579,9 +594,9 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                 } else {
                     $currentDayItem->result = "当日计划已完成，累计金额: {$dailyExecutedAmount}";
                 }
-                
+
                 Log::channel('gift_card_exchange')->info("计划 {$plan->id} 第 {$currentDay} 天计划已达成，累计: {$dailyExecutedAmount}");
-                
+
                 // 保存当日计划更新
                 $currentDayItem->save();
 
@@ -603,10 +618,10 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                 // 当日计划进行中
                 $currentDayItem->status = 'processing';
                 $currentDayItem->result = "当日计划进行中，累计金额: {$dailyExecutedAmount}/{$currentDayItem->amount}";
-                
+
                 // 保存当日计划更新
                 $currentDayItem->save();
-                
+
                 Log::channel('gift_card_exchange')->info("计划 {$plan->id} 第 {$currentDay} 天计划进行中，累计: {$dailyExecutedAmount}/{$currentDayItem->amount}");
             }
 
