@@ -12,27 +12,29 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Http;
 
 /**
  * Gift Exchange Service
- * 
+ *
  * 礼品兑换服务，处理充值计划的创建、管理和执行
- * 
+ *
  * 新增功能：
  * 1. 账号去重：创建计划时自动检查账号是否已存在于活跃计划中
  * 2. 密码加密：使用Laravel对称加密存储密码，确保数据安全
  * 3. API链接解析：支持解析账号字符串中的验证URL链接
- * 
+ * 4. 异步登录请求：计划创建成功后自动发送登录请求到指定API
+ *
  * 账号字符串格式支持：
  * - "account password"
- * - "account password http://verify.example.com"  
+ * - "account password http://verify.example.com"
  * - "account password https://verify.example.com"
  * - "account\tpassword\thttp://verify.example.com" (制表符分隔)
- * 
+ *
  * 使用示例：
  * ```php
  * $service = new GiftExchangeService();
- * 
+ *
  * // 创建计划（自动去重和加密）
  * $plan = $service->createPlan([
  *     'account' => 'user@example.com password123 https://verify.example.com',
@@ -40,7 +42,7 @@ use Illuminate\Support\Facades\Crypt;
  *     'totalAmount' => 100.00,
  *     // ... 其他参数
  * ]);
- * 
+ *
  * // 获取解密后的账号信息
  * $accountInfo = $service->getDecryptedAccountInfo($plan);
  * // $accountInfo = ['account' => 'user@example.com', 'password' => 'password123', 'verify_url' => 'https://verify.example.com']
@@ -49,6 +51,11 @@ use Illuminate\Support\Facades\Crypt;
 class GiftExchangeService
 {
     protected $wechatRoomBindingService;
+
+    /**
+     * 登录API地址
+     */
+    protected const LOGIN_API_URL = 'http://47.76.200.188:8080/api/login_poll/new';
 
     public function __construct(WechatRoomBindingService $wechatRoomBindingService = null)
     {
@@ -64,8 +71,8 @@ class GiftExchangeService
     protected function parseAccountAndPassword(string $accountString): array
     {
         // 账号、密码和API可能以空格、制表符或其他分隔符连接
-        // 例如: 
-        // "gordony1982@icloud.com\tzIxHkNvAV0" 
+        // 例如:
+        // "gordony1982@icloud.com\tzIxHkNvAV0"
         // "gordony1982@icloud.com zIxHkNvAV0"
         // "gordony1982@icloud.com zIxHkNvAV0 http://api.example.com"
         // "gordony1982@icloud.com zIxHkNvAV0    https://api.example.com"
@@ -73,7 +80,7 @@ class GiftExchangeService
         // 使用正则表达式来解析账号、密码和可选的API链接
         // 匹配模式：账号 + 空白字符 + 密码 + 可选的(空白字符 + API链接)
         $pattern = '/^([^\s\t]+)[\s\t]+([^\s\t]+)(?:[\s\t]+(https?:\/\/[^\s\t]+))?/';
-        
+
         if (preg_match($pattern, trim($accountString), $matches)) {
             return [
                 'account' => trim($matches[1]),
@@ -84,7 +91,7 @@ class GiftExchangeService
 
         // 如果正则匹配失败，尝试传统的分隔符方式
         $separators = ['\t', ' ', '|', ','];
-        
+
         foreach ($separators as $separator) {
             if ($separator === '\t') {
                 $parts = explode("\t", $accountString);
@@ -98,7 +105,7 @@ class GiftExchangeService
                     'password' => trim($parts[1]),
                     'verify_url' => null
                 ];
-                
+
                 // 检查是否有第三部分且是API链接
                 if (count($parts) >= 3) {
                     $potentialApi = trim($parts[2]);
@@ -106,7 +113,7 @@ class GiftExchangeService
                         $result['verify_url'] = $potentialApi;
                     }
                 }
-                
+
                 return $result;
             }
         }
@@ -120,7 +127,63 @@ class GiftExchangeService
     }
 
     /**
-     * Encrypt password using Laravel's encryption
+     * 异步发送登录请求
+     *
+     * @param array $accounts 账号列表
+     * @return void
+     */
+    public function sendAsyncLoginRequest(array $accounts): void
+    {
+        try {
+            $loginData = [
+                'list' => []
+            ];
+
+            $id = 1;
+            foreach ($accounts as $account) {
+                $accountInfo = is_array($account) ? $account : $this->parseAccountAndPassword($account);
+
+                $loginData['list'][] = [
+                    'id' => $id++,
+                    'username' => $accountInfo['account'],
+                    'password' => $accountInfo['password'],
+                    'VerifyUrl' => $accountInfo['verify_url'] ?? ''
+                ];
+            }
+
+            // 异步发送HTTP请求
+//            Http::async()->timeout(30)->post(self::LOGIN_API_URL, $loginData);
+//
+//            Log::info('Async login request sent successfully', [
+//                'url' => self::LOGIN_API_URL,
+//                'accounts_count' => count($loginData['list']),
+//                'data' => $loginData
+//            ]);
+
+            $response = Http::timeout(30)->post(self::LOGIN_API_URL, $loginData);
+
+            $responseData = $response->json(); // 获取JSON响应数据
+            $statusCode = $response->status(); // 获取HTTP状态码
+
+            Log::info('Login request sent and response received', [
+                'url' => self::LOGIN_API_URL,
+                'accounts_count' => count($loginData['list']),
+                'request_data' => $loginData,
+                'response_status' => $statusCode,
+                'response_data' => $responseData,
+                'success' => $response->successful() // 是否为成功响应(2xx)
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to send async login request: ' . $e->getMessage(), [
+                'url' => self::LOGIN_API_URL,
+                'accounts' => $accounts
+            ]);
+        }
+    }
+
+    /**
+     * 使用APP_KEY检查或优雅降级处理的密码加密
      *
      * @param string $password
      * @return string
@@ -130,17 +193,25 @@ class GiftExchangeService
         if (empty($password)) {
             return '';
         }
-        
+
         try {
+            // 检查是否有APP_KEY
+            if (empty(config('app.key'))) {
+                Log::warning('APP_KEY not set, storing password in plain text. Please run: php artisan key:generate');
+                return $password; // 如果没有APP_KEY，直接返回明文
+            }
+
             return Crypt::encryptString($password);
         } catch (\Exception $e) {
             Log::error('Failed to encrypt password: ' . $e->getMessage());
-            throw new \Exception('Password encryption failed');
+            // 优雅降级：如果加密失败，记录警告但继续存储明文
+            Log::warning('Password encryption failed, storing in plain text for account');
+            return $password;
         }
     }
 
     /**
-     * Decrypt password using Laravel's decryption
+     * 使用APP_KEY检查或优雅降级处理的密码解密
      *
      * @param string $encryptedPassword
      * @return string
@@ -150,12 +221,20 @@ class GiftExchangeService
         if (empty($encryptedPassword)) {
             return '';
         }
-        
+
         try {
+            // 检查是否有APP_KEY
+            if (empty(config('app.key'))) {
+                Log::warning('APP_KEY not set, treating stored password as plain text');
+                return $encryptedPassword; // 如果没有APP_KEY，假设存储的是明文
+            }
+
             return Crypt::decryptString($encryptedPassword);
         } catch (\Exception $e) {
             Log::error('Failed to decrypt password: ' . $e->getMessage());
-            return '';
+            // 优雅降级：如果解密失败，可能存储的是明文
+            Log::warning('Password decryption failed, treating as plain text');
+            return $encryptedPassword;
         }
     }
 
@@ -170,11 +249,11 @@ class GiftExchangeService
     {
         $query = ChargePlan::where('account', $account)
             ->whereNotIn('status', ['completed', 'cancelled']);
-            
+
         if ($excludePlanId) {
             $query->where('id', '!=', $excludePlanId);
         }
-        
+
         return $query->exists();
     }
 
@@ -197,16 +276,17 @@ class GiftExchangeService
      * Create a new charge plan
      *
      * @param array $data
+     * @param bool $sendLoginRequest 是否发送登录请求
      * @return ChargePlan
      */
-    public function createPlan(array $data): ChargePlan
+    public function createPlan(array $data, bool $sendLoginRequest = true): ChargePlan
     {
         try {
             DB::beginTransaction();
 
             // 解析账号、密码和API
             $accountData = $this->parseAccountAndPassword($data['account']);
-            
+
             // 检查账号是否重复
             if ($this->isAccountDuplicate($accountData['account'])) {
                 throw new \Exception("Account '{$accountData['account']}' already exists in active plans");
@@ -241,6 +321,11 @@ class GiftExchangeService
 //            }
 
             DB::commit();
+
+            // 计划创建成功后，根据参数决定是否异步发送登录请求
+            if ($sendLoginRequest) {
+                $this->sendAsyncLoginRequest([$accountData]);
+            }
 
             return $plan;
         } catch (\Exception $e) {
@@ -303,12 +388,13 @@ class GiftExchangeService
         $failCount = 0;
         $plans = [];
         $duplicateAccounts = [];
+        $successfulAccounts = []; // 记录成功创建的账号信息
 
         foreach ($data['accounts'] as $account) {
             try {
                 // 解析账号信息
                 $accountData = $this->parseAccountAndPassword($account);
-                
+
                 // 检查是否重复
                 if ($this->isAccountDuplicate($accountData['account'])) {
                     $duplicateAccounts[] = $accountData['account'];
@@ -325,14 +411,20 @@ class GiftExchangeService
                     'floatAmount' => $data['floatAmount'],
                     'intervalHours' => $data['intervalHours'],
                     'startTime' => $data['startTime'],
-                ]);
+                ], false); // 不发送登录请求，统一在最后发送
 
                 $successCount++;
                 $plans[] = $plan->toApiArray();
+                $successfulAccounts[] = $accountData; // 记录成功的账号
             } catch (\Exception $e) {
                 Log::error('Failed to create plan for account ' . $account . ': ' . $e->getMessage());
                 $failCount++;
             }
+        }
+
+        // 批量创建成功后，一次性发送所有成功账号的登录请求
+        if (!empty($successfulAccounts)) {
+            $this->sendAsyncLoginRequest($successfulAccounts);
         }
 
         return [
@@ -362,7 +454,7 @@ class GiftExchangeService
 
             // 解析账号、密码和API
             $accountData = $this->parseAccountAndPassword($data['account']);
-            
+
             // 检查账号是否重复（排除当前计划）
             if ($this->isAccountDuplicate($accountData['account'], $plan->id)) {
                 throw new \Exception("Account '{$accountData['account']}' already exists in other active plans");
@@ -570,12 +662,13 @@ class GiftExchangeService
         $failCount = 0;
         $plans = [];
         $duplicateAccounts = [];
+        $successfulAccounts = []; // 记录成功创建的账号信息
 
         foreach ($accounts as $account) {
             try {
                 // 解析账号、密码和API
                 $accountData = $this->parseAccountAndPassword($account);
-                
+
                 // 检查是否重复
                 if ($this->isAccountDuplicate($accountData['account'])) {
                     $duplicateAccounts[] = $accountData['account'];
@@ -617,10 +710,16 @@ class GiftExchangeService
 
                 $successCount++;
                 $plans[] = $plan->toApiArray();
+                $successfulAccounts[] = $accountData; // 记录成功的账号
             } catch (\Exception $e) {
                 Log::error('Failed to create plan from template for account ' . $account . ': ' . $e->getMessage());
                 $failCount++;
             }
+        }
+
+        // 从模板创建成功后，一次性发送所有成功账号的登录请求
+        if (!empty($successfulAccounts)) {
+            $this->sendAsyncLoginRequest($successfulAccounts);
         }
 
         return [

@@ -6,12 +6,10 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Laravel\Sanctum\HasApiTokens;
-use Laravel\Passport\HasApiTokens as PassportHasApiTokens;
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable, PassportHasApiTokens;
+    use HasFactory, Notifiable;
 
     protected $table = 'admin_users';  // 指定正确的表名
 

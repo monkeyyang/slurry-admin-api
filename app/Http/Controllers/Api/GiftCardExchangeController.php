@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessGiftCardExchangeJob;
+use App\Models\ChargePlan;
 use App\Services\GiftCardApiClient;
 use App\Services\GiftCardExchangeService;
+use App\Services\GiftExchangeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -20,80 +22,80 @@ class GiftCardExchangeController extends Controller
         $this->giftCardExchangeService = $giftCardExchangeService;
     }
 
-    public function test(Request $request)
+    /**
+     * 测试方法：获取所有处理中的计划并发送登录请求
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function test(Request $request): JsonResponse
     {
         try {
-            $roomId = $request->input('room_wxid','');
-            $msgId = $request->input('msgid', '');
-            $wxId = $request->input('from_wxid', '');
-            $message = $request->input('message', '');
+            Log::info('开始执行测试方法：获取处理中的计划并发送登录请求');
 
-            Log::channel('gift_card_exchange')->error('获取到兑换消息1：'.json_encode([
-                'room_id' => $roomId,
-                'wxid' => $wxId,
-                'msgid' => $msgId,
-                'msg' => $message
-            ]));
+            $service = new GiftExchangeService();
 
-            if(empty($roomId)) {
-                 return response()->json([
-                    'code' => 400,
-                    'message' => '未获取到群聊ID',
-                    'data' => null,
-                ]);
-            }
+            // 获取所有处理中的计划
+            $query = ChargePlan::where('status', 'processing');
+            $plans = $query->orderBy('created_at', 'asc')->get();
 
-            if (empty($message)) {
+            Log::info('查询到处理中的计划数量: ' . $plans->count());
+
+            if ($plans->isEmpty()) {
                 return response()->json([
-                    'code' => 400,
-                    'message' => '消息不能为空',
-                    'data' => null,
+                    'code' => 0,
+                    'message' => '没有找到处理中的计划',
+                    'data' => [
+                        'plans_count' => 0,
+                        'plans' => [],
+                        'login_sent' => false
+                    ],
                 ]);
             }
 
-            // 验证消息格式
-            $parseResult = $this->giftCardExchangeService->parseMessage($message);
-            if (!$parseResult) {
-                return response()->json([
-                    'code' => 400,
-                    'message' => '消息格式无效，正确格式：卡号 /类型（如：XQPD5D7KJ8TGZT4L /1）',
-                    'data' => null,
-                ]);
+            // 准备账号数据用于发送登录请求
+            $accountsForLogin = [];
+            $plansData = [];
+
+            foreach ($plans as $plan) {
+                $planData = $plan->toApiArray();
+                $plansData[] = $planData;
+
+                // 获取解密后的账号信息
+                $decryptedAccountInfo = $service->getDecryptedAccountInfo($plan);
+
+                // 为每个计划准备登录账号信息
+                $accountsForLogin[] = [
+                    'account' => $decryptedAccountInfo['account'],
+                    'password' => $decryptedAccountInfo['password'], // 现在是解密后的密码
+                    'verify_url' => $decryptedAccountInfo['verify_url'] ?? ''
+                ];
             }
 
-            // 生成请求ID用于追踪
-            $requestId = uniqid('exchange_', true);
+            // 发送异步登录请求
+            $service->sendAsyncLoginRequest($accountsForLogin);
 
-            Log::channel('gift_card_exchange')->info('收到兑换请求，加入队列处理', [
-                'request_id' => $requestId,
-                'message' => $message,
-                'card_number' => $parseResult['card_number'],
-                'card_type' => $parseResult['card_type']
-            ]);
-
-            // 将任务加入队列
-            ProcessGiftCardExchangeJob::dispatch([
-                'room_id' => $roomId,
-                'wxid' => $wxId,
-                'msgid' => $msgId,
-                'msg' => $message
-            ], $requestId);
+            Log::info('已为 ' . count($accountsForLogin) . ' 个账号发送登录请求');
 
             return response()->json([
                 'code' => 0,
-                'message' => '兑换请求已接收，正在队列中处理',
+                'message' => '成功获取处理中的计划并发送登录请求',
                 'data' => [
-                    'request_id' => $requestId,
-                    'card_number' => $parseResult['card_number'],
-                    'card_type' => $parseResult['card_type'],
-                    'status' => 'queued'
+                    'plans_count' => $plans->count(),
+                    'plans' => $plansData,
+                    'login_sent' => true,
+                    'accounts_sent' => count($accountsForLogin)
                 ],
             ]);
+
         } catch (\Exception $e) {
-            Log::error('处理兑换消息失败: ' . $e->getMessage());
+            Log::error('测试方法执行失败: ' . $e->getMessage(), [
+                'exception' => $e->getTraceAsString()
+            ]);
+
             return response()->json([
                 'code' => 500,
-                'message' => '处理兑换消息失败: ' . $e->getMessage(),
+                'message' => '测试方法执行失败: ' . $e->getMessage(),
                 'data' => null,
             ]);
         }

@@ -5,6 +5,8 @@ use App\Http\Controllers\AdminRoleController;
 use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\Api\GiftCardExchangeController;
 use App\Http\Controllers\Api\AppleAccountController;
+use App\Http\Controllers\Api\GiftExchangeController;
+use App\Http\Controllers\Api\ItunesTradeRateController;
 use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\CountriesController;
 use App\Http\Controllers\GiftCardController;
@@ -217,6 +219,15 @@ Route::group(['middleware' => ['auth:api']], function() {
 
     // iTunes交易路由
     Route::prefix('trade/itunes')->group(function () {
+        // 交易汇率管理
+        Route::get('/rates', [ItunesTradeRateController::class, 'index']);
+        Route::get('/rates/{id}', [ItunesTradeRateController::class, 'show']);
+        Route::post('/rates', [ItunesTradeRateController::class, 'store']);
+        Route::put('/rates/{id}', [ItunesTradeRateController::class, 'update']);
+        Route::delete('/rates/{id}', [ItunesTradeRateController::class, 'destroy']);
+        Route::post('/rates/batch-status', [ItunesTradeRateController::class, 'batchUpdateStatus']);
+        Route::get('/rates-statistics', [ItunesTradeRateController::class, 'statistics']);
+
         // 国家配置接口
         Route::get('/configs', 'App\Http\Controllers\Api\ItunesTradeController@getConfigs');
         Route::get('/configs/{countryCode}', 'App\Http\Controllers\Api\ItunesTradeController@getConfig');
@@ -235,6 +246,8 @@ Route::group(['middleware' => ['auth:api']], function() {
 
     // 礼品卡兑换路由组
     Route::prefix('trade/gift-exchange')->group(function () {
+        // 账号路由
+        Route::get('/accounts', [GiftExchangeController::class, 'lists']);
         // 计划路由
         Route::get('/plans', 'App\Http\Controllers\Api\GiftExchangeController@getPlans');
         Route::get('/plans/{id}', 'App\Http\Controllers\Api\GiftExchangeController@getPlan');

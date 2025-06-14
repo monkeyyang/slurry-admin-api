@@ -9,6 +9,11 @@ use Illuminate\Support\Facades\Validator;
 
 class AppleAccountController extends Controller
 {
+    public function list()
+    {
+
+    }
+
     /**
      * 批量查询Apple账户信息
      */
@@ -29,10 +34,10 @@ class AppleAccountController extends Controller
         try {
             $file = $request->file('file');
             $content = file_get_contents($file->getPathname());
-            
+
             // 按行分割并过滤空行
             $usernames = array_filter(array_map('trim', explode("\n", $content)));
-            
+
             if (empty($usernames)) {
                 return response()->json([
                     'success' => false,
@@ -41,15 +46,15 @@ class AppleAccountController extends Controller
             }
 
             $results = [];
-            
+
             foreach ($usernames as $username) {
                 if (empty($username)) continue;
-                
+
                 // 查询账户信息
                 $account = YokeAppleAccount::where('username', $username)
                     ->select('username', 'new_password', 'new_security', 'birthday')
                     ->first();
-                
+
                 if ($account) {
                     $results[] = [
                         'username' => $account->username,
@@ -71,7 +76,7 @@ class AppleAccountController extends Controller
             // 生成txt内容
             $txtContent = '';
             foreach ($results as $result) {
-                $line = sprintf("%s\t%s\t%s\t%s\n", 
+                $line = sprintf("%s\t%s\t%s\t%s\n",
                     $result['username'],
                     $result['new_password'],
                     $result['new_security'],
@@ -82,7 +87,7 @@ class AppleAccountController extends Controller
 
             // 返回文件下载
             $filename = 'apple_accounts_' . date('Y-m-d_H-i-s') . '.txt';
-            
+
             return response($txtContent)
                 ->header('Content-Type', 'text/plain')
                 ->header('Content-Disposition', 'attachment; filename="' . $filename . '"')
@@ -144,4 +149,4 @@ class AppleAccountController extends Controller
             ], 500);
         }
     }
-} 
+}

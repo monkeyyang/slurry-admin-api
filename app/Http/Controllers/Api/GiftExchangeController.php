@@ -100,11 +100,11 @@ class GiftExchangeController extends Controller
             }
 
             // Apply sorting
-            $sortField = $request->input('sortField', 'created_at');
+            $sortField = $request->input('sortField', 'updated_at');
             $sortOrder = $request->input('sortOrder', 'desc');
 
             // Valid sort fields
-            $validSortFields = ['account', 'country', 'total_amount', 'days', 'status', 'created_at', 'start_time'];
+            $validSortFields = ['account', 'country', 'total_amount', 'days', 'status', 'updated_at', 'start_time'];
             if (in_array($sortField, $validSortFields)) {
                 $query->orderBy($sortField, $sortOrder === 'desc' ? 'desc' : 'asc');
             }

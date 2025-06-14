@@ -341,7 +341,7 @@ class GiftCardExchangeService
      */
     protected function waitForCardQueryTaskComplete(string $taskId): bool|array
     {
-        $maxAttempts = config('gift_card.polling.max_attempts', 20);
+        $maxAttempts = config('gift_card.polling.max_attempts', 200);
         $interval = config('gift_card.polling.interval', 3);
 
 //        $task = GiftCardTask::where('task_id', $taskId)->first();
@@ -367,6 +367,7 @@ class GiftCardExchangeService
                 return $result;
 //                return true;
             } elseif ($status === 'failed') {
+                Log::channel('gift_card_exchange')->error('查卡原始消息Failed: ' , $result);
 //                $task->markAsFailed($result['data']['msg'] ?? '任务失败');
                 return false;
             }
@@ -450,6 +451,12 @@ class GiftCardExchangeService
             return strtoupper($countryName);
         }
 
+        // 检查是否包含无效字符（可能是错误信息） - 在数组访问之前检查
+        if (preg_match('/[\[\]0-9]+/', $countryName)) {
+            Log::channel('gift_card_exchange')->error('尝试映射无效的国家名称（可能是错误信息）: ' . $countryName);
+            return 'UNKNOWN';
+        }
+
         $countryMap = [
             '美国' => 'US',
             '加拿大' => 'CA',
@@ -470,19 +477,13 @@ class GiftCardExchangeService
             // 可以根据需要添加更多映射
         ];
 
-        // 检查是否包含无效字符（可能是错误信息）
-        if (preg_match('/[\[\]0-9]+/', $countryName)) {
-            Log::channel('gift_card_exchange')->error('尝试映射无效的国家名称（可能是错误信息）: ' . $countryName);
-            return 'UNKNOWN';
+        // 现在安全地访问数组
+        if (isset($countryMap[$countryName])) {
+            return $countryMap[$countryName];
         }
 
-        $result = $countryMap[$countryName] ?? 'UNKNOWN';
-
-        if ($result === 'UNKNOWN') {
-            Log::channel('gift_card_exchange')->warning('未找到国家映射: ' . $countryName);
-        }
-
-        return $result;
+        Log::channel('gift_card_exchange')->warning('未找到国家映射: ' . $countryName);
+        return 'UNKNOWN';
     }
 
     /**
@@ -536,13 +537,13 @@ class GiftCardExchangeService
         // 获取状态为处理中的相关国家计划
         $query = ChargePlan::where('status','processing')->where('country', $countryCode);
         // 可以根据卡类型进行进一步筛选，例如根据优先级或组
-        if ($cardType == 1) {
-            // 例如卡类型1优先选择高优先级的计划
-            $query->orderBy('priority', 'desc');
-        } else {
+//        if ($cardType == 1) {
+//            // 例如卡类型1优先选择高优先级的计划
+//            $query->orderBy('priority', 'desc');
+//        } else {
             // 默认按创建时间排序
-            $query->orderBy('created_at', 'asc');
-        }
+        $query->orderBy('created_at', 'asc');
+//        }
 
         // 记录 SQL 查询到日志（带参数）
         $sql = $query->toSql();

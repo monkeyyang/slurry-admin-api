@@ -183,9 +183,10 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                     'request_id' => $this->requestId,
                     'error' => $result['message']
                 ]);
-//                send_msg_to_wechat($this->input['room_id'], $result['message']);
-                // 如果是业务逻辑错误（如卡无效、没有合适账户等），不重试
+
+                // 如果是业务逻辑错误（如卡无效、没有合适账户等），发送消息到微信并不重试
                 if ($this->shouldNotRetry($result['message'])) {
+                    $this->sendFailureMessageToWechat($result['message']);
                     $this->fail(new Exception($result['message']));
                     return;
                 }
@@ -199,7 +200,12 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                 'error' => $e->getMessage(),
                 'attempt' => $this->attempts()
             ]);
-//            send_msg_to_wechat($this->input['room_id'], $e->getMessage());
+
+            // 如果是不重试的错误，发送消息到微信
+            if ($this->shouldNotRetry($e->getMessage())) {
+                $this->sendFailureMessageToWechat($e->getMessage());
+            }
+
             throw $e;
         }
     }
@@ -246,21 +252,23 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
             'error' => $exception->getMessage(),
             'attempts' => $this->attempts()
         ]);
-        $error = [
-            '礼品卡无效: 该礼品卡已经被兑换-AlreadyRedeemed' => 'err1'
-        ];
-        $date = date('Y-m-d H:i:s');
-        $errorMsg['err1'] = "该代码已经被兑换";
-        $failMessage = sprintf(
-            "❌失败：%s\n" .
-            "--------------------------------------\n" .
-            "加载卡号：%s\n" .
-            "执行时间：%s",
-            $errorMsg[$error[$exception->getMessage()]],
-            $this->extractCardNumber(),
-            $date
-        );
-        send_msg_to_wechat($this->input['room_id'], $failMessage);
+
+        // 如果不是应该发送到微信的错误类型，就不发送消息
+        // 因为 shouldNotRetry 的错误已经在 handle 方法中发送过了
+        if (!$this->shouldNotRetry($exception->getMessage())) {
+            $failMessage = sprintf(
+                "❌系统错误：%s\n" .
+                "--------------------------------------\n" .
+                "加载卡号：%s\n" .
+                "执行时间：%s\n" .
+                "尝试次数：%d",
+                $exception->getMessage(),
+                $this->extractCardNumber(),
+                date('Y-m-d H:i:s'),
+                $this->attempts()
+            );
+            send_msg_to_wechat($this->input['room_id'], $failMessage);
+        }
     }
 
     /**
@@ -432,7 +440,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
         // 确保所有金额都使用BC函数格式化为两位小数
         $amount = bcadd($data['amount'], '0', 2);
         $beforeMoney = bcadd($data['before_money'], '0', 2);
-        $rate = bcadd($data['rate'], '0', 1); // 汇率保留一位小数
+        $rate = bcadd($data['rate'], '0', 2); // 汇率保留一位小数
         $changeAmount = bcadd($data['change_amount'], '0', 0); // 变动金额保留整数
         $afterMoney = bcadd($data['after_money'], '0', 2);
         $currency = $data['currency'] ?? 'USD'; // 动态货币代码
@@ -773,5 +781,27 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
             // 默认返回当前时间
             return Carbon::now();
         }
+    }
+
+    /**
+     * 发送失败消息到微信
+     *
+     * @param string $message
+     * @return void
+     */
+    private function sendFailureMessageToWechat(string $message): void
+    {
+        $failMessage = sprintf(
+            "❌失败：%s\n" .
+            "--------------------------------------\n" .
+            "加载卡号：%s\n" .
+            "执行时间：%s",
+            $message,
+            $this->extractCardNumber(),
+            date('Y-m-d H:i:s')
+        );
+        Log::channel('gift_card_exchange')->error("发送到微信: " . $failMessage);
+
+        send_msg_to_wechat($this->input['room_id'], $failMessage);
     }
 }
