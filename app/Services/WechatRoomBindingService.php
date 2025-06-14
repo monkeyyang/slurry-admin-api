@@ -170,9 +170,9 @@ class WechatRoomBindingService
             $settings = WechatRoomBindingSetting::getSettings();
             $currentCount = ChargePlanWechatRoomBinding::where('room_id', $roomId)->count();
 
-            if ($currentCount >= $settings->max_plans_per_room) {
-                throw new Exception("该群组已达到最大计划数限制（{$settings->max_plans_per_room}个）");
-            }
+//            if ($currentCount >= $settings->max_plans_per_room) {
+//                throw new Exception("该群组已达到最大计划数限制（{$settings->max_plans_per_room}个）");
+//            }
 
             // 创建绑定
             $binding = ChargePlanWechatRoomBinding::create([

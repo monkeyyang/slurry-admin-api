@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\AppleAccountController;
 use App\Http\Controllers\Api\GiftExchangeController;
 use App\Http\Controllers\Api\ItunesTradeRateController;
 use App\Http\Controllers\Api\ItunesTradePlanController;
+use App\Http\Controllers\Api\ItunesTradeAccountController;
 use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\CountriesController;
 use App\Http\Controllers\GiftCardController;
@@ -228,7 +229,7 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::delete('/rates/{id}', [ItunesTradeRateController::class, 'destroy']);
         Route::post('/rates/batch-status', [ItunesTradeRateController::class, 'batchUpdateStatus']);
         Route::get('/rates-statistics', [ItunesTradeRateController::class, 'statistics']);
-        
+
         // 根据国家获取汇率列表（不分页）
         Route::get('/rates/by-country/{countryCode}', [ItunesTradeRateController::class, 'getRatesByCountry']);
 
@@ -241,6 +242,19 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::delete('/plans/batch', [ItunesTradePlanController::class, 'batchDestroy']);
         Route::patch('/plans/{id}/status', [ItunesTradePlanController::class, 'updateStatus']);
         Route::post('/plans/{id}/add-days', [ItunesTradePlanController::class, 'addDays']);
+
+        // iTunes交易账号路由
+        Route::get('/accounts', [ItunesTradeAccountController::class, 'index']);
+        Route::get('/accounts/{id}', [ItunesTradeAccountController::class, 'show']);
+        Route::post('/accounts/batch-import', [ItunesTradeAccountController::class, 'batchImport']);
+        Route::put('/accounts/{id}/status', [ItunesTradeAccountController::class, 'updateStatus']);
+        Route::delete('/accounts/{id}', [ItunesTradeAccountController::class, 'destroy']);
+        Route::delete('/accounts/batch', [ItunesTradeAccountController::class, 'batchDestroy']);
+        Route::post('/accounts/{id}/bind-plan', [ItunesTradeAccountController::class, 'bindToPlan']);
+        Route::post('/accounts/{id}/unbind-plan', [ItunesTradeAccountController::class, 'unbindFromPlan']);
+        Route::put('/accounts/{id}/login-status', [ItunesTradeAccountController::class, 'updateLoginStatus']);
+        Route::get('/accounts/statistics', [ItunesTradeAccountController::class, 'statistics']);
+        Route::get('/accounts/available', [ItunesTradeAccountController::class, 'getAvailableAccounts']);
 
         // 国家配置接口
         Route::get('/configs', 'App\Http\Controllers\Api\ItunesTradeController@getConfigs');
@@ -257,6 +271,9 @@ Route::group(['middleware' => ['auth:api']], function() {
         // 群组接口
         Route::get('/groups', 'App\Http\Controllers\Api\MrRoomGroupController@getGroupsList');
     });
+
+
+
 
     // 礼品卡兑换路由组
     Route::prefix('trade/gift-exchange')->group(function () {
