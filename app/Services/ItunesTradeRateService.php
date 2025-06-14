@@ -271,6 +271,34 @@ class ItunesTradeRateService
     }
 
     /**
+     * 根据国家代码获取汇率列表（不分页）
+     *
+     * @param string $countryCode
+     * @return array
+     */
+    public function getRatesByCountry(string $countryCode): array
+    {
+        $query = ItunesTradeRate::query()->with(['customer', 'country']);
+
+        // 按国家代码筛选
+        $query->byCountry($countryCode);
+
+        // 只获取启用状态的汇率
+        $query->active();
+
+        // 按创建时间倒序排列
+        $tradeRates = $query->orderBy('created_at', 'desc')->get();
+
+        // 批量获取跨库关联数据
+        $crossDbData = $this->batchLoadCrossDbData($tradeRates);
+
+        // 转换为API格式
+        return $tradeRates->map(function ($tradeRate) use ($crossDbData) {
+            return $this->toApiArrayWithRelations($tradeRate, $crossDbData);
+        })->toArray();
+    }
+
+    /**
      * 获取统计信息
      *
      * @return array

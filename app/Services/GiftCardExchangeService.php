@@ -189,7 +189,7 @@ class GiftCardExchangeService
             $exchangeResult = $this->executeExchange($plan, $cardInfo['card_number'], $cardInfo);
 
             // 同步数据到微信
-            $msg = "兑换成功\n---------------\n";
+            $msg = "兑换成功\n---------\n";
             $msg .= $exchangeResult['message'];
             Log::channel('gift_card_exchange')->info('兑换结果：'. $msg);
             return [
@@ -1058,7 +1058,7 @@ class GiftCardExchangeService
      */
     protected function waitForRedemptionTaskComplete(string $taskId): bool|array
     {
-        $maxAttempts = config('gift_card.polling.max_attempts', 20);
+        $maxAttempts = config('gift_card.polling.max_attempts', 500);
         $interval = config('gift_card.polling.interval', 3);
 
         for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {

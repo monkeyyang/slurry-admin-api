@@ -258,7 +258,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
         if (!$this->shouldNotRetry($exception->getMessage())) {
             $failMessage = sprintf(
                 "❌系统错误：%s\n" .
-                "--------------------------------------\n" .
+                "---------------------------------\n" .
                 "加载卡号：%s\n" .
                 "执行时间：%s\n" .
                 "尝试次数：%d",
@@ -447,7 +447,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
 
         return sprintf(
             "[强]兑换成功\n" .
-            "--------------------------------------\n" .
+            "---------------------------------\n" .
             "加载卡号：%s\n" .
             "加载结果：$%s（%s）\n" .
             "原始账单：%s\n" .
@@ -793,7 +793,7 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
     {
         $failMessage = sprintf(
             "❌失败：%s\n" .
-            "--------------------------------------\n" .
+            "---------------------------------\n" .
             "加载卡号：%s\n" .
             "执行时间：%s",
             $message,

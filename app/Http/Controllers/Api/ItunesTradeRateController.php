@@ -30,7 +30,7 @@ class ItunesTradeRateController extends Controller
         try {
             $params = $request->validate([
                 'page' => 'nullable|integer|min:1',
-                'pageSize' => 'nullable|integer|min:1|max:100',
+                'pageSize' => 'nullable|integer|min:1|max:1000',
                 'country' => 'nullable|string|max:10',
                 'countryName' => 'nullable|string|max:100',
                 'uid' => 'nullable|integer',
@@ -382,6 +382,37 @@ class ItunesTradeRateController extends Controller
             return response()->json([
                 'code' => 500,
                 'message' => '批量更新状态失败: ' . $e->getMessage(),
+                'data' => null,
+            ], 500);
+        }
+    }
+
+    /**
+     * 根据国家代码获取汇率列表（不分页）
+     *
+     * @param string $countryCode
+     * @return JsonResponse
+     */
+    public function getRatesByCountry(string $countryCode): JsonResponse
+    {
+        try {
+            $rates = $this->itunesTradeRateService->getRatesByCountry($countryCode);
+
+            return response()->json([
+                'code' => 0,
+                'message' => 'success',
+                'data' => $rates,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('根据国家代码获取汇率列表失败: ' . $e->getMessage(), [
+                'country_code' => $countryCode,
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'code' => 500,
+                'message' => '获取汇率列表失败: ' . $e->getMessage(),
                 'data' => null,
             ], 500);
         }

@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\GiftCardExchangeController;
 use App\Http\Controllers\Api\AppleAccountController;
 use App\Http\Controllers\Api\GiftExchangeController;
 use App\Http\Controllers\Api\ItunesTradeRateController;
+use App\Http\Controllers\Api\ItunesTradePlanController;
 use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\CountriesController;
 use App\Http\Controllers\GiftCardController;
@@ -227,6 +228,19 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::delete('/rates/{id}', [ItunesTradeRateController::class, 'destroy']);
         Route::post('/rates/batch-status', [ItunesTradeRateController::class, 'batchUpdateStatus']);
         Route::get('/rates-statistics', [ItunesTradeRateController::class, 'statistics']);
+        
+        // 根据国家获取汇率列表（不分页）
+        Route::get('/rates/by-country/{countryCode}', [ItunesTradeRateController::class, 'getRatesByCountry']);
+
+        // 交易计划管理
+        Route::get('/plans', [ItunesTradePlanController::class, 'index']);
+        Route::get('/plans/{id}', [ItunesTradePlanController::class, 'show']);
+        Route::post('/plans', [ItunesTradePlanController::class, 'store']);
+        Route::put('/plans/{id}', [ItunesTradePlanController::class, 'update']);
+        Route::delete('/plans/{id}', [ItunesTradePlanController::class, 'destroy']);
+        Route::delete('/plans/batch', [ItunesTradePlanController::class, 'batchDestroy']);
+        Route::patch('/plans/{id}/status', [ItunesTradePlanController::class, 'updateStatus']);
+        Route::post('/plans/{id}/add-days', [ItunesTradePlanController::class, 'addDays']);
 
         // 国家配置接口
         Route::get('/configs', 'App\Http\Controllers\Api\ItunesTradeController@getConfigs');
