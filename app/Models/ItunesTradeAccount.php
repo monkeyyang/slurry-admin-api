@@ -22,13 +22,15 @@ class ItunesTradeAccount extends Model
     const STATUS_WAITING = 'waiting';
 
     // 登录状态常量
-    const LOGIN_STATUS_VALID = 'valid';
-    const LOGIN_STATUS_INVALID = 'invalid';
+    const STATUS_LOGIN_ACTIVE = 'valid';
+    const STATUS_LOGIN_FAILED = 'failed';
+    const STATUS_LOGGED_OUT = 'logout';
 
     protected $fillable = [
         'account',
         'password',
         'api_url',
+        'amount',
         'country_code',
         'status',
         'login_status',
@@ -49,10 +51,15 @@ class ItunesTradeAccount extends Model
         'password',
     ];
 
+    public function user(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(User::class, 'uid');
+    }
+
     /**
      * 设置密码时自动加密
      */
-    public function setPasswordAttribute($value)
+    public function setPasswordAttribute($value): void
     {
         if (!empty($value)) {
             $this->setEncryptedPassword($value);
@@ -139,16 +146,16 @@ class ItunesTradeAccount extends Model
         }
 
         return match($this->login_status) {
-            self::LOGIN_STATUS_VALID => '有效',
-            self::LOGIN_STATUS_INVALID => '无效',
-            default => '未知',
+            self::STATUS_LOGIN_ACTIVE => '有效',
+            self::STATUS_LOGIN_FAILED => '登录失败',
+            default => '未登录',
         };
     }
 
     /**
      * 关联计划
      */
-    public function plan()
+    public function plan(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
         return $this->belongsTo(ItunesTradePlan::class, 'plan_id');
     }
@@ -156,23 +163,15 @@ class ItunesTradeAccount extends Model
     /**
      * 关联国家
      */
-    public function country()
+    public function country(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
         return $this->belongsTo(Countries::class, 'country_code', 'code');
     }
 
     /**
-     * 关联用户
-     */
-    public function user()
-    {
-        return $this->belongsTo('App\Models\User', 'uid');
-    }
-
-    /**
      * 关联兑换日志
      */
-    public function exchangeLogs()
+    public function exchangeLogs(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(ItunesTradeAccountLog::class, 'account_id');
     }
@@ -272,17 +271,30 @@ class ItunesTradeAccount extends Model
      */
     public function toApiArray(): array
     {
-
+        $user = $this->user;
+        $plan = $this->plan;
+        $country = $this->country;
         return [
             'id' => (string) $this->id,
             'account' => $this->account,
             'apiUrl' => $this->api_url,
-            'country' => $this->country_code,
+            'country_code' => $this->country_code,
+            'amount' => $this->amount,
             'status' => $this->status,
             'loginStatus' => $this->login_status,
             'currentPlanDay' => $this->current_plan_day,
             'planId' => $this->plan_id ? (string) $this->plan_id : null,
             'completedDays' => $this->getDailyCompletions(),
+            'user' => $this->user ? [
+                'nickname' => $this->user->nickname
+            ] : null,
+            'country' => $this->country ? [
+                'id' => $this->country->id,
+                'code' => $this->country->code,
+                'name_zh' => $this->country->name_zh,
+                'name_en' => $this->country->name_en
+            ] : null,
+            'plan' => $this->plan,
             'createdAt' => $this->created_at ? $this->created_at->format('Y-m-d H:i:s') : null,
             'updatedAt' => $this->updated_at ? $this->updated_at->format('Y-m-d H:i:s') : null,
         ];

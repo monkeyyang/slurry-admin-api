@@ -129,3 +129,48 @@ function send_msg_to_wechat(string $roomId, string $msg, string $type = 'MT_SEND
 
     return true;
 }
+
+/**
+ * 发送登录请求
+ *
+ * @param array $accounts 账号列表
+ * @return void
+ */
+function send_async_login_request(array $accounts): void
+{
+    $loginUrl = 'http://47.76.200.188:8080/api/login_poll/new';
+    try {
+
+        $loginData = [
+            'list' => []
+        ];
+
+        $id = 1;
+        foreach ($accounts as $account) {
+            $loginData['list'][] = [
+                'id' => $id++,
+                'username' => $account['account'],
+                'password' => $account['password'],
+                'VerifyUrl' => $account['api_url'] ?? ''
+            ];
+        }
+
+        $response = Http::timeout(30)->post($loginUrl, $loginData);
+        $responseData = $response->json(); // 获取JSON响应数据
+        $statusCode = $response->status(); // 获取HTTP状态码
+        Log::info('登录请求发送成功且收到回调', [
+            'url' => $loginUrl,
+            'accounts_count' => count($loginData['list']),
+            'request_data' => $loginData,
+            'response_status' => $statusCode,
+            'response_data' => $responseData,
+            'success' => $response->successful() // 是否为成功响应(2xx)
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error('登录请求发送失败: ' . $e->getMessage(), [
+            'url' => $loginUrl,
+            'accounts' => $accounts
+        ]);
+    }
+}

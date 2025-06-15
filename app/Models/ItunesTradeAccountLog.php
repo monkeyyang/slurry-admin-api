@@ -36,7 +36,7 @@ class ItunesTradeAccountLog extends Model
     /**
      * 关联账号
      */
-    public function account()
+    public function account(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
         return $this->belongsTo(ItunesTradeAccount::class, 'account_id');
     }
@@ -44,7 +44,7 @@ class ItunesTradeAccountLog extends Model
     /**
      * 关联计划
      */
-    public function plan()
+    public function plan(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
         return $this->belongsTo(ItunesTradePlan::class, 'plan_id');
     }
@@ -109,4 +109,4 @@ class ItunesTradeAccountLog extends Model
     {
         return $query->where('status', self::STATUS_PENDING);
     }
-} 
+}

@@ -173,6 +173,15 @@ return [
             'level' => 'debug',
             'days' => 14,
         ],
+
+        // WebSocket账号监控日志
+        'websocket_monitor' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/account_monitor.log'),
+            'level' => env('WEBSOCKET_LOG_LEVEL', 'debug'),
+            'days' => 7,
+            'replace_placeholders' => true,
+        ],
     ],
 
 ];

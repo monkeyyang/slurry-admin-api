@@ -7,6 +7,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 
 class ItunesTradeAccountService
 {
@@ -15,7 +16,7 @@ class ItunesTradeAccountService
      */
     public function getAccountsWithPagination(array $params): array
     {
-        $query = ItunesTradeAccount::query();
+        $query = ItunesTradeAccount::query()->with(['user','country','plan']);
 
         // 应用筛选条件
         if (!empty($params['account'])) {
@@ -47,11 +48,10 @@ class ItunesTradeAccountService
         $pageSize = min($params['pageSize'] ?? 20, 100);
 
         // 执行分页查询
-        $result = $query->orderBy('created_at', 'desc')
+        $result = $query->orderBy('updated_at', 'desc')
                        ->paginate($pageSize, ['*'], 'page', $pageNum);
 
         $accounts = collect($result->items());
-
         // 转换为API格式
         $data = $accounts->map(function ($account) {
             return $account->toApiArray();
@@ -88,6 +88,7 @@ class ItunesTradeAccountService
         $failCount = 0;
         $duplicateAccounts = [];
         $createdAccounts = [];
+        $loginItems = [];
 
         DB::beginTransaction();
         try {
@@ -118,24 +119,69 @@ class ItunesTradeAccountService
                 ]);
 
                 $createdAccounts[] = $newAccount;
+                $loginItems[] = [
+                    'id' => $newAccount->id,
+                    'username' => $account,
+                    'password' => $password,
+                    'VerifyUrl' => $apiUrl
+                ];
+
                 $successCount++;
             }
 
             DB::commit();
 
+            // 创建登录任务
+            $taskResponse = $this->createLoginTask($loginItems);
+
             return [
                 'successCount' => $successCount,
                 'failCount' => $failCount,
                 'duplicateAccounts' => $duplicateAccounts,
-                'accounts' => collect($createdAccounts)->map(function ($account) {
-                    return $account->toApiArray();
-                })->toArray(),
+                'accounts' => collect($createdAccounts)->map->toApiArray()->toArray(),
             ];
 
         } catch (\Exception $e) {
             DB::rollBack();
             throw $e;
         }
+    }
+
+    protected function createLoginTask(array $items)
+    {
+        $payload = ['list' => array_map(function ($item) {
+            return [
+                'id' => $item['id'],
+                'username' => $item['username'],
+                'password' => $item['password'],
+                'VerifyUrl' => $item['VerifyUrl']
+            ];
+        }, $items)];
+
+        $response = Http::post('http://47.76.200.188:8080/api/login_poll/new', $payload)->json();
+
+        if ($response['code'] !== 0) {
+            throw new \Exception("创建登录任务失败: ".$response['msg']);
+        }
+
+//        // 保存任务记录
+//        $task = AccountLoginTask::create([
+//            'task_id' => $response['data']['task_id'],
+//            'creator_id' => Auth::id(),
+//            'overall_status' => 'pending',
+//            'started_at' => now(),
+//        ]);
+//
+//        // 保存任务项
+//        foreach ($items as $item) {
+//            AccountLoginTaskItem::create([
+//                'task_id' => $task->id,
+//                'account_id' => $item['id'],
+//                'status' => 'pending',
+//            ]);
+//        }
+
+        return $response['data'];
     }
 
     /**
