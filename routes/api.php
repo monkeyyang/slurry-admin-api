@@ -4,6 +4,7 @@ use App\Http\Controllers\AdminMenuController;
 use App\Http\Controllers\AdminRoleController;
 use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\Api\GiftCardExchangeController;
+use App\Http\Controllers\Api\GiftCardController as ApiGiftCardController;
 use App\Http\Controllers\Api\AppleAccountController;
 use App\Http\Controllers\Api\GiftExchangeController;
 use App\Http\Controllers\Api\ItunesTradeRateController;
@@ -203,6 +204,18 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('/redeem/new', 'App\Http\Controllers\Api\GiftCardExchangeController@redeemCards');
         Route::get('/redeem/status', 'App\Http\Controllers\Api\GiftCardExchangeController@getRedemptionTaskStatus');
         Route::post('/redeem/history', 'App\Http\Controllers\Api\GiftCardExchangeController@getRedemptionHistory');
+    });
+
+    // 新的礼品卡批量兑换路由组
+    Route::prefix('giftcards')->group(function () {
+        // 批量兑换礼品卡
+        Route::post('/bulk-redeem', [ApiGiftCardController::class, 'bulkRedeem'])->name('giftcards.bulk.redeem');
+        
+        // 查询批量任务进度
+        Route::get('/batch/{batchId}/progress', [ApiGiftCardController::class, 'batchProgress'])->name('giftcards.batch.progress');
+        
+        // 取消批量任务
+        Route::post('/batch/{batchId}/cancel', [ApiGiftCardController::class, 'cancelBatch'])->name('giftcards.batch.cancel');
     });
 
     // 微信账单记录

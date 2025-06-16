@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Log;
 
 class WechatRoomBindingController extends Controller
 {
-    protected $wechatRoomBindingService;
+    protected WechatRoomBindingService $wechatRoomBindingService;
 
     public function __construct(WechatRoomBindingService $wechatRoomBindingService)
     {
@@ -18,7 +18,7 @@ class WechatRoomBindingController extends Controller
     /**
      * 获取微信群组绑定状态
      */
-    public function getBindingStatus()
+    public function getBindingStatus(): \Illuminate\Http\JsonResponse
     {
         try {
             $data = $this->wechatRoomBindingService->getBindingStatus();
@@ -33,7 +33,7 @@ class WechatRoomBindingController extends Controller
     /**
      * 更新微信群组绑定状态
      */
-    public function updateBindingStatus(Request $request)
+    public function updateBindingStatus(Request $request): \Illuminate\Http\JsonResponse
     {
         try {
             $data = $request->validate([
@@ -55,7 +55,7 @@ class WechatRoomBindingController extends Controller
     /**
      * 获取微信群组列表
      */
-    public function getWechatRooms(Request $request)
+    public function getWechatRooms(Request $request): \Illuminate\Http\JsonResponse
     {
         try {
             $params = $request->only(['page', 'pageSize', 'keyword']);
@@ -71,7 +71,7 @@ class WechatRoomBindingController extends Controller
     /**
      * 绑定计划到微信群组
      */
-    public function bindPlanToRoom(Request $request, $planId)
+    public function bindPlanToRoom(Request $request, $planId): \Illuminate\Http\JsonResponse
     {
         try {
             $data = $request->validate([
@@ -90,7 +90,7 @@ class WechatRoomBindingController extends Controller
     /**
      * 解绑计划的微信群组
      */
-    public function unbindPlanFromRoom($planId)
+    public function unbindPlanFromRoom($planId): \Illuminate\Http\JsonResponse
     {
         try {
             $result = $this->wechatRoomBindingService->unbindPlanFromRoom($planId);
@@ -105,7 +105,7 @@ class WechatRoomBindingController extends Controller
     /**
      * 批量绑定计划到微信群组
      */
-    public function batchBindPlansToRoom(Request $request)
+    public function batchBindPlansToRoom(Request $request): \Illuminate\Http\JsonResponse
     {
         try {
             $data = $request->validate([
@@ -129,7 +129,7 @@ class WechatRoomBindingController extends Controller
     /**
      * 批量解绑计划的微信群组
      */
-    public function batchUnbindPlansFromRoom(Request $request)
+    public function batchUnbindPlansFromRoom(Request $request): \Illuminate\Http\JsonResponse
     {
         try {
             $data = $request->validate([
@@ -149,7 +149,7 @@ class WechatRoomBindingController extends Controller
     /**
      * 获取微信群组执行统计
      */
-    public function getWechatRoomStats(Request $request)
+    public function getWechatRoomStats(Request $request): \Illuminate\Http\JsonResponse
     {
         try {
             $roomId = $request->query('roomId');
