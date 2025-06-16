@@ -341,7 +341,7 @@ class GiftCardExchangeService
      */
     protected function waitForCardQueryTaskComplete(string $taskId): bool|array
     {
-        $maxAttempts = config('gift_card.polling.max_attempts', 200);
+        $maxAttempts = config('gift_card.polling.max_attempts', 500);
         $interval = config('gift_card.polling.interval', 3);
 
 //        $task = GiftCardTask::where('task_id', $taskId)->first();

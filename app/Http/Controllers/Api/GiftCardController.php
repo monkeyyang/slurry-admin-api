@@ -108,6 +108,37 @@ class GiftCardController extends Controller
     }
 
     /**
+     * 获取批量任务的详细结果
+     */
+    public function batchResults(string $batchId): JsonResponse
+    {
+        try {
+            $summary = $this->batchService->getBatchSummary($batchId);
+
+            if (empty($summary)) {
+                return response()->json([
+                    'code' => 404,
+                    'message' => '批量任务不存在',
+                    'data' => null
+                ], 404);
+            }
+
+            return response()->json([
+                'code' => 0,
+                'message' => 'success',
+                'data' => $summary
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'code' => 500,
+                'message' => '获取批量任务结果失败: ' . $e->getMessage(),
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
      * 取消批量任务
      */
     public function cancelBatch(string $batchId): JsonResponse

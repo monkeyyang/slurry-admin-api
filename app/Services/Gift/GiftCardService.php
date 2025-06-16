@@ -45,16 +45,17 @@ class GiftCardService
         try {
             // 1. 验证礼品卡并获取信息
             $giftCardInfo = $this->validateGiftCard($code);
+            $this->getLogger()->info('验证礼品卡并获取信息', $giftCardInfo);
 
             // 2. 根据条件获取汇率
             $rate = $this->findMatchingRate($giftCardInfo, $roomId, $cardType, $cardForm);
-
+            $this->getLogger()->info('根据条件获取汇率', $rate->toArray());
             // 3. 获取对应的计划
             $plan = $this->findAvailablePlan($rate->id);
-
+            $this->getLogger()->info('获取对应的计划', $plan->toArray());
             // 4. 查找符合要求的账号
             $account = $this->findAvailableAccount($plan, $roomId);
-
+            $this->getLogger()->info('获取对应的计划', $account->toArray());
             // 5. 执行兑换
             $result = $this->executeRedemption($code, $giftCardInfo, $rate, $plan, $account, $batchId);
 
@@ -73,14 +74,14 @@ class GiftCardService
                 'error' => $e->getMessage(),
                 'batch_id' => $batchId
             ];
-            
+
             // 只有系统错误才记录堆栈跟踪，业务逻辑错误不记录
             if ($this->isSystemError($e)) {
                 $logData['trace'] = $e->getTraceAsString();
             }
-            
+
             $this->getLogger()->error("礼品卡兑换失败", $logData);
-            
+
             throw $e;
         }
     }
@@ -93,14 +94,14 @@ class GiftCardService
     {
         // 调用GiftCardExchangeService的validateGiftCard方法
         $result = $this->exchangeService->validateGiftCard($code);
-
-        if (!$result['valid']) {
+        $this->getLogger()->info('查卡返回数据：', $result);
+        if (!$result['is_valid'] || $result['balance']<=0 ) {
             throw new \Exception("礼品卡无效: " . ($result['message'] ?? '未知错误'));
         }
 
         return [
             'country_code' => $result['country_code'],
-            'amount' => $result['amount'],
+            'amount' => $result['balance'],
             'currency' => $result['currency'] ?? 'USD',
             'valid' => true
         ];
@@ -108,6 +109,7 @@ class GiftCardService
 
     /**
      * 查找匹配的汇率
+     * @throws \Exception
      */
     protected function findMatchingRate(array $giftCardInfo, string $roomId, string $cardType, string $cardForm): ItunesTradeRate
     {
@@ -122,7 +124,6 @@ class GiftCardService
 
         // 优先级1: 匹配room_id
         $rateWithRoomId = (clone $query)->where('room_id', $roomId)->get();
-
         if ($rateWithRoomId->isNotEmpty()) {
             $rate = $this->selectBestRateByAmount($rateWithRoomId, $amount);
             if ($rate) {
@@ -132,18 +133,18 @@ class GiftCardService
         }
 
         // 优先级2: 匹配群组（通过room_id获取群组）
-        $groupId = $this->getGroupIdByRoomId($roomId);
-        if ($groupId) {
-            $rateWithGroup = (clone $query)->where('group_id', $groupId)->get();
-
-            if ($rateWithGroup->isNotEmpty()) {
-                $rate = $this->selectBestRateByAmount($rateWithGroup, $amount);
-                if ($rate) {
-                    $this->getLogger()->info("找到匹配群组的汇率", ['rate_id' => $rate->id, 'group_id' => $groupId]);
-                    return $rate;
-                }
-            }
-        }
+//        $groupId = $this->getGroupIdByRoomId($roomId);
+//        if ($groupId) {
+//            $rateWithGroup = (clone $query)->where('group_id', $groupId)->get();
+//
+//            if ($rateWithGroup->isNotEmpty()) {
+//                $rate = $this->selectBestRateByAmount($rateWithGroup, $amount);
+//                if ($rate) {
+//                    $this->getLogger()->info("找到匹配群组的汇率", ['rate_id' => $rate->id, 'group_id' => $groupId]);
+//                    return $rate;
+//                }
+//            }
+//        }
 
         // 优先级3: 空room_id和空群组的汇率
         $defaultRates = (clone $query)
@@ -152,6 +153,7 @@ class GiftCardService
             ->get();
 
         if ($defaultRates->isNotEmpty()) {
+            $this->getLogger()->info("第一次筛选的汇率", $defaultRates->toArray());
             $rate = $this->selectBestRateByAmount($defaultRates, $amount);
             if ($rate) {
                 $this->getLogger()->info("找到默认汇率", ['rate_id' => $rate->id]);
@@ -171,7 +173,15 @@ class GiftCardService
             // 1. 检查固定面额
             if ($rate->amount_constraint === ItunesTradeRate::AMOUNT_CONSTRAINT_FIXED) {
                 $fixedAmounts = $rate->fixed_amounts ?? [];
-                if (in_array($amount, $fixedAmounts)) {
+                
+                $this->getLogger()->info("固定面额检查", [
+                    'fixed_amounts' => $fixedAmounts, 
+                    'amount' => $amount,
+                    'type' => gettype($fixedAmounts)
+                ]);
+                
+                if (is_array($fixedAmounts) && in_array($amount, $fixedAmounts)) {
+                    $this->getLogger()->info("匹配到固定面额汇率", ['rate_id' => $rate->id]);
                     return $rate;
                 }
             }
@@ -179,17 +189,38 @@ class GiftCardService
             // 2. 检查倍数要求
             elseif ($rate->amount_constraint === ItunesTradeRate::AMOUNT_CONSTRAINT_MULTIPLE) {
                 $multipleBase = $rate->multiple_base ?? 1;
+                $minAmount = $rate->min_amount ?? 0;
+                $maxAmount = ($rate->max_amount > 0) ? $rate->max_amount : PHP_FLOAT_MAX;
+                
+                $this->getLogger()->info("倍数要求检查", [
+                    'amount' => $amount,
+                    'multiple_base' => $multipleBase,
+                    'min_amount' => $minAmount,
+                    'max_amount' => $maxAmount,
+                    'modulo_result' => $amount % $multipleBase
+                ]);
+                
                 if ($amount % $multipleBase == 0 &&
-                    $amount >= ($rate->min_amount ?? 0) &&
-                    $amount <= ($rate->max_amount ?? PHP_FLOAT_MAX)) {
+                    $amount >= $minAmount &&
+                    $amount <= $maxAmount) {
+                    $this->getLogger()->info("匹配到倍数要求汇率", ['rate_id' => $rate->id]);
                     return $rate;
                 }
             }
 
             // 3. 检查全面额
             elseif ($rate->amount_constraint === ItunesTradeRate::AMOUNT_CONSTRAINT_ALL) {
-                if ($amount >= ($rate->min_amount ?? 0) &&
-                    $amount <= ($rate->max_amount ?? PHP_FLOAT_MAX)) {
+                $minAmount = $rate->min_amount ?? 0;
+                $maxAmount = ($rate->max_amount > 0) ? $rate->max_amount : PHP_FLOAT_MAX;
+                
+                $this->getLogger()->info("全面额检查", [
+                    'amount' => $amount,
+                    'min_amount' => $minAmount,
+                    'max_amount' => $maxAmount
+                ]);
+                
+                if ($amount >= $minAmount && $amount <= $maxAmount) {
+                    $this->getLogger()->info("匹配到全面额汇率", ['rate_id' => $rate->id]);
                     return $rate;
                 }
             }
@@ -299,6 +330,9 @@ class GiftCardService
                 'exchange_time' => now(),
             ]);
 
+            // 触发日志创建事件
+            event(new \App\Events\TradeLogCreated($log));
+
             // 这里应该调用实际的兑换API
             // $exchangeResult = $this->callExchangeApi($account, $code, $giftCardInfo);
 
@@ -318,6 +352,9 @@ class GiftCardService
                     'exchanged_amount' => $exchangeResult['exchanged_amount'],
                 ]);
 
+                // 触发日志更新事件
+                event(new \App\Events\TradeLogCreated($log->fresh()));
+
                 // 检查是否完成当天任务
                 $this->checkAndUpdateDayCompletion($account, $plan);
             } else {
@@ -327,15 +364,24 @@ class GiftCardService
                     'error_message' => $exchangeResult['error'] ?? '兑换失败'
                 ]);
 
+                // 触发日志更新事件
+                event(new \App\Events\TradeLogCreated($log->fresh()));
+
                 throw new \Exception("兑换API调用失败: " . ($exchangeResult['error'] ?? '未知错误'));
             }
+
+            // 刷新账号信息以获取最新余额
+            $account->refresh();
 
             return [
                 'success' => true,
                 'log_id' => $log->id,
                 'account_id' => $account->id,
+                'account_username' => $account->username ?? null,
+                'account_balance' => $account->balance ?? 0,
                 'plan_id' => $plan->id,
                 'rate_id' => $rate->id,
+                'country_code' => $giftCardInfo['country_code'],
                 'original_amount' => $giftCardInfo['amount'],
                 'exchanged_amount' => $exchangeResult['exchanged_amount'],
                 'currency' => $exchangeResult['currency'],
@@ -393,7 +439,7 @@ class GiftCardService
     protected function isSystemError(\Exception $e): bool
     {
         $message = $e->getMessage();
-        
+
         // 业务逻辑错误，不需要堆栈跟踪
         $businessErrors = [
             '礼品卡无效',
@@ -405,13 +451,13 @@ class GiftCardService
             'Bad card',
             '查卡失败'
         ];
-        
+
         foreach ($businessErrors as $businessError) {
             if (strpos($message, $businessError) !== false) {
                 return false;
             }
         }
-        
+
         // 其他错误视为系统错误，需要堆栈跟踪
         return true;
     }

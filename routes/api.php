@@ -6,10 +6,12 @@ use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\Api\GiftCardExchangeController;
 use App\Http\Controllers\Api\GiftCardController as ApiGiftCardController;
 use App\Http\Controllers\Api\AppleAccountController;
+use App\Http\Controllers\Api\GiftCardLogMonitorController;
 use App\Http\Controllers\Api\GiftExchangeController;
 use App\Http\Controllers\Api\ItunesTradeRateController;
 use App\Http\Controllers\Api\ItunesTradePlanController;
 use App\Http\Controllers\Api\ItunesTradeAccountController;
+use App\Http\Controllers\Api\TradeMonitorController;
 use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\CountriesController;
 use App\Http\Controllers\GiftCardController;
@@ -210,12 +212,48 @@ Route::group(['middleware' => ['auth:api']], function() {
     Route::prefix('giftcards')->group(function () {
         // 批量兑换礼品卡
         Route::post('/bulk-redeem', [ApiGiftCardController::class, 'bulkRedeem'])->name('giftcards.bulk.redeem');
-        
+
         // 查询批量任务进度
         Route::get('/batch/{batchId}/progress', [ApiGiftCardController::class, 'batchProgress'])->name('giftcards.batch.progress');
-        
+
+        // 获取批量任务详细结果
+        Route::get('/batch/{batchId}/results', [ApiGiftCardController::class, 'batchResults'])->name('giftcards.batch.results');
+
         // 取消批量任务
         Route::post('/batch/{batchId}/cancel', [ApiGiftCardController::class, 'cancelBatch'])->name('giftcards.batch.cancel');
+    });
+
+    // 交易监控路由
+    Route::prefix('trade/monitor')->group(function () {
+        // 获取日志列表
+        Route::get('/logs', [TradeMonitorController::class, 'getLogs']);
+
+        // 获取监控统计数据
+        Route::get('/stats', [TradeMonitorController::class, 'getStats']);
+
+        // 获取实时状态
+        Route::get('/status', [TradeMonitorController::class, 'getRealtimeStatus']);
+
+        // 清空日志
+        Route::delete('/logs', [TradeMonitorController::class, 'clearLogs']);
+
+        // 导出日志
+        Route::get('/logs/export', [TradeMonitorController::class, 'exportLogs']);
+    });
+
+    // 礼品卡日志监控路由
+    Route::prefix('giftcard/logs')->group(function () {
+        // 获取最新日志
+        Route::get('/latest', [GiftCardLogMonitorController::class, 'getLatestLogs']);
+
+        // 获取日志统计
+        Route::get('/stats', [GiftCardLogMonitorController::class, 'getLogStats']);
+
+        // 搜索日志
+        Route::get('/search', [GiftCardLogMonitorController::class, 'searchLogs']);
+
+        // 实时日志流 (Server-Sent Events)
+        Route::get('/stream', [GiftCardLogMonitorController::class, 'getLogStream']);
     });
 
     // 微信账单记录

@@ -136,7 +136,16 @@ class RedeemGiftCardJob implements ShouldQueue
             $e->getMessage()
         );
 
-        $batchService->recordError($this->batchId, $this->giftCardCode, $errorMessage);
+        // 尝试获取礼品卡基本信息（如果可能的话）
+        $cardInfo = [];
+        try {
+            // 这里可以尝试调用GiftCardService的check方法来获取基本信息
+            // 但要避免再次抛出异常
+        } catch (\Exception $ex) {
+            // 忽略获取卡信息时的异常
+        }
+
+        $batchService->recordError($this->batchId, $this->giftCardCode, $errorMessage, $cardInfo);
     }
 
     /**
@@ -199,7 +208,7 @@ class RedeemGiftCardJob implements ShouldQueue
                 $exception->getMessage()
             );
 
-            $batchService->recordError($this->batchId, $this->giftCardCode, $finalErrorMessage);
+            $batchService->recordError($this->batchId, $this->giftCardCode, $finalErrorMessage, []);
 
         } catch (Throwable $e) {
             // 这种情况通常是系统错误，记录堆栈跟踪

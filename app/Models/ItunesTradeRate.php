@@ -44,6 +44,14 @@ class ItunesTradeRate extends Model
         'updated_at'
     ];
 
+    protected $casts = [
+        'fixed_amounts' => 'array',
+        'max_amount' => 'decimal:2',
+        'min_amount' => 'decimal:2',
+        'rate' => 'decimal:2',
+        'multiple_base' => 'integer',
+    ];
+
     /**
      * 获取状态文本
      * @return string
