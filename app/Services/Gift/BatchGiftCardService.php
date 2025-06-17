@@ -42,6 +42,7 @@ class BatchGiftCardService
 
             $this->getLogger()->info("批量兑换任务已启动", [
                 'batch_id' => $batchId,
+                'cards' => $giftCardCodes,
                 'total_cards' => count($giftCardCodes),
                 'room_id' => $roomId,
                 'card_type' => $cardType,
@@ -163,10 +164,10 @@ class BatchGiftCardService
             // 记录成功结果 - 包含详细信息
             if (!empty($result)) {
                 $successData = [
-                    'gift_card_code' => $giftCardCode,
+                    'code' => $giftCardCode,
                     'country_code' => $result['country_code'] ?? null,
                     'original_amount' => $result['original_amount'] ?? null,
-                    'exchanged_amount' => $result['exchanged_amount'] ?? null,
+                    'amount' => $result['amount'] ?? null,
                     'currency' => $result['currency'] ?? null,
                     'account_id' => $result['account_id'] ?? null,
                     'account_balance' => $result['account_balance'] ?? null,

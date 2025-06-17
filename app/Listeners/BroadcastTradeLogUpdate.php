@@ -55,14 +55,14 @@ class BroadcastTradeLogUpdate implements ShouldQueue
             'message' => $this->generateLogMessage($log),
             'accountId' => (string)$log->account_id,
             'planId' => (string)($log->plan_id ?? ''),
+            'rateId' => (string)($log->rate_id ?? ''),
             'amount' => $log->amount,
             'status' => $this->mapStatus($log->status),
             'errorMessage' => $log->error_message,
             'metadata' => [
-                'gift_card_code' => $log->gift_card_code,
-                'transaction_id' => $log->transaction_id,
+                'gift_card_code' => $log->code,
                 'country_code' => $log->country_code,
-                'exchanged_amount' => $log->exchanged_amount,
+                'exchanged_amount' => $log->amount,
                 'rate_id' => $log->rate_id,
                 'batch_id' => $log->batch_id,
                 'day' => $log->day,
@@ -82,7 +82,7 @@ class BroadcastTradeLogUpdate implements ShouldQueue
 
         // 推送到Redis列表，WebSocket服务器会定期检查
         \Illuminate\Support\Facades\Redis::lpush('websocket-messages', $message);
-        
+
         // 限制列表长度，避免内存溢出
         \Illuminate\Support\Facades\Redis::ltrim('websocket-messages', 0, 999);
     }
@@ -127,7 +127,7 @@ class BroadcastTradeLogUpdate implements ShouldQueue
     private function generateLogMessage($log): string
     {
         $account = $log->account->username ?? $log->account->email ?? "账号{$log->account_id}";
-        
+
         switch ($log->status) {
             case \App\Models\ItunesTradeAccountLog::STATUS_SUCCESS:
                 return "账号 {$account} 成功兑换礼品卡 {$log->gift_card_code}，金额 {$log->amount}，获得 {$log->exchanged_amount}";
@@ -139,4 +139,4 @@ class BroadcastTradeLogUpdate implements ShouldQueue
                 return "账号 {$account} 礼品卡 {$log->gift_card_code} 状态未知";
         }
     }
-} 
+}

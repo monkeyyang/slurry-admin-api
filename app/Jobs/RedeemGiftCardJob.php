@@ -27,6 +27,8 @@ class RedeemGiftCardJob implements ShouldQueue
     protected string $cardForm;
     protected string $batchId;
 
+    const QUEUE_NAME = 'gift-card-redeem';
+
     public function __construct(
         string $giftCardCode,
         string $roomId,
@@ -41,7 +43,7 @@ class RedeemGiftCardJob implements ShouldQueue
         $this->batchId = $batchId;
 
         // 设置队列名称
-        $this->onQueue('gift-card');
+        $this->onQueue(self::QUEUE_NAME);
     }
 
     /**
@@ -54,6 +56,7 @@ class RedeemGiftCardJob implements ShouldQueue
 
     /**
      * 执行任务
+     * @throws Throwable
      */
     public function handle(GiftCardService $giftCardService, BatchGiftCardService $batchService): void
     {
@@ -95,6 +98,8 @@ class RedeemGiftCardJob implements ShouldQueue
                 'result' => $result
             ]);
 
+            send_msg_to_wechat($this->roomId,'礼品卡兑换任务完成-调试');
+
         } catch (Throwable $e) {
             // 根据错误类型决定是否记录堆栈跟踪
             $logData = [
@@ -103,14 +108,14 @@ class RedeemGiftCardJob implements ShouldQueue
                 'error' => $e->getMessage(),
                 'attempt' => $this->attempts()
             ];
-            
+
             // 只有系统错误才记录堆栈跟踪
             if ($this->isSystemError($e)) {
                 $logData['trace'] = $e->getTraceAsString();
             }
-            
-            $this->getLogger()->error("礼品卡兑换任务失败", $logData);
 
+            $this->getLogger()->error("礼品卡兑换任务失败", $logData);
+            send_msg_to_wechat($this->roomId,'礼品卡兑换任务失败-调试:'.$this->giftCardCode."\n".$e->getMessage());
             // 记录错误信息
             $this->recordFailure($e, $batchService);
 
@@ -154,7 +159,7 @@ class RedeemGiftCardJob implements ShouldQueue
     protected function isSystemError(Throwable $e): bool
     {
         $message = $e->getMessage();
-        
+
         // 业务逻辑错误，不需要堆栈跟踪
         $businessErrors = [
             '礼品卡无效',
@@ -166,13 +171,13 @@ class RedeemGiftCardJob implements ShouldQueue
             'Bad card',
             '查卡失败'
         ];
-        
+
         foreach ($businessErrors as $businessError) {
             if (strpos($message, $businessError) !== false) {
                 return false;
             }
         }
-        
+
         // 其他错误视为系统错误，需要堆栈跟踪
         return true;
     }
@@ -189,12 +194,12 @@ class RedeemGiftCardJob implements ShouldQueue
             'error' => $exception->getMessage(),
             'attempts' => $this->attempts()
         ];
-        
+
         // 只有系统错误才记录堆栈跟踪
         if ($this->isSystemError($exception)) {
             $logData['trace'] = $exception->getTraceAsString();
         }
-        
+
         $this->getLogger()->error("礼品卡兑换任务最终失败", $logData);
 
         // 确保更新批量任务进度

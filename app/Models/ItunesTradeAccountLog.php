@@ -18,6 +18,8 @@ class ItunesTradeAccountLog extends Model
     protected $fillable = [
         'account_id',
         'plan_id',
+        'rate_id',
+        'country_code',
         'day',
         'amount',
         'status',
@@ -28,6 +30,7 @@ class ItunesTradeAccountLog extends Model
     protected $casts = [
         'account_id' => 'integer',
         'plan_id' => 'integer',
+        'rate_id' => 'integer',
         'day' => 'integer',
         'amount' => 'decimal:2',
         'exchange_time' => 'datetime',
@@ -47,6 +50,11 @@ class ItunesTradeAccountLog extends Model
     public function plan(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
         return $this->belongsTo(ItunesTradePlan::class, 'plan_id');
+    }
+
+    public function rate(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(ItunesTradeRate::class, 'rate_id');
     }
 
     /**

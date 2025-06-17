@@ -32,6 +32,7 @@ class ItunesTradePlanController extends Controller
                 'pageSize' => 'nullable|integer|min:1|max:100',
                 'countryId' => 'nullable|string|max:10',
                 'rateId' => 'nullable|integer',
+                'bind_room' => ['nullable', Rule::in(['0', '1'])],
                 'status' => ['nullable', Rule::in(['enabled', 'disabled'])],
                 'keyword' => 'nullable|string|max:255',
             ]);
@@ -49,6 +50,10 @@ class ItunesTradePlanController extends Controller
 
             if (!empty($params['rateId'])) {
                 $serviceParams['rate_id'] = $params['rateId'];
+            }
+
+            if (isset($params['bind_room'])) {
+                $serviceParams['bind_room'] = (int)$params['bind_room'];
             }
 
             if (!empty($params['status'])) {
@@ -137,6 +142,7 @@ class ItunesTradePlanController extends Controller
                 'exchange_interval' => 'nullable|integer|min:1',
                 'day_interval' => 'nullable|integer|min:1',
                 'daily_amounts' => 'required|array',
+                'bind_room' => 'nullable|integer|in:0,1',
                 'status' => ['nullable', Rule::in(['enabled', 'disabled'])],
                 'description' => 'nullable|string|max:1000',
             ]);
@@ -145,6 +151,7 @@ class ItunesTradePlanController extends Controller
             $validated['float_amount'] = $validated['float_amount'] ?? 0;
             $validated['exchange_interval'] = $validated['exchange_interval'] ?? 5;
             $validated['day_interval'] = $validated['day_interval'] ?? 24;
+            $validated['bind_room'] = $validated['bind_room'] ?? 0;
             $validated['status'] = $validated['status'] ?? 'enabled';
             $validated['completed_days'] = [];
 
@@ -193,6 +200,7 @@ class ItunesTradePlanController extends Controller
                 'day_interval' => 'nullable|integer|min:1',
                 'daily_amounts' => 'sometimes|array',
                 'completed_days' => 'nullable|array',
+                'bind_room' => 'nullable|integer|in:0,1',
                 'status' => ['nullable', Rule::in(['enabled', 'disabled'])],
                 'description' => 'nullable|string|max:1000',
             ]);
@@ -385,4 +393,4 @@ class ItunesTradePlanController extends Controller
             ], 500);
         }
     }
-} 
+}

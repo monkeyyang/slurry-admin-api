@@ -29,6 +29,7 @@ class ItunesTradePlan extends Model
         'day_interval',
         'daily_amounts',
         'completed_days',
+        'bind_room',
         'status',
         'description',
     ];
@@ -43,6 +44,7 @@ class ItunesTradePlan extends Model
         'day_interval' => 'integer',
         'rate_id' => 'integer',
         'uid' => 'integer',
+        'bind_room' => 'integer'
     ];
 
     /**
@@ -89,11 +91,11 @@ class ItunesTradePlan extends Model
         if ($this->relationLoaded('user')) {
             return $this->user;
         }
-        
+
         if (empty($this->uid)) {
             return null;
         }
-        
+
         return \App\Models\User::where('id', $this->uid)->first();
     }
 
@@ -105,11 +107,11 @@ class ItunesTradePlan extends Model
         if ($this->relationLoaded('rate')) {
             return $this->rate;
         }
-        
+
         if (empty($this->rate_id)) {
             return null;
         }
-        
+
         return ItunesTradeRate::where('id', $this->rate_id)->first();
     }
 
@@ -121,11 +123,11 @@ class ItunesTradePlan extends Model
         if ($this->relationLoaded('country')) {
             return $this->country;
         }
-        
+
         if (empty($this->country_code)) {
             return null;
         }
-        
+
         return Countries::where('code', $this->country_code)->first();
     }
 
@@ -153,6 +155,7 @@ class ItunesTradePlan extends Model
             'day_interval' => $this->day_interval,
             'daily_amounts' => json_encode($this->daily_amounts),
             'completed_days' => json_encode($this->completed_days),
+            'bind_room' => $this->bind_room,
             'status' => $this->status,
             'status_text' => $this->status_text,
             'description' => $this->description,
@@ -203,6 +206,14 @@ class ItunesTradePlan extends Model
     }
 
     /**
+     * 作用域：按绑定群聊筛选
+     */
+    public function scopeByBindRoom($query, int $bindRoom)
+    {
+        return $query->where('bind_room', $bindRoom);
+    }
+
+    /**
      * 作用域：启用状态
      */
     public function scopeEnabled($query)
@@ -228,4 +239,4 @@ class ItunesTradePlan extends Model
               ->orWhere('description', 'like', "%{$keyword}%");
         });
     }
-} 
+}

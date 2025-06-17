@@ -34,6 +34,10 @@ class ItunesTradePlanService
             $query->byUser($params['uid']);
         }
 
+        if (isset($params['bind_room'])) {
+            $query->byBindRoom($params['bind_room']);
+        }
+
         // 关键词搜索
         if (!empty($params['keyword'])) {
             $query->byKeyword($params['keyword']);

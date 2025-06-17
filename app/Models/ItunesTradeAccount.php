@@ -271,9 +271,6 @@ class ItunesTradeAccount extends Model
      */
     public function toApiArray(): array
     {
-        $user = $this->user;
-        $plan = $this->plan;
-        $country = $this->country;
         return [
             'id' => (string) $this->id,
             'account' => $this->account,
@@ -325,6 +322,8 @@ class ItunesTradeAccount extends Model
                 'planDays' => $planInfo->plan_days,
                 'dailyAmounts' => $planInfo->daily_amounts,
                 'totalAmount' => (float) $planInfo->total_amount,
+                'floatAmount' => $planInfo->float_amount,
+                'enableRoomBinding' => $planInfo->bind_room,
                 'status' => $planInfo->status,
             ];
         }
@@ -337,6 +336,7 @@ class ItunesTradeAccount extends Model
                 'accountId' => (string) $log->account_id,
                 'planId' => (string) $log->plan_id,
                 'day' => $log->day,
+                'code' => $log->code,
                 'amount' => (float) $log->amount,
                 'status' => $log->status,
                 'exchangeTime' => $log->exchange_time ? $log->exchange_time->format('Y-m-d H:i:s') : null,
