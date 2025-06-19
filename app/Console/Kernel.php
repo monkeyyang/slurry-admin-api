@@ -27,8 +27,13 @@ class Kernel extends ConsoleKernel
         // $schedule->command('plans:execute')->everyFifteenMinutes();
 
         // 每10分钟检查计划天数进度
-        $schedule->command('plan:check-day-progress')->everyTenMinutes()
-                 ->name('check_plan_day_progress')
+//        $schedule->command('plan:check-day-progress')->everyTenMinutes()
+//                 ->name('check_plan_day_progress')
+//                 ->withoutOverlapping();
+
+        // 每5分钟处理iTunes账号状态转换
+        $schedule->command('itunes:process-accounts')->everyFiveMinutes()
+                 ->name('process_itunes_accounts')
                  ->withoutOverlapping();
     }
 

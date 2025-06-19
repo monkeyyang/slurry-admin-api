@@ -44,7 +44,7 @@ class CheckPlanDayProgressCommand extends Command
                 }
             } catch (\Exception $e) {
                 $this->error("处理计划 {$plan->id} 时发生错误: " . $e->getMessage());
-                Log::error("CheckPlanDayProgressCommand: 处理计划 {$plan->id} 失败", [
+                Log::channel('gift_card_exchange')->error("CheckPlanDayProgressCommand: 处理计划 {$plan->id} 失败", [
                     'error' => $e->getMessage(),
                     'plan_id' => $plan->id
                 ]);

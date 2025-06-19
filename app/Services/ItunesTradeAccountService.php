@@ -114,7 +114,7 @@ class ItunesTradeAccountService
                     'password' => $password,
                     'api_url' => $apiUrl,
                     'country_code' => $country,
-                    'status' => ItunesTradeAccount::STATUS_WAITING,
+                    'status' => ItunesTradeAccount::STATUS_PROCESSING,
                     'uid' => Auth::id()
                 ]);
 

@@ -13,7 +13,7 @@ class ProcessForecastCrawlerQueue extends Command
 
     public function handle()
     {
-        Log::info('====== 开始执行预报爬虫队列处理命令 ======');
+        Log::channel('forecast_crawler')->info('====== 开始执行预报爬虫队列处理命令 ======');
         $this->info('开始处理预报爬虫队列...');
         
         try {
@@ -28,11 +28,11 @@ class ProcessForecastCrawlerQueue extends Command
                 ->where('warehouse_forecast.deleted', 0)
                 ->count();
             
-            Log::info("发现 {$pendingCount} 个待处理任务");
+            Log::channel('forecast_crawler')->info("发现 {$pendingCount} 个待处理任务");
             $this->info("发现 {$pendingCount} 个待处理任务");
             
             if ($pendingCount == 0) {
-                Log::info('没有需要处理的任务，命令退出');
+                Log::channel('forecast_crawler')->info('没有需要处理的任务，命令退出');
                 $this->info('没有需要处理的任务，程序退出');
                 return;
             }
@@ -54,11 +54,11 @@ class ProcessForecastCrawlerQueue extends Command
             
             $this->newLine();
             $this->info('队列处理完成！');
-            Log::info('====== 预报爬虫队列处理命令执行完成 ======');
+            Log::channel('forecast_crawler')->info('====== 预报爬虫队列处理命令执行完成 ======');
             
         } catch (\Exception $e) {
-            Log::error('处理队列时发生错误：' . $e->getMessage());
-            Log::error('错误堆栈: ' . $e->getTraceAsString());
+            Log::channel('forecast_crawler')->error('处理队列时发生错误：' . $e->getMessage());
+            Log::channel('forecast_crawler')->error('错误堆栈: ' . $e->getTraceAsString());
             $this->error('处理队列时发生错误：' . $e->getMessage());
         }
     }

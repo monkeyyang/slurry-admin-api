@@ -25,6 +25,7 @@ class ItunesTradeAccountLog extends Model
         'status',
         'exchange_time',
         'error_message',
+        'code',
     ];
 
     protected $casts = [

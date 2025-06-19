@@ -21,6 +21,7 @@ class GiftCardController extends Controller
     {
         $validated = $request->validate([
             'room_id' => 'required|string|max:255',
+            'msgid' => 'nullable|string|max:255',
             'codes' => 'required|array|min:1|max:100', // 限制最多100张卡
             'codes.*' => 'required|string|min:10|max:20', // 礼品卡码长度限制
             'card_type' => ['required', Rule::in(['fast', 'slow'])],
@@ -44,7 +45,8 @@ class GiftCardController extends Controller
                 $validated['codes'],
                 $validated['room_id'],
                 $validated['card_type'],
-                $validated['card_form']
+                $validated['card_form'],
+                $validated['msgid']
             );
 
             return response()->json([

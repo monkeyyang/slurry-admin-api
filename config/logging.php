@@ -182,6 +182,15 @@ return [
             'days' => 7,
             'replace_placeholders' => true,
         ],
+
+        // 脚本处理账号状态日志
+        'kernel_process_accounts' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/kernel_process_accounts.log'),
+            'level' => env('WEBSOCKET_LOG_LEVEL', 'debug'),
+            'days' => 7,
+            'replace_placeholders' => true,
+        ]
     ],
 
 ];

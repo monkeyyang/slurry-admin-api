@@ -26,7 +26,8 @@ class BatchGiftCardService
         array $giftCardCodes,
         string $roomId,
         string $cardType,
-        string $cardForm
+        string $cardForm,
+        string $msgid = '',
     ): string {
         $batchId = Str::uuid()->toString();
 
@@ -36,8 +37,8 @@ class BatchGiftCardService
         // 分发单个任务到Redis队列
         try {
             foreach ($giftCardCodes as $code) {
-                $job = new RedeemGiftCardJob($code, $roomId, $cardType, $cardForm, $batchId);
-                Queue::push($job);
+                $job = new RedeemGiftCardJob($code, $roomId, $cardType, $cardForm, $batchId, $msgid);
+                dispatch($job);
             }
 
             $this->getLogger()->info("批量兑换任务已启动", [

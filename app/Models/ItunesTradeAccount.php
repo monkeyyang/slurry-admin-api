@@ -20,6 +20,7 @@ class ItunesTradeAccount extends Model
     const STATUS_COMPLETED = 'completed';
     const STATUS_PROCESSING = 'processing';
     const STATUS_WAITING = 'waiting';
+    const STATUS_LOCKING = 'locking';
 
     // 登录状态常量
     const STATUS_LOGIN_ACTIVE = 'valid';
@@ -132,6 +133,7 @@ class ItunesTradeAccount extends Model
             self::STATUS_COMPLETED => '已完成',
             self::STATUS_PROCESSING => '执行中',
             self::STATUS_WAITING => '等待中',
+            self::STATUS_LOCKING => '锁定中',
             default => '未知',
         };
     }

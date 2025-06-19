@@ -26,6 +26,7 @@ class RedeemGiftCardJob implements ShouldQueue
     protected string $cardType;
     protected string $cardForm;
     protected string $batchId;
+    protected string $msgId;
 
     const QUEUE_NAME = 'gift-card-redeem';
 
@@ -34,14 +35,15 @@ class RedeemGiftCardJob implements ShouldQueue
         string $roomId,
         string $cardType,
         string $cardForm,
-        string $batchId
+        string $batchId,
+        string $msgId = ''
     ) {
         $this->giftCardCode = $giftCardCode;
         $this->roomId = $roomId;
         $this->cardType = $cardType;
         $this->cardForm = $cardForm;
         $this->batchId = $batchId;
-
+        $this->msgId = $msgId;
         // 设置队列名称
         $this->onQueue(self::QUEUE_NAME);
     }
@@ -66,6 +68,7 @@ class RedeemGiftCardJob implements ShouldQueue
             'card_type' => $this->cardType,
             'card_form' => $this->cardForm,
             'batch_id' => $this->batchId,
+            'msgid' => $this->msgId,
             'attempt' => $this->attempts()
         ]);
 
@@ -86,7 +89,8 @@ class RedeemGiftCardJob implements ShouldQueue
                 $this->roomId,
                 $this->cardType,
                 $this->cardForm,
-                $this->batchId
+                $this->batchId,
+                $this->msgId
             );
 
             // 更新批量任务进度 - 成功
@@ -98,7 +102,7 @@ class RedeemGiftCardJob implements ShouldQueue
                 'result' => $result
             ]);
 
-            send_msg_to_wechat($this->roomId,'礼品卡兑换任务完成-调试');
+            send_msg_to_wechat($this->roomId, $result['wechat_msg']);
 
         } catch (Throwable $e) {
             // 根据错误类型决定是否记录堆栈跟踪
@@ -115,7 +119,7 @@ class RedeemGiftCardJob implements ShouldQueue
             }
 
             $this->getLogger()->error("礼品卡兑换任务失败", $logData);
-            send_msg_to_wechat($this->roomId,'礼品卡兑换任务失败-调试:'.$this->giftCardCode."\n".$e->getMessage());
+            send_msg_to_wechat($this->roomId,"兑换失败\n-------------------------\n".$this->giftCardCode."\n".$e->getMessage());
             // 记录错误信息
             $this->recordFailure($e, $batchService);
 

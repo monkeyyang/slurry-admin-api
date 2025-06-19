@@ -58,7 +58,7 @@ class ProcessGiftCardExchange extends Command
             }
         } catch (\Exception $e) {
             $this->error("处理异常: " . $e->getMessage());
-            Log::error("礼品卡兑换命令执行失败: " . $e->getMessage());
+            Log::channel('gift_card_exchange')->error("礼品卡兑换命令执行失败: " . $e->getMessage());
             return 1;
         }
     }

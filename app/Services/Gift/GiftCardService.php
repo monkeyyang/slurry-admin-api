@@ -25,6 +25,7 @@ class GiftCardService
     protected string $cardType;
     protected string $cardForm;
     protected string $countryCode;
+    protected string $msgid;
 
     public function __construct(GiftCardExchangeService $exchangeService)
     {
@@ -43,19 +44,21 @@ class GiftCardService
      * 兑换礼品卡
      * @throws Exception
      */
-    public function redeem(string $code, string $roomId, string $cardType, string $cardForm, string $batchId): array
+    public function redeem(string $code, string $roomId, string $cardType, string $cardForm, string $batchId, string $msgid = ''): array
     {
         $this->getLogger()->info("开始兑换礼品卡", [
             'code' => $code,
             'room_id' => $roomId,
             'card_type' => $cardType,
             'card_form' => $cardForm,
-            'batch_id' => $batchId
+            'batch_id' => $batchId,
+            'msgid' => $msgid
         ]);
         $this->roomId = $roomId;
         $this->code = $code;
         $this->cardType = $cardType;
         $this->cardForm = $cardForm;
+        $this->msgid = $msgid;
 
         try {
             // 1. 验证礼品卡并获取信息
@@ -189,13 +192,45 @@ class GiftCardService
             if ($rate->amount_constraint === ItunesTradeRate::AMOUNT_CONSTRAINT_FIXED) {
                 $fixedAmounts = $rate->fixed_amounts ?? [];
 
+                // 如果是字符串，尝试JSON解码
+                if (is_string($fixedAmounts)) {
+                    $decodedAmounts = json_decode($fixedAmounts, true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($decodedAmounts)) {
+                        $fixedAmounts = $decodedAmounts;
+                    }
+                }
+
                 $this->getLogger()->info("固定面额检查", [
-                    'fixed_amounts' => $fixedAmounts,
+                    'original_fixed_amounts' => $rate->fixed_amounts,
+                    'parsed_fixed_amounts' => $fixedAmounts,
                     'amount' => $amount,
+                    'amount_type' => gettype($amount),
                     'type' => gettype($fixedAmounts)
                 ]);
 
-                if (is_array($fixedAmounts) && in_array($amount, $fixedAmounts)) {
+                // 检查是否匹配固定面额
+                $isMatched = false;
+                if (is_array($fixedAmounts)) {
+                    // 精确匹配
+                    if (in_array($amount, $fixedAmounts)) {
+                        $isMatched = true;
+                    } else {
+                        // 类型宽松匹配（处理整数和浮点数的差异）
+                        foreach ($fixedAmounts as $fixedAmount) {
+                            if (abs($amount - (float)$fixedAmount) < 0.01) {
+                                $isMatched = true;
+                                $this->getLogger()->info("通过宽松匹配找到固定面额", [
+                                    'amount' => $amount,
+                                    'matched_value' => $fixedAmount,
+                                    'diff' => abs($amount - (float)$fixedAmount)
+                                ]);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if ($isMatched) {
                     $this->getLogger()->info("匹配到固定面额汇率", ['rate_id' => $rate->id]);
                     return $rate;
                 }
@@ -296,29 +331,73 @@ class GiftCardService
         $account = $this->findProcessingAccount($plan, $roomId, $lastCheckedId);
         if ($account) {
             $this->getLogger()->info("找到processing状态账号", ['account_id' => $account->id]);
-            if ($this->validateAccount($account, $plan, $giftCardInfo)) {
+            if ($this->validateAndLockAccount($account, $plan, $giftCardInfo)) {
                 return $account;
             } else {
-                $this->getLogger()->info("processing账号验证失败，继续查找", ['account_id' => $account->id]);
+                $this->getLogger()->info("processing账号验证失败或锁定失败，继续查找", ['account_id' => $account->id]);
                 // 递归查找下一个账号
                 return $this->findAvailableAccount($plan, $roomId, $giftCardInfo, $account->id);
             }
         }
 
-        // 2. 查找状态为waiting且天数为1的账号
-        $account = $this->findWaitingAccount($plan, $lastCheckedId);
-        if ($account) {
-            $this->getLogger()->info("找到waiting状态账号", ['account_id' => $account->id]);
-            if ($this->validateAccount($account, $plan, $giftCardInfo)) {
-                return $account;
-            } else {
-                $this->getLogger()->info("waiting账号验证失败，继续查找", ['account_id' => $account->id]);
-                // 递归查找下一个账号
-                return $this->findAvailableAccount($plan, $roomId, $giftCardInfo, $account->id);
-            }
-        }
+        // 2. 查找状态为waiting且天数为1的账号，
+        // 暂时注释 06-18，waiting状态将在计划任务中执行
+//        $account = $this->findWaitingAccount($plan, $lastCheckedId);
+//        if ($account) {
+//            $this->getLogger()->info("找到waiting状态账号", ['account_id' => $account->id]);
+//            if ($this->validateAndLockAccount($account, $plan, $giftCardInfo)) {
+//                return $account;
+//            } else {
+//                $this->getLogger()->info("waiting账号验证失败或锁定失败，继续查找", ['account_id' => $account->id]);
+//                // 递归查找下一个账号
+//                return $this->findAvailableAccount($plan, $roomId, $giftCardInfo, $account->id);
+//            }
+//        }
 
         throw new Exception("未找到可用的兑换账号");
+    }
+
+    /**
+     * 验证账号并尝试原子锁定
+     */
+    private function validateAndLockAccount(
+        ItunesTradeAccount $account,
+        ItunesTradePlan $plan,
+        array $giftCardInfo
+    ): bool {
+        // 首先验证账号是否符合条件
+        if (!$this->validateAccount($account, $plan, $giftCardInfo)) {
+            return false;
+        }
+
+        // 尝试原子锁定账号 - 使用数据库级别的原子操作
+        $originalStatus = $account->status;
+        $lockResult = DB::table('itunes_trade_accounts')
+            ->where('id', $account->id)
+            ->where('status', $originalStatus) // 确保状态没有被其他任务改变
+            ->update([
+                'status' => ItunesTradeAccount::STATUS_LOCKING,
+                'plan_id' => $plan->id,
+                'updated_at' => now()
+            ]);
+
+        if ($lockResult > 0) {
+            // 锁定成功，刷新账号模型
+            $account->refresh();
+            $this->getLogger()->info("账号原子锁定成功", [
+                'account_id' => $account->id,
+                'original_status' => $originalStatus,
+                'locked_status' => ItunesTradeAccount::STATUS_LOCKING
+            ]);
+            return true;
+        } else {
+            // 锁定失败，说明账号状态已被其他任务改变
+            $this->getLogger()->info("账号原子锁定失败，可能已被其他任务占用", [
+                'account_id' => $account->id,
+                'original_status' => $originalStatus
+            ]);
+            return false;
+        }
     }
 
     /**
@@ -372,6 +451,15 @@ class GiftCardService
         ItunesTradePlan $plan,
         array $giftCardInfo
     ): bool {
+        // 检查账号是否被锁定
+        if ($account->status === ItunesTradeAccount::STATUS_LOCKING) {
+            $this->getLogger()->info("账号已被锁定，跳过", [
+                'account_id' => $account->id,
+                'status' => $account->status
+            ]);
+            return false;
+        }
+
         // 检查当日额度
         if (!$this->validateDailyAmount($account, $plan, $giftCardInfo)) {
             return false;
@@ -425,7 +513,7 @@ class GiftCardService
         $this->getLogger()->info(
             $isValid ? "当日额度验证通过" : "当日额度不足",
             [
-                'account_id' => $account->id,
+                'account_id' => $account->account,
                 'current_day' => $currentDay,
                 'daily_limit' => $dailyLimit,
                 'float_amount' => $plan->float_amount,
@@ -458,7 +546,7 @@ class GiftCardService
         $this->getLogger()->info(
             $isValid ? "总额度验证通过" : "超出总额度限制",
             [
-                'account_id' => $account->id,
+                'account_id' => $account->account,
                 'total_spent' => $totalSpent,
                 'current_amount' => $giftCardInfo['amount'],
                 'total_after_exchange' => $totalAfterExchange,
@@ -483,22 +571,35 @@ class GiftCardService
         return DB::transaction(function () use ($code, $giftCardInfo, $rate, $plan, $account, $batchId) {
             $this->getLogger()->info("开始执行兑换", [
                 'code' => $code,
-                'account_id' => $account->id,
+                'account_id' => $account->account,
                 'plan_id' => $plan->id,
-                'rate_id' => $rate->id
+                'rate_id' => $rate->id,
+                'account_status' => $account->status
             ]);
 
-            // 更新账号状态为processing并绑定计划
-            $account->update([
-                'status' => ItunesTradeAccount::STATUS_PROCESSING,
-                'plan_id' => $plan->id,
+            // 账号已经在findAvailableAccount阶段被锁定为STATUS_LOCKING
+            // 这里只需要记录锁定前的状态，用于失败时恢复
+            // 通过completed_days字段来推断原始状态
+            $completedDays = json_decode($account->completed_days ?? '{}', true) ?: [];
+            $currentDay = $account->current_plan_day ?? 1;
+
+            // 推断原始状态：如果是第一天且没有完成记录，则为WAITING；否则为PROCESSING
+            $originalStatus = (empty($completedDays) && $currentDay == 1)
+                ? ItunesTradeAccount::STATUS_WAITING
+                : ItunesTradeAccount::STATUS_PROCESSING;
+
+            $this->getLogger()->info("账号已在查找阶段锁定", [
+                'account_id' => $account->id,
+                'code' => $code,
+                'current_status' => $account->status,
+                'inferred_original_status' => $originalStatus
             ]);
 
             // 创建兑换日志
             $log = ItunesTradeAccountLog::create([
                 'account_id' => $account->id,
                 'plan_id' => $plan->id,
-                'code' => $this->code,
+                'code' => $code,
                 'day' => $account->current_plan_day ?? 1,
                 'amount' => $giftCardInfo['amount'],
                 'status' => ItunesTradeAccountLog::STATUS_PENDING,
@@ -529,23 +630,30 @@ class GiftCardService
                     ]);
 
                     // 更新账号余额为API返回的总金额
+                    $currentAmount = $exchangeData['data']['amount'] ?? 0;
                     $totalAmount = $exchangeData['data']['total_amount'] ?? 0;
-                    if ($totalAmount > 0) {
+                    if ($currentAmount > 0) {
+                        // 更新completed_days字段
+                        $completedDays = json_decode($account->completed_days ?? '{}', true) ?: [];
+                        $completedDays[(string)$currentDay] = $currentAmount;
                         $account->update([
                             'amount' => $totalAmount,  // 更新为ID总金额
+                             'completed_days' => json_encode($completedDays),
                         ]);
-                        
+
                         $this->getLogger()->info("更新账号余额", [
-                            'account_id' => $account->id,
+                            'account_id' => $account->account,
                             'account' => $account->account,
                             'new_amount' => $totalAmount,
                             'fund_added' => $exchangeData['data']['amount'] ?? 0
                         ]);
                     }
 
-                    $this->getLogger()->info("兑换成功", [
+                    // 兑换成功，保持锁定状态不变，让计划任务来处理状态转换
+                    $this->getLogger()->info("兑换成功，保持锁定状态", [
                         'code' => $code,
-                        'account_id' => $account->id,
+                        'account_id' => $account->account,
+                        'status_kept' => 'LOCKING (待计划任务处理)',
                         'original_amount' => $giftCardInfo['amount'],
                         'exchanged_amount' => $exchangeData['data']['amount'] ?? 0
                     ]);
@@ -553,10 +661,11 @@ class GiftCardService
                     // 触发日志更新事件
                     event(new TradeLogCreated($log->fresh()));
 
-                    // 检查是否完成当天任务
-                    $this->checkAndUpdateDayCompletion($account, $plan);
+                    // 注意：不调用 checkAndUpdateDayCompletion，让计划任务统一处理
+                    // $this->checkAndUpdateDayCompletion($account, $plan);
+
                     // 执行加账处理
-//                    $this->processAccountBilling();
+                    $buildWechatMsg = $this->processAccountBilling($giftCardInfo['amount'], $rate, $account);
                     // 返回成功结果
                     return [
                         'success' => true,
@@ -574,6 +683,7 @@ class GiftCardService
                         'exchange_time' => $log->exchange_time->toISOString(),
                         'message' => $exchangeData['message'],
                         'details' => $exchangeData['data']['details'] ?? null,
+                        'wechat_msg' => $buildWechatMsg
                     ];
                 } else {
                     // 兑换失败，更新日志
@@ -584,14 +694,20 @@ class GiftCardService
 
                     $this->getLogger()->error("兑换失败", [
                         'code' => $code,
-                        'account_id' => $account->id,
+                        'account_id' => $account->account,
                         'error' => $exchangeData['message']
                     ]);
 
-                    // 恢复账号状态
-                    $account->update([
-                        'status' => ItunesTradeAccount::STATUS_WAITING,
-                    ]);
+                    // 兑换失败，恢复账号到锁定前的状态
+//                    $account->update([
+//                        'status' => $originalStatus,
+//                    ]);
+//
+//                    $this->getLogger()->info("兑换失败，恢复账号状态", [
+//                        'account_id' => $account->id,
+//                        'status_restored' => "LOCKING -> {$originalStatus}",
+//                        'error' => $exchangeData['message']
+//                    ]);
 
                     // 触发日志更新事件
                     event(new TradeLogCreated($log->fresh()));
@@ -606,17 +722,18 @@ class GiftCardService
                     'error_message' => $e->getMessage()
                 ]);
 
-                // 恢复账号状态
-                $account->update([
-                    'status' => ItunesTradeAccount::STATUS_WAITING,
-                ]);
+                // 异常情况，恢复账号到锁定前的状态
+//                $account->update([
+//                    'status' => $originalStatus,
+//                ]);
 
-                $this->getLogger()->error("兑换过程发生异常", [
-                    'code' => $code,
-                    'account_id' => $account->id,
-                    'error' => $e->getMessage(),
-                    'trace' => $this->isSystemError($e) ? $e->getTraceAsString() : null
-                ]);
+//                $this->getLogger()->error("兑换过程发生异常，恢复账号状态", [
+//                    'code' => $code,
+//                    'account_id' => $account->id,
+//                    'status_restored' => "LOCKING -> {$originalStatus}",
+//                    'error' => $e->getMessage(),
+//                    'trace' => $this->isSystemError($e) ? $e->getTraceAsString() : null
+//                ]);
 
                 // 触发日志更新事件
                 event(new TradeLogCreated($log->fresh()));
@@ -629,53 +746,31 @@ class GiftCardService
     /**
      * 处理加账操作
      *
-     * @param array $data 兑换结果数据
-     * @return void
+     * @param float $amount
+     * @param ItunesTradeRate $rateObj
+     * @param ItunesTradeAccount $account
+     * @return string
      */
-    private function processAccountBilling(array $data): void
+    private function processAccountBilling(float $amount, ItunesTradeRate $rateObj, ItunesTradeAccount $account): string
     {
         try {
             if (empty($this->roomId)) {
                 Log::channel('gift_card_exchange')->error('room_id为空，无法进行加账处理');
-                return;
+                return '';
             }
 
             // 获取群组信息
             $room = MrRoom::where('room_id', $this->roomId)->first();
             if (!$room) {
                 Log::channel('gift_card_exchange')->error("群组 {$this->roomId} 不存在");
-                return;
+                return '';
             }
 
-            // 从兑换结果中提取必要信息
-            $account = $data['account'] ?? '';
-            $cardNumber = $this->code;
-            $amount = $data['amount'] ?? 0; // 原始金额
-            $rate = $data['rate'] ?? 0; // 汇率
-            $totalAmount = $data['total_amount'] ?? 0; // 账户总额
-
-            // 从details中提取国家代码和货币信息
-            $details = json_decode($data['details'] ?? '{}', true);
-            $countryCode = $details['country_code'] ?? 'USD'; // 默认USD
-            $currencyMap = [
-                'US' => 'USD',
-                'CA' => 'CAD',
-                'GB' => 'GBP',
-                'AU' => 'AUD',
-                'DE' => 'EUR',
-                'FR' => 'EUR',
-                'IT' => 'EUR',
-                'ES' => 'EUR',
-                'JP' => 'JPY',
-                'KR' => 'KRW',
-                'HK' => 'HKD',
-                'SG' => 'SGD'
-            ];
-            $currency = $currencyMap[$countryCode] ?? $countryCode;
+            $countryCode = $rateObj->country_code;
 
             // 使用BC函数进行精度计算，保留两位小数
             $amount = bcadd($amount, '0', 2); // 确保金额为两位小数
-            $rate = bcadd($rate, '0', 2); // 确保汇率为两位小数
+            $rate = bcadd($rateObj->rate, '0', 2); // 确保汇率为两位小数
 
             // 计算变动金额（原始金额 * 汇率）
             $changeAmount = bcmul($amount, $rate, 2);
@@ -694,26 +789,25 @@ class GiftCardService
                     'room_id' => $this->roomId,
                     'room_name' => $room->room_name ?? '未知群组',
                     'event' => 1, // 兑换事件
-                    'msgid' => $this->input['msgid'] ?? '',
+                    'msgid' => $this->msgid,
                     'money' => $amount,
                     'rate' => $rate,
                     'fee' => 0.00,
                     'amount' => $changeAmount,
-                    'card_type' => 'image', // 默认图片类型
+                    'card_type' => $countryCode, // 国家
                     'before_money' => $beforeMoney,
                     'bill_money' => $afterMoney, // 修正：这应该是变动后的总金额
-                    'remark' => $cardNumber,
-                    'op_id' => $this->input['wxid'] ?? '',
+                    'remark' => 'iTunes',
+                    'op_id' => '',
                     'op_name' => '',
-                    'code' => $cardNumber,
+                    'code' => $this->code,
                     'content' => json_encode([
-                        'account' => $account,
+                        'account' => $account->account,
                         'original_amount' => $amount,
                         'exchange_rate' => $rate,
-                        'converted_amount' => $changeAmount,
-                        'total_balance' => $totalAmount
+                        'converted_amount' => $changeAmount
                     ]),
-                    'note' => "礼品卡兑换 - {$cardNumber}",
+                    'note' => "礼品卡兑换 - {$this->code}",
                     'status' => 0,
                     'is_settle' => 0,
                     'is_del' => 0
@@ -730,20 +824,20 @@ class GiftCardService
 
                 // 构建成功消息
                 $successMessage = $this->buildSuccessMessage([
-                    'card_number' => $cardNumber,
+                    'card_number' => $this->code,
                     'amount' => $amount,
                     'rate' => $rate,
                     'before_money' => $beforeMoney,
                     'change_amount' => $changeAmount,
                     'after_money' => $afterMoney,
-                    'currency' => $currency,
                     'exchange_time' => now()->format('Y-n-j H:i:s')
                 ]);
 
 
 
                 Log::channel('gift_card_exchange')->info("群组 {$this->roomId} 加账处理完成", [
-                    'card_number' => $cardNumber,
+                    'msgid' => $this->msgid,
+                    'card_number' =>  $this->code,
                     'amount' => $amount,
                     'rate' => $rate,
                     'change_amount' => $changeAmount,
@@ -753,19 +847,58 @@ class GiftCardService
                     'room_id' => $this->roomId
                 ]);
 
+
+
             } catch (\Exception $e) {
                 // 回滚事务
                 DB::rollBack();
                 throw $e;
             }
-
+            return $successMessage;
         } catch (\Exception $e) {
             Log::channel('gift_card_exchange')->error("加账处理失败: " . $e->getMessage(), [
-                'request_id' => $this->requestId,
                 'room_id' => $this->input['room_id'] ?? '',
-                'data' => $data
             ]);
         }
+
+        return '';
+    }
+
+    /**
+     * 构建成功消息
+     *
+     * @param array $data
+     * @return string
+     */
+    private function buildSuccessMessage(array $data): string
+    {
+        // 确保所有金额都使用BC函数格式化为两位小数
+        $amount = bcadd($data['amount'], '0', 2);
+        $beforeMoney = bcadd($data['before_money'], '0', 2);
+        $rate = bcadd($data['rate'], '0', 2); // 汇率保留一位小数
+        $changeAmount = bcadd($data['change_amount'], '0', 2); // 变动金额保留整数
+        $afterMoney = bcadd($data['after_money'], '0', 2);
+
+        return sprintf(
+            "[强]兑换成功\n" .
+            "---------------------------------\n" .
+            "加载卡号：%s\n" .
+            "加载结果：$%s（%s）\n" .
+            "原始账单：%s\n" .
+            "变动金额：%s$%s*%s=%s\n" .
+            "当前账单：%s\n" .
+            "加卡时间：%s",
+            $data['card_number'],
+            $amount,
+            $this->countryCode,
+            $beforeMoney,
+            $this->countryCode,
+            $amount,
+            $rate,
+            $changeAmount,
+            $afterMoney,
+            $data['exchange_time']
+        );
     }
 
     /**
@@ -1091,13 +1224,19 @@ class GiftCardService
      *
      * 这个方法的作用：
      * 1. 检查当天是否还有待处理的任务 - 确保一天的所有兑换任务都完成后才更新状态
-     * 2. 更新账号的completed_days字段 - 记录每天的累计兑换金额
-     * 3. 判断是否进入下一天或完成整个计划
+     * 2. 检查当天兑换金额是否达到计划要求 - 只有达到要求才能进入下一天
+     * 3. 更新账号的completed_days字段 - 记录每天的累计兑换金额
+     * 4. 判断是否进入下一天或完成整个计划
      */
     protected function checkAndUpdateDayCompletion(ItunesTradeAccount $account, ItunesTradePlan $plan): void
     {
         $currentDay = $account->current_plan_day ?? 1;
-
+        // 更新completed_days字段
+        $completedDays = json_decode($account->completed_days ?? '{}', true) ?: [];
+        $completedDays[(string)$currentDay] = $currentDay;
+        $account->update([
+            'completed_days' => json_encode($completedDays),
+        ]);
         // 检查当天是否还有其他待处理的任务
         // 这一步很重要：因为可能同时有多个兑换任务在执行，需要确保当天所有任务都完成
         $pendingCount = ItunesTradeAccountLog::where('account_id', $account->id)
@@ -1110,47 +1249,82 @@ class GiftCardService
             $dailyAmount = ItunesTradeAccountLog::where('account_id', $account->id)
                 ->where('day', $currentDay)
                 ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
-                ->sum('amount'); // 修正：使用amount字段而不是exchanged_amount
+                ->sum('amount');
+
+            // 获取当天的计划额度
+            $dailyAmounts = $plan->daily_amounts ?? [];
+            $dailyLimit = $dailyAmounts[$currentDay - 1] ?? 0;
+            // $dailyTarget = $dailyLimit + $plan->float_amount; // 计划额度 + 浮动额度
+            $dailyTarget = $dailyLimit;
+            $this->getLogger()->info("检查当天完成情况", [
+                'account_id' => $account->account,
+                'day' => $currentDay,
+                'daily_amount' => $dailyAmount,
+                'daily_limit' => $dailyLimit,
+                'float_amount' => $plan->float_amount,
+                'daily_target' => $dailyTarget,
+                'is_target_reached' => $dailyAmount >= $dailyTarget
+            ]);
 
             // 更新completed_days字段
             $completedDays = json_decode($account->completed_days ?? '{}', true) ?: [];
             $completedDays[(string)$currentDay] = $dailyAmount;
-            
-            $this->getLogger()->info("更新账号完成天数记录", [
-                'account_id' => $account->id,
-                'day' => $currentDay,
-                'daily_amount' => $dailyAmount,
-                'completed_days' => $completedDays
-            ]);
 
-            if ($currentDay >= $plan->plan_days) {
-                // 计划完成
-                $account->update([
-                    'status' => ItunesTradeAccount::STATUS_COMPLETED,
-                    'current_plan_day' => null,
-                    'plan_id' => null,
-                    'completed_days' => json_encode($completedDays),
-                ]);
-
-                $this->getLogger()->info("账号计划完成", [
-                    'account_id' => $account->id, 
-                    'plan_id' => $plan->id,
-                    'total_completed_days' => count($completedDays),
-                    'final_completed_days' => $completedDays
-                ]);
-            } else {
-                // 进入下一天，但需要等待日期间隔
-                $nextDay = $currentDay + 1;
-                $account->update([
-                    'status' => ItunesTradeAccount::STATUS_WAITING,
-                    'current_plan_day' => $nextDay,
-                    'completed_days' => json_encode($completedDays),
-                ]);
-
-                $this->getLogger()->info("账号进入下一天", [
+            // 检查是否达到当天的目标额度
+            if ($dailyAmount >= $dailyTarget) {
+                // 达到目标额度，可以进入下一天或完成计划
+                $this->getLogger()->info("当天目标达成，更新账号状态", [
                     'account_id' => $account->id,
-                    'current_day' => $nextDay,
-                    'plan_id' => $plan->id,
+                    'day' => $currentDay,
+                    'daily_amount' => $dailyAmount,
+                    'daily_target' => $dailyTarget,
+                    'completed_days' => $completedDays
+                ]);
+
+                if ($currentDay >= $plan->plan_days) {
+                    // 计划完成
+                    $account->update([
+                        'status' => ItunesTradeAccount::STATUS_COMPLETED,
+                        'current_plan_day' => null,
+                        'plan_id' => null,
+                        'completed_days' => json_encode($completedDays),
+                    ]);
+
+                    $this->getLogger()->info("账号计划完成", [
+                        'account_id' => $account->id,
+                        'plan_id' => $plan->id,
+                        'total_completed_days' => count($completedDays),
+                        'final_completed_days' => $completedDays
+                    ]);
+                } else {
+                    // 进入下一天，但需要等待日期间隔
+                    $nextDay = $currentDay + 1;
+                    $account->update([
+                        'status' => ItunesTradeAccount::STATUS_WAITING,
+                        'current_plan_day' => $nextDay,
+                        'completed_days' => json_encode($completedDays),
+                    ]);
+
+                    $this->getLogger()->info("账号进入下一天", [
+                        'account_id' => $account->id,
+                        'current_day' => $nextDay,
+                        'plan_id' => $plan->id,
+                        'completed_days' => $completedDays
+                    ]);
+                }
+            } else {
+                // 未达到目标额度，保持当前状态，等待更多兑换
+                $account->update([
+                    'status' => ItunesTradeAccount::STATUS_LOCKING,
+                    'completed_days' => json_encode($completedDays),
+                ]);
+
+                $this->getLogger()->info("当天目标未达成，保持等待状态", [
+                    'account_id' => $account->id,
+                    'day' => $currentDay,
+                    'daily_amount' => $dailyAmount,
+                    'daily_target' => $dailyTarget,
+                    'remaining_amount' => $dailyTarget - $dailyAmount,
                     'completed_days' => $completedDays
                 ]);
             }

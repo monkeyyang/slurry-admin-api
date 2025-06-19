@@ -49,7 +49,7 @@ class ExecutePlansCommand extends Command
             return 0;
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Plan execution failed: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('Plan execution failed: ' . $e->getMessage());
             $this->error('Execution failed: ' . $e->getMessage());
             return 1;
         }
