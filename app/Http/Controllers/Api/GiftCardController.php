@@ -46,7 +46,7 @@ class GiftCardController extends Controller
                 $validated['room_id'],
                 $validated['card_type'],
                 $validated['card_form'],
-                $validated['msgid']
+                $validated['msgid']??''
             );
 
             return response()->json([

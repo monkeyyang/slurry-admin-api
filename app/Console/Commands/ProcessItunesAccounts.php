@@ -166,7 +166,8 @@ class ProcessItunesAccounts extends Command
             ->first();
 
         if (!$lastSuccessLog) {
-            $this->getLogger()->info("账号 {$account->account} 没有成功的兑换记录，保持等待状态");
+            $account->update(['status' => ItunesTradeAccount::STATUS_PROCESSING]);
+            $this->getLogger()->info("账号 {$account->account} 没有成功的兑换记录，恢复待执行状态");
             return;
         }
 

@@ -36,6 +36,7 @@ class ItunesTradeAccount extends Model
         'status',
         'login_status',
         'current_plan_day',
+        'completed_days',
         'plan_id',
         'room_id',
         'uid',
@@ -229,40 +230,44 @@ class ItunesTradeAccount extends Model
     /**
      * 获取每日完成情况
      */
-    public function getDailyCompletions()
+   public function getDailyCompletions(): array
     {
-        $planInfo = $this->getPlanInfo();
-        if (!$planInfo) {
+        // 获取所有兑换日志并按天分组
+        $logs = $this->exchangeLogs()
+            ->selectRaw('day, SUM(amount) as total_amount, MAX(exchange_time) as last_exchange_time')
+            ->groupBy('day')
+            ->orderBy('day')
+            ->get()
+            ->keyBy('day');
+
+        $completions = [];
+
+        if ($logs->isEmpty()) {
             return [];
         }
 
-        $logs = $this->exchangeLogs()
-                     ->where('plan_id', $this->plan_id)
-                     ->orderBy('day')
-                     ->get();
+        $minDay = $logs->min('day');
+        $maxDay = $logs->max('day');
 
-        $completions = [];
-        for ($day = 1; $day <= $planInfo->plan_days; $day++) {
-            $log = $logs->where('day', $day)->first();
-            $amount = isset($planInfo->daily_amounts[$day - 1]) ? $planInfo->daily_amounts[$day - 1] : 0;
+        foreach (range($minDay, $maxDay) as $day) {
+            $log = $logs->get($day);
 
-            if ($log) {
-                $completions[] = [
-                    'day' => $day,
-                    'amount' => $amount,
-                    'status' => $log->status === 'success' ? 'complete' :
-                               ($log->status === 'pending' ? 'processing' : 'waiting'),
-                    'time' => $log->exchange_time ? $log->exchange_time->format('Y-m-d H:i:s') : null,
-                ];
-            } else {
-                $status = $day <= ($this->current_plan_day ?? 0) ? 'processing' : 'waiting';
-                $completions[] = [
-                    'day' => $day,
-                    'amount' => $amount,
-                    'status' => $status,
-                    'time' => null,
-                ];
+            // 处理日期格式 - 如果已经是字符串就直接使用，否则格式化为字符串
+            $time = null;
+            if ($log && $log->last_exchange_time) {
+                $time = is_string($log->last_exchange_time)
+                    ? $log->last_exchange_time
+                    : $log->last_exchange_time->format('Y-m-d H:i:s');
             }
+
+            $completion = [
+                'day' => $day,
+                'amount' => $log ? (float)$log->total_amount : 0,
+                'time' => $time,
+                'status' => $log ? 'complete' : 'no_data'
+            ];
+
+            $completions[] = $completion;
         }
 
         return $completions;

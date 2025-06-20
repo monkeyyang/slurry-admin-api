@@ -10,6 +10,7 @@ use App\Models\ItunesTradePlan;
 use App\Models\ItunesTradeAccountLog;
 use App\Models\MrRoom;
 use App\Models\MrRoomBill;
+use App\Models\MrRoomGroup;
 use App\Services\GiftCardApiClient;
 use App\Services\GiftCardExchangeService;
 use Exception;
@@ -151,18 +152,18 @@ class GiftCardService
         }
 
         // 优先级2: 匹配群组（通过room_id获取群组）
-//        $groupId = $this->getGroupIdByRoomId($roomId);
-//        if ($groupId) {
-//            $rateWithGroup = (clone $query)->where('group_id', $groupId)->get();
-//
-//            if ($rateWithGroup->isNotEmpty()) {
-//                $rate = $this->selectBestRateByAmount($rateWithGroup, $amount);
-//                if ($rate) {
-//                    $this->getLogger()->info("找到匹配群组的汇率", ['rate_id' => $rate->id, 'group_id' => $groupId]);
-//                    return $rate;
-//                }
-//            }
-//        }
+        $groupId = $this->getGroupIdByRoomId($roomId);
+        $this->getLogger()->info("找到群组ID", ['group_id' => $groupId]);
+        if ($groupId) {
+            $rateWithGroup = (clone $query)->where('group_id', $groupId)->get();
+            if ($rateWithGroup->isNotEmpty()) {
+                $rate = $this->selectBestRateByAmount($rateWithGroup, $amount);
+                if ($rate) {
+                    $this->getLogger()->info("找到匹配群组的汇率", ['rate_id' => $rate->id, 'group_id' => $groupId]);
+                    return $rate;
+                }
+            }
+        }
 
         // 优先级3: 空room_id和空群组的汇率
         $defaultRates = (clone $query)
@@ -284,12 +285,10 @@ class GiftCardService
      */
     protected function getGroupIdByRoomId(string $roomId): ?int
     {
-        // 这里需要根据实际的群组表结构来实现
-        // 假设有一个groups表或者room_groups表
-        // return DB::table('room_groups')->where('room_id', $roomId)->value('group_id');
-
-        // 临时实现，返回null
-        return null;
+        // 先根据roomId获取room表id
+        $roomInfo = MrRoom::getByRoomId($roomId);
+        if($roomInfo) $roomId = $roomInfo->id;
+        return MrRoomGroup::whereRaw("FIND_IN_SET(?, room_ids)", [$roomId])->value('id');
     }
 
     /**
@@ -885,7 +884,7 @@ class GiftCardService
             "加载卡号：%s\n" .
             "加载结果：$%s（%s）\n" .
             "原始账单：%s\n" .
-            "变动金额：%s$%s*%s=%s\n" .
+            "变动金额：%s%s*%s=%s\n" .
             "当前账单：%s\n" .
             "加卡时间：%s",
             $data['card_number'],

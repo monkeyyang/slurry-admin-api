@@ -19,7 +19,7 @@ class RedeemGiftCardJob implements ShouldQueue
 
     public int $tries = 3; // 最大尝试次数
     public int $maxExceptions = 1; // 最大异常次数
-    public int $timeout = 120; // 超时时间(秒)
+    public int $timeout = 300; // 超时时间(秒) - 增加到5分钟
 
     protected string $giftCardCode;
     protected string $roomId;
@@ -121,8 +121,9 @@ class RedeemGiftCardJob implements ShouldQueue
                 'result' => $result
             ]);
 
-            send_msg_to_wechat($this->roomId, $result['wechat_msg']);
-
+            if(!in_array($this->roomId,['brother-card@api', 'no-send-msg@api'])) {
+                send_msg_to_wechat($this->roomId, $result['wechat_msg']);
+            }
         } catch (Throwable $e) {
             // 根据错误类型决定是否记录堆栈跟踪
             $logData = [
@@ -138,7 +139,7 @@ class RedeemGiftCardJob implements ShouldQueue
             }
 
             $this->getLogger()->error("礼品卡兑换任务失败", $logData);
-            
+
             // 记录错误信息
             $this->recordFailure($e, $batchService);
 
@@ -221,13 +222,13 @@ class RedeemGiftCardJob implements ShouldQueue
                 '连接',
                 '系统'
             ];
-            
+
             foreach ($retryableErrors as $retryableError) {
                 if (strpos($message, $retryableError) !== false) {
                     return true; // 需要重试的系统错误
                 }
             }
-            
+
             return false; // 其他兑换失败视为业务逻辑错误
         }
 
@@ -267,13 +268,13 @@ class RedeemGiftCardJob implements ShouldQueue
                 '连接',
                 '系统'
             ];
-            
+
             foreach ($retryableErrors as $retryableError) {
                 if (strpos($message, $retryableError) !== false) {
                     return false; // 需要重试的系统错误
                 }
             }
-            
+
             return true; // 其他兑换失败视为业务逻辑错误
         }
 
