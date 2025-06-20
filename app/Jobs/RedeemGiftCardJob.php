@@ -27,6 +27,25 @@ class RedeemGiftCardJob implements ShouldQueue
     protected string $cardForm;
     protected string $batchId;
     protected string $msgId;
+    // 业务逻辑错误，不需要堆栈跟踪，直接更新进度为失败，不抛出异常
+    protected array $businessErrors = [
+        '礼品卡无效',
+        '该礼品卡已经被兑换',
+        '未找到符合条件的汇率',
+        '未找到可用的兑换计划',
+        '未找到可用的兑换账号',
+        'AlreadyRedeemed',
+        'Bad card',
+        '查卡失败'
+    ];
+    // 系统错误，需要堆栈跟踪，抛出异常，队列会重试
+    protected array $systemErrors = [
+        '系统错误',
+        '网络错误',
+        '服务器错误',
+        '数据库错误',
+        'Tap Continue to request re-enablement'
+    ];
 
     const QUEUE_NAME = 'gift-card-redeem';
 
@@ -119,16 +138,29 @@ class RedeemGiftCardJob implements ShouldQueue
             }
 
             $this->getLogger()->error("礼品卡兑换任务失败", $logData);
-            send_msg_to_wechat($this->roomId,"兑换失败\n-------------------------\n".$this->giftCardCode."\n".$e->getMessage());
+            
             // 记录错误信息
             $this->recordFailure($e, $batchService);
 
-            // 如果还有重试机会，抛出异常触发重试
-            if ($this->attempts() < $this->tries) {
-                throw $e;
+            // 检查是否为业务逻辑错误，如果是则不重试
+            if ($this->isBusinessError($e)) {
+                $this->getLogger()->info("检测到业务逻辑错误，不进行重试", [
+                    'gift_card_code' => $this->giftCardCode,
+                    'error' => $e->getMessage()
+                ]);
+                // 直接更新进度为失败，不抛出异常
+                $batchService->updateProgress($this->batchId, false, $this->giftCardCode);
+                // 业务逻辑错误直接发送失败消息
+                send_msg_to_wechat($this->roomId,"兑换失败\n-------------------------\n".$this->giftCardCode."\n".$e->getMessage());
+                return; // 不抛出异常，队列不会重试
             }
 
-            // 最后一次尝试失败，更新进度
+            // 如果还有重试机会，抛出异常触发重试
+            if ($this->attempts() < $this->tries) {
+                throw $e; // 抛出异常，队列会重试
+            }
+
+            // 最后一次尝试失败，更新进度（不发送消息，让failed方法处理）
             $batchService->updateProgress($this->batchId, false, $this->giftCardCode);
         }
     }
@@ -164,22 +196,39 @@ class RedeemGiftCardJob implements ShouldQueue
     {
         $message = $e->getMessage();
 
-        // 业务逻辑错误，不需要堆栈跟踪
-        $businessErrors = [
-            '礼品卡无效',
-            '该礼品卡已经被兑换',
-            '未找到符合条件的汇率',
-            '未找到可用的兑换计划',
-            '未找到可用的兑换账号',
-            'AlreadyRedeemed',
-            'Bad card',
-            '查卡失败'
-        ];
-
-        foreach ($businessErrors as $businessError) {
+        // 首先检查是否为明确的业务逻辑错误
+        foreach ($this->businessErrors as $businessError) {
             if (strpos($message, $businessError) !== false) {
                 return false;
             }
+        }
+
+        // 然后检查是否为明确的系统错误
+        foreach ($this->systemErrors as $systemError) {
+            if (strpos($message, $systemError) !== false) {
+                return true;
+            }
+        }
+
+        // 包含"兑换失败:"前缀的错误需要进一步判断
+        if (strpos($message, '兑换失败:') === 0) {
+            // 检查是否包含需要重试的系统错误关键词
+            $retryableErrors = [
+                'Tap Continue to request re-enablement',
+                '网络',
+                '服务器',
+                '超时',
+                '连接',
+                '系统'
+            ];
+            
+            foreach ($retryableErrors as $retryableError) {
+                if (strpos($message, $retryableError) !== false) {
+                    return true; // 需要重试的系统错误
+                }
+            }
+            
+            return false; // 其他兑换失败视为业务逻辑错误
         }
 
         // 其他错误视为系统错误，需要堆栈跟踪
@@ -187,10 +236,65 @@ class RedeemGiftCardJob implements ShouldQueue
     }
 
     /**
+     * 判断是否为业务逻辑错误（不需要重试）
+     */
+    protected function isBusinessError(Throwable $e): bool
+    {
+        $message = $e->getMessage();
+
+        // 检查是否为明确的业务逻辑错误
+        foreach ($this->businessErrors as $businessError) {
+            if (strpos($message, $businessError) !== false) {
+                return true;
+            }
+        }
+
+        // 检查是否为明确的系统错误（需要重试）
+        foreach ($this->systemErrors as $systemError) {
+            if (strpos($message, $systemError) !== false) {
+                return false;
+            }
+        }
+
+        // 包含"兑换失败:"前缀的错误需要进一步判断
+        if (strpos($message, '兑换失败:') === 0) {
+            // 检查是否包含需要重试的系统错误关键词
+            $retryableErrors = [
+                'Tap Continue to request re-enablement',
+                '网络',
+                '服务器',
+                '超时',
+                '连接',
+                '系统'
+            ];
+            
+            foreach ($retryableErrors as $retryableError) {
+                if (strpos($message, $retryableError) !== false) {
+                    return false; // 需要重试的系统错误
+                }
+            }
+            
+            return true; // 其他兑换失败视为业务逻辑错误
+        }
+
+        // 其他错误视为系统错误，需要重试
+        return false;
+    }
+
+    /**
      * 任务最终失败处理
      */
     public function failed(Throwable $exception): void
     {
+        // 如果是业务逻辑错误，已经在handle方法中处理过了，不需要重复处理
+        if ($this->isBusinessError($exception)) {
+            $this->getLogger()->info("业务逻辑错误已在handle方法中处理，跳过failed方法", [
+                'gift_card_code' => $this->giftCardCode,
+                'error' => $exception->getMessage()
+            ]);
+            return;
+        }
+
         // 根据错误类型决定是否记录堆栈跟踪
         $logData = [
             'gift_card_code' => $this->giftCardCode,
@@ -205,6 +309,9 @@ class RedeemGiftCardJob implements ShouldQueue
         }
 
         $this->getLogger()->error("礼品卡兑换任务最终失败", $logData);
+
+        // 发送最终失败消息
+        send_msg_to_wechat($this->roomId,"兑换失败\n-------------------------\n".$this->giftCardCode."\n".$exception->getMessage());
 
         // 确保更新批量任务进度
         try {
