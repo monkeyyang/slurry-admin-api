@@ -64,7 +64,7 @@ class WechatRoomBindingService
             return $settings;
         } catch (Exception $e) {
             DB::rollBack();
-            Log::error('Failed to update wechat room binding status: ' . $e->getMessage());
+            Log::channel('wechat')->error('Failed to update wechat room binding status: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -129,7 +129,7 @@ class WechatRoomBindingService
                 'total' => $total,
             ];
         } catch (\Exception $e) {
-            Log::error('Failed to get wechat rooms: ' . $e->getMessage());
+            Log::channel('wechat')->error('Failed to get wechat rooms: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -186,7 +186,7 @@ class WechatRoomBindingService
             return $binding;
         } catch (Exception $e) {
             DB::rollBack();
-            Log::error('Failed to bind plan to wechat room: ' . $e->getMessage());
+            Log::channel('wechat')->error('Failed to bind plan to wechat room: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -211,7 +211,7 @@ class WechatRoomBindingService
 
             return true;
         } catch (Exception $e) {
-            Log::error('Failed to unbind plan from wechat room: ' . $e->getMessage());
+            Log::channel('wechat')->error('Failed to unbind plan from wechat room: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -361,7 +361,7 @@ class WechatRoomBindingService
                 'roomStats' => $roomStats,
             ];
         } catch (Exception $e) {
-            Log::error('Failed to get wechat room stats: ' . $e->getMessage());
+            Log::channel('wechat')->error('Failed to get wechat room stats: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -406,7 +406,7 @@ class WechatRoomBindingService
 
             return false;
         } catch (Exception $e) {
-            Log::error('Failed to auto assign plan to room: ' . $e->getMessage());
+            Log::channel('wechat')->error('Failed to auto assign plan to room: ' . $e->getMessage());
             return false;
         }
     }

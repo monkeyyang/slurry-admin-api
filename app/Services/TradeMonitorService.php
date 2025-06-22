@@ -327,7 +327,7 @@ class TradeMonitorService
             $queueName = config('queue.connections.redis.queue', 'default');
             return Redis::llen("queues:{$queueName}");
         } catch (\Exception $e) {
-            Log::warning('获取队列数量失败: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->warning('获取队列数量失败: ' . $e->getMessage());
             return 0;
         }
     }

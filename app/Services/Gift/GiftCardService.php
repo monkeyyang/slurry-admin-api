@@ -401,22 +401,56 @@ class GiftCardService
 
     /**
      * 查询执行中的账号
+     * 增加筛选，初次绑定了计划后不可再修改除非该计划已被删除，可重新绑定计划
      */
     private function findProcessingAccount(
         ItunesTradePlan $plan,
         string $roomId,
         int $lastCheckedId
     ): ?ItunesTradeAccount {
-        $query = ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_PROCESSING)
-            ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_ACTIVE)
-            ->where('id', '>', $lastCheckedId)
-            ->orderBy('id', 'asc');
+        // 基础查询条件
+        $baseQuery = function () use ($plan, $lastCheckedId) {
+            return ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_PROCESSING)
+                ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_ACTIVE)
+                ->where('id', '>', $lastCheckedId)
+                ->orderBy('id', 'asc');
+        };
 
-        // 如果计划绑定群聊，优先查找绑定该群聊的账号
+        // 1. 首先查找绑定当前计划且绑定对应群聊的账号
         if ($plan->bind_room && !empty($roomId)) {
-            $account = (clone $query)->where('room_id', $roomId)->first();
+            $account = (clone $baseQuery())
+                ->where('plan_id', $plan->id)
+                ->where('room_id', $roomId)
+                ->first();
+
             if ($account) {
-                $this->getLogger()->info("找到绑定群聊的processing账号", [
+                $this->getLogger()->info("找到绑定群聊和计划的processing账号", [
+                    'account_id' => $account->id,
+                    'room_id' => $roomId,
+                    'plan_id' => $plan->id
+                ]);
+                return $account;
+            }
+        }
+
+        // 2. 查找绑定当前计划但不限定群聊的账号
+        $account = (clone $baseQuery())
+            ->where('plan_id', $plan->id)
+            ->first();
+
+        if ($account) {
+            return $account;
+        }
+
+        // 3. 查找未绑定计划但绑定对应群聊的账号
+        if ($plan->bind_room && !empty($roomId)) {
+            $account = (clone $baseQuery())
+                ->whereNull('plan_id')
+                ->where('room_id', $roomId)
+                ->first();
+
+            if ($account) {
+                $this->getLogger()->info("找到绑定群聊但未绑定计划的processing账号", [
                     'account_id' => $account->id,
                     'room_id' => $roomId
                 ]);
@@ -424,7 +458,10 @@ class GiftCardService
             }
         }
 
-        return $query->first();
+        // 4. 最后查找未绑定计划的账号
+        return (clone $baseQuery())
+            ->whereNull('plan_id')
+            ->first();
     }
 
     /**
@@ -459,13 +496,13 @@ class GiftCardService
             return false;
         }
 
-        // 检查当日额度
-        if (!$this->validateDailyAmount($account, $plan, $giftCardInfo)) {
+        // 检查总额度
+        if (!$this->validateTotalAmount($account, $plan, $giftCardInfo)) {
             return false;
         }
 
-        // 检查总额度
-        if (!$this->validateTotalAmount($account, $plan, $giftCardInfo)) {
+        // 检查当日额度
+        if (!$this->validateDailyAmount($account, $plan, $giftCardInfo)) {
             return false;
         }
 

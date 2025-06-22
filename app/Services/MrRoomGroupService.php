@@ -36,7 +36,7 @@ class MrRoomGroupService
                 'total' => $groups->total(),
             ];
         } catch (\Exception $e) {
-            Log::error('Failed to get room groups list: ' . $e->getMessage());
+            Log::channel('wechat')->error('Failed to get room groups list: ' . $e->getMessage());
             throw $e;
         }
     }

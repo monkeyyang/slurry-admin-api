@@ -60,7 +60,7 @@ class TradeAccountService
                     $successCount++;
 
                 } catch (Exception $e) {
-                    Log::error('Failed to import account: ' . $accountData['account'], [
+                    Log::channel('gift_card_exchange')->error('Failed to import account: ' . $accountData['account'], [
                         'error' => $e->getMessage(),
                         'account_data' => $accountData
                     ]);
@@ -70,7 +70,7 @@ class TradeAccountService
 
             DB::commit();
 
-            Log::info('Batch import accounts completed', [
+            Log::channel('gift_card_exchange')->info('Batch import accounts completed', [
                 'success_count' => $successCount,
                 'fail_count' => $failCount,
                 'duplicate_count' => count($duplicateAccounts),
@@ -87,7 +87,7 @@ class TradeAccountService
 
         } catch (Exception $e) {
             DB::rollBack();
-            Log::error('Batch import accounts failed', [
+            Log::channel('gift_card_exchange')->error('Batch import accounts failed', [
                 'error' => $e->getMessage(),
                 'data' => $data
             ]);
@@ -109,7 +109,7 @@ class TradeAccountService
             $account->status = $status;
             $account->save();
 
-            Log::info('Account status updated', [
+            Log::channel('gift_card_exchange')->info('Account status updated', [
                 'account_id' => $account->id,
                 'account' => $account->account,
                 'old_status' => $oldStatus,
@@ -120,7 +120,7 @@ class TradeAccountService
             return $account;
 
         } catch (Exception $e) {
-            Log::error('Failed to update account status', [
+            Log::channel('gift_card_exchange')->error('Failed to update account status', [
                 'account_id' => $account->id,
                 'account' => $account->account,
                 'status' => $status,
@@ -157,7 +157,7 @@ class TradeAccountService
 
             DB::commit();
 
-            Log::info('Batch delete accounts completed', [
+            Log::channel('gift_card_exchange')->info('Batch delete accounts completed', [
                 'deleted_count' => $deletedCount,
                 'deleted_accounts' => $deletedAccounts,
                 'deleted_by' => auth()->user()->name ?? 'System'
@@ -170,7 +170,7 @@ class TradeAccountService
 
         } catch (Exception $e) {
             DB::rollBack();
-            Log::error('Batch delete accounts failed', [
+            Log::channel('gift_card_exchange')->error('Batch delete accounts failed', [
                 'ids' => $ids,
                 'error' => $e->getMessage()
             ]);

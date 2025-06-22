@@ -36,7 +36,7 @@ class ForecastCrawlerService
     private function reportProgress($message)
     {
         // 同时记录到日志文件
-        Log::info('[预报爬虫] ' . $message);
+        Log::channel('forecast_crawler')->info('[预报爬虫] ' . $message);
 
         // 原有回调通知
         if ($this->progressCallback) {
@@ -420,5 +420,10 @@ class ForecastCrawlerService
 
         $this->reportProgress("最终处理结果: " . json_encode($result, JSON_UNESCAPED_UNICODE));
         return $result;
+    }
+
+    private function log(string $message): void
+    {
+        Log::channel('forecast_crawler')->info('[预报爬虫] ' . $message);
     }
 }

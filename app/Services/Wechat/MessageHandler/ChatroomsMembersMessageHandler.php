@@ -11,7 +11,7 @@ class ChatroomsMembersMessageHandler implements MessageHandler
     public function handle($input)
     {
         var_dump($input);exit;
-        Log::info('成员信息', json_encode($input));
+        Log::channel('wechat')->info('成员信息', json_encode($input));
 //        if (!empty($input['data']['member_list'])) {
 //            foreach ($input['data']['member_list'] as $item) {
 //                try {

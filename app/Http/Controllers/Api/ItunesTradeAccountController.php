@@ -27,7 +27,7 @@ class ItunesTradeAccountController extends Controller
             $params = $request->validate([
                 'account' => 'nullable|string|max:255',
                 'country' => 'nullable|string|max:10',
-                'status' => ['nullable', Rule::in(['completed', 'processing', 'waiting'])],
+                'status' => ['nullable', Rule::in(['completed', 'processing', 'waiting', 'locking'])],
                 'loginStatus' => ['nullable', Rule::in(['valid', 'invalid'])],
                 'uid' => 'nullable|integer',
                 'startTime' => 'nullable|date',

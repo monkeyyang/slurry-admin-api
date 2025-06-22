@@ -33,7 +33,7 @@ class GiftCardApiClient
 
             return $response->json();
         } catch (\Exception $e) {
-            Log::error('创建登录任务异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('创建登录任务异常: ' . $e->getMessage());
             return [
                 'code' => -1,
                 'msg' => $e->getMessage(),
@@ -61,7 +61,7 @@ class GiftCardApiClient
 
             return $response->json();
         } catch (\Exception $e) {
-            Log::error('查询登录任务状态异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('查询登录任务状态异常: ' . $e->getMessage());
             return [
                 'code' => -1,
                 'msg' => $e->getMessage(),
@@ -89,7 +89,7 @@ class GiftCardApiClient
 
             return $response->json();
         } catch (\Exception $e) {
-            Log::error('删除用户登录异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('删除用户登录异常: ' . $e->getMessage());
             return [
                 'code' => -1,
                 'msg' => $e->getMessage(),
@@ -115,7 +115,7 @@ class GiftCardApiClient
 
             return $response->json();
         } catch (\Exception $e) {
-            Log::error('刷新用户登录异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('刷新用户登录异常: ' . $e->getMessage());
             return [
                 'code' => -1,
                 'msg' => $e->getMessage(),
@@ -143,7 +143,7 @@ class GiftCardApiClient
 
             return $response->json();
         } catch (\Exception $e) {
-            Log::error('创建查卡任务异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('创建查卡任务异常: ' . $e->getMessage());
             return [
                 'code' => -1,
                 'msg' => $e->getMessage(),
@@ -161,7 +161,6 @@ class GiftCardApiClient
     public function getCardQueryTaskStatus(string $taskId): array
     {
         try {
-
             $response = Http::get("{$this->baseUrl}/batch_query/status", [
                 'task_id' => $taskId
             ]);
@@ -172,7 +171,7 @@ class GiftCardApiClient
 
             return $response->json();
         } catch (\Exception $e) {
-            Log::error('查询查卡任务状态异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('查询查卡任务状态异常: ' . $e->getMessage());
             return [
                 'code' => -1,
                 'msg' => $e->getMessage(),
@@ -202,7 +201,7 @@ class GiftCardApiClient
 
             return $response->json();
         } catch (\Exception $e) {
-            Log::error('创建兑换任务异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('创建兑换任务异常: ' . $e->getMessage());
             return [
                 'code' => -1,
                 'msg' => $e->getMessage(),
@@ -273,7 +272,7 @@ class GiftCardApiClient
 
             return $response->json();
         } catch (\Exception $e) {
-            Log::error('查询查卡历史记录异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('查询查卡历史记录异常: ' . $e->getMessage());
             return [
                 'code' => -1,
                 'msg' => $e->getMessage(),
@@ -316,7 +315,7 @@ class GiftCardApiClient
 
             return $response->json();
         } catch (\Exception $e) {
-            Log::error('查询兑换历史记录异常: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('查询兑换历史记录异常: ' . $e->getMessage());
             return [
                 'code' => -1,
                 'msg' => $e->getMessage(),

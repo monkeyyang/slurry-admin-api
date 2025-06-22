@@ -43,7 +43,7 @@ class ItunesTradeService
             $config = ItunesTradeConfig::createOrUpdateFromRequest($data);
             return $config->toResponseArray();
         } catch (\Exception $e) {
-            Log::error('Failed to save iTunes trade config: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('Failed to save iTunes trade config: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -78,7 +78,7 @@ class ItunesTradeService
             
             return $config->toResponseArray();
         } catch (\Exception $e) {
-            Log::error('Failed to update iTunes trade config: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('Failed to update iTunes trade config: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -95,7 +95,7 @@ class ItunesTradeService
             $config = ItunesTradeConfig::findOrFail($id);
             return $config->delete();
         } catch (\Exception $e) {
-            Log::error('Failed to delete iTunes trade config: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('Failed to delete iTunes trade config: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -128,7 +128,7 @@ class ItunesTradeService
             
             return $template->toResponseArray();
         } catch (\Exception $e) {
-            Log::error('Failed to save iTunes trade template: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('Failed to save iTunes trade template: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -152,7 +152,7 @@ class ItunesTradeService
             
             return $configs;
         } catch (\Exception $e) {
-            Log::error('Failed to apply iTunes trade template: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('Failed to apply iTunes trade template: ' . $e->getMessage());
             throw $e;
         }
     }
