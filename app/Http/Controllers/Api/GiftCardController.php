@@ -4,17 +4,22 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\Gift\BatchGiftCardService;
+use App\Services\Gift\GiftCardService;
+use App\Models\ItunesTradeAccountLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Log;
 
 class GiftCardController extends Controller
 {
     protected BatchGiftCardService $batchService;
+    protected GiftCardService $giftCardService;
 
-    public function __construct(BatchGiftCardService $batchService)
+    public function __construct(BatchGiftCardService $batchService, GiftCardService $giftCardService)
     {
         $this->batchService = $batchService;
+        $this->giftCardService = $giftCardService;
     }
 
     public function bulkRedeem(Request $request): JsonResponse
@@ -22,6 +27,7 @@ class GiftCardController extends Controller
         $validated = $request->validate([
             'room_id' => 'required|string|max:255',
             'msgid' => 'nullable|string|max:255',
+            'wxid' => 'nullable|string|max:255',
             'codes' => 'required|array|min:1|max:100', // 限制最多100张卡
             'codes.*' => 'required|string|min:10|max:20', // 礼品卡码长度限制
             'card_type' => ['required', Rule::in(['fast', 'slow'])],
@@ -41,31 +47,91 @@ class GiftCardController extends Controller
         ]);
 
         try {
-            $batchId = $this->batchService->startBatchRedemption(
-                $validated['codes'],
-                $validated['room_id'],
-                $validated['card_type'],
-                $validated['card_form'],
-                $validated['msgid']??''
-            );
+            // 1. 检查重复的礼品卡码
+            $duplicateCodes = $this->checkDuplicateCodes($validated['codes']);
 
-            return response()->json([
+            // 过滤掉重复的卡
+            $validCodes = array_diff($validated['codes'], $duplicateCodes);
+            if (empty($validCodes)) {
+                return response()->json([
+                    'code' => 400,
+                    'message' => '所有礼品卡码都已处理过，无新卡需要兑换',
+                    'data' => [
+                        'duplicate_codes' => $duplicateCodes,
+                        'total_duplicates' => count($duplicateCodes)
+                    ]
+                ], 400);
+            }
+
+            // 2. 开始批量兑换任务（只处理有效的卡）
+            // 使用批量服务处理兑换（新的属性设置方式）
+            $batchId = $this->batchService
+                ->setGiftCardCodes(array_values($validCodes)) // 重新索引数组
+                ->setRoomId($validated['room_id'])
+                ->setCardType($validated['card_type'])
+                ->setCardForm($validated['card_form'])
+                ->setMsgId($validated['msgid'] ?? '')
+                ->setWxId($validated['wxid'] ?? '')
+                ->startBatchRedemption();
+
+            $response = [
                 'code' => 0,
                 'message' => '批量兑换任务已开始处理',
                 'data' => [
                     'batch_id' => $batchId,
-                    'total_cards' => count($validated['codes']),
+                    'total_cards' => count($validCodes),
                     'progress_url' => route('giftcards.batch.progress', ['batchId' => $batchId])
                 ]
-            ]);
+            ];
+
+            // 如果有重复的卡，在响应中说明
+            if (!empty($duplicateCodes)) {
+                $response['message'] = '批量兑换任务已开始处理，已跳过重复的卡';
+                $response['data']['skipped_duplicates'] = $duplicateCodes;
+                $response['data']['skipped_count'] = count($duplicateCodes);
+                $response['data']['original_total'] = count($validated['codes']);
+            }
+
+            return response()->json($response);
 
         } catch (\Exception $e) {
+            Log::error('批量兑换任务启动失败', [
+                'error' => $e->getMessage(),
+                'codes' => $validated['codes'],
+                'room_id' => $validated['room_id']
+            ]);
+
             return response()->json([
                 'code' => 500,
                 'message' => '批量兑换任务启动失败: ' . $e->getMessage(),
                 'data' => null
             ], 500);
         }
+    }
+
+    /**
+     * 检查重复的礼品卡码
+     */
+    private function checkDuplicateCodes(array $codes): array
+    {
+        // 检查数据库中是否已存在这些礼品卡的处理记录
+        $existingCodes = ItunesTradeAccountLog::whereIn('code', $codes)
+            ->whereIn('status', [
+                ItunesTradeAccountLog::STATUS_PENDING,
+                ItunesTradeAccountLog::STATUS_SUCCESS
+            ])
+            ->pluck('code')
+            ->toArray();
+
+        if (!empty($existingCodes)) {
+            Log::warning('检测到重复的礼品卡码', [
+                'duplicate_codes' => $existingCodes,
+                'total_submitted' => count($codes),
+                'duplicate_count' => count($existingCodes)
+            ]);
+        }
+
+        return $existingCodes;
     }
 
     public function batchProgress(string $batchId): JsonResponse

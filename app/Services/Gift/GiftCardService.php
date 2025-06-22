@@ -21,12 +21,17 @@ use Psr\Log\LoggerInterface;
 class GiftCardService
 {
     protected GiftCardExchangeService $exchangeService;
-    protected string $roomId;
-    protected string $code;
-    protected string $cardType;
-    protected string $cardForm;
-    protected string $countryCode;
-    protected string $msgid;
+    
+    // 兑换任务的属性
+    protected string $giftCardCode = '';
+    protected string $roomId = '';
+    protected string $cardType = '';
+    protected string $cardForm = '';
+    protected string $batchId = '';
+    protected string $msgId = '';
+    protected string $wxId = '';
+    protected string $countryCode = '';
+    protected array $additionalParams = [];
 
     public function __construct(GiftCardExchangeService $exchangeService)
     {
@@ -42,46 +47,168 @@ class GiftCardService
     }
 
     /**
-     * 兑换礼品卡
+     * 设置礼品卡码
+     */
+    public function setGiftCardCode(string $code): self
+    {
+        $this->giftCardCode = $code;
+        return $this;
+    }
+
+    /**
+     * 设置房间ID
+     */
+    public function setRoomId(string $roomId): self
+    {
+        $this->roomId = $roomId;
+        return $this;
+    }
+
+    /**
+     * 设置卡类型
+     */
+    public function setCardType(string $cardType): self
+    {
+        $this->cardType = $cardType;
+        return $this;
+    }
+
+    /**
+     * 设置卡形式
+     */
+    public function setCardForm(string $cardForm): self
+    {
+        $this->cardForm = $cardForm;
+        return $this;
+    }
+
+    /**
+     * 设置批次ID
+     */
+    public function setBatchId(string $batchId): self
+    {
+        $this->batchId = $batchId;
+        return $this;
+    }
+
+    /**
+     * 设置消息ID
+     */
+    public function setMsgId(string $msgId): self
+    {
+        $this->msgId = $msgId;
+        return $this;
+    }
+
+    /**
+     * 设置微信ID
+     */
+    public function setWxId(string $wxId): self
+    {
+        $this->wxId = $wxId;
+        return $this;
+    }
+
+    /**
+     * 设置额外参数
+     */
+    public function setAdditionalParam(string $key, $value): self
+    {
+        $this->additionalParams[$key] = $value;
+        return $this;
+    }
+
+    /**
+     * 批量设置额外参数
+     */
+    public function setAdditionalParams(array $params): self
+    {
+        $this->additionalParams = array_merge($this->additionalParams, $params);
+        return $this;
+    }
+
+    /**
+     * 获取额外参数
+     */
+    public function getAdditionalParam(string $key, $default = null)
+    {
+        return $this->additionalParams[$key] ?? $default;
+    }
+
+    /**
+     * 重置所有属性
+     */
+    public function reset(): self
+    {
+        $this->giftCardCode = '';
+        $this->roomId = '';
+        $this->cardType = '';
+        $this->cardForm = '';
+        $this->batchId = '';
+        $this->msgId = '';
+        $this->wxId = '';
+        $this->countryCode = '';
+        $this->additionalParams = [];
+        return $this;
+    }
+
+    /**
+     * 验证必要参数
+     */
+    protected function validateParams(): void
+    {
+        if (empty($this->giftCardCode)) {
+            throw new \InvalidArgumentException('礼品卡码不能为空');
+        }
+        if (empty($this->roomId)) {
+            throw new \InvalidArgumentException('房间ID不能为空');
+        }
+        if (empty($this->cardType)) {
+            throw new \InvalidArgumentException('卡类型不能为空');
+        }
+        if (empty($this->cardForm)) {
+            throw new \InvalidArgumentException('卡形式不能为空');
+        }
+    }
+
+    /**
+     * 兑换礼品卡（新的属性设置方式）
      * @throws Exception
      */
-    public function redeem(string $code, string $roomId, string $cardType, string $cardForm, string $batchId, string $msgid = ''): array
+    public function redeemGiftCard(): array
     {
-        $this->getLogger()->info("开始兑换礼品卡", [
-            'code' => $code,
-            'room_id' => $roomId,
-            'card_type' => $cardType,
-            'card_form' => $cardForm,
-            'batch_id' => $batchId,
-            'msgid' => $msgid
-        ]);
-        $this->roomId = $roomId;
-        $this->code = $code;
-        $this->cardType = $cardType;
-        $this->cardForm = $cardForm;
-        $this->msgid = $msgid;
+        // 验证参数
+        $this->validateParams();
 
         try {
-            // 1. 验证礼品卡并获取信息
-            $giftCardInfo = $this->validateGiftCard($code);
-            $this->getLogger()->info('验证礼品卡并获取信息', $giftCardInfo);
+            $this->getLogger()->info("开始兑换礼品卡", [
+                'code' => $this->giftCardCode,
+                'room_id' => $this->roomId,
+                'card_type' => $this->cardType,
+                'card_form' => $this->cardForm,
+                'batch_id' => $this->batchId,
+                'additional_params' => $this->additionalParams
+            ]);
 
-            // 2. 根据条件获取汇率
-            $rate = $this->findMatchingRate($giftCardInfo, $roomId, $cardType, $cardForm);
-            $this->getLogger()->info('根据条件获取汇率', $rate->toArray());
-            // 3. 获取对应的计划
+            // 验证礼品卡
+            $giftCardInfo = $this->validateGiftCard($this->giftCardCode);
+
+            // 查找匹配的汇率
+            $rate = $this->findMatchingRate($giftCardInfo, $this->roomId, $this->cardType, $this->cardForm);
+
+            // 查找可用的计划
             $plan = $this->findAvailablePlan($rate->id);
-            $this->getLogger()->info('获取对应的计划', $plan->toArray());
-            // 4. 查找符合要求的账号
-            $account = $this->findAvailableAccount($plan, $roomId, $giftCardInfo);
-            $this->getLogger()->info('获取对应的账号', $account->toArray());
-            // 5. 执行兑换
-            $result = $this->executeRedemption($code, $giftCardInfo, $rate, $plan, $account, $batchId);
+
+            // 查找可用账号
+            $account = $this->findAvailableAccount($plan, $this->roomId, $giftCardInfo);
+
+            // 执行兑换
+            $result = $this->executeRedemption($this->giftCardCode, $giftCardInfo, $rate, $plan, $account, $this->batchId);
 
             $this->getLogger()->info("礼品卡兑换成功", [
-                'code' => $code,
+                'code' => $this->giftCardCode,
                 'result' => $result,
-                'batch_id' => $batchId
+                'batch_id' => $this->batchId
             ]);
 
             return $result;
@@ -89,9 +216,9 @@ class GiftCardService
         } catch (Exception $e) {
             // 根据错误类型决定是否记录堆栈跟踪
             $logData = [
-                'code' => $code,
+                'code' => $this->giftCardCode,
                 'error' => $e->getMessage(),
-                'batch_id' => $batchId
+                'batch_id' => $this->batchId
             ];
 
             // 只有系统错误才记录堆栈跟踪，业务逻辑错误不记录
@@ -103,6 +230,22 @@ class GiftCardService
 
             throw $e;
         }
+    }
+
+    /**
+     * 兑换礼品卡（兼容旧版本，已废弃）
+     * @deprecated 使用属性设置方法替代
+     * @throws Exception
+     */
+    public function redeem(string $code, string $roomId, string $cardType, string $cardForm, string $batchId, string $msgid = ''): array
+    {
+        return $this->setGiftCardCode($code)
+            ->setRoomId($roomId)
+            ->setCardType($cardType)
+            ->setCardForm($cardForm)
+            ->setBatchId($batchId)
+            ->setMsgId($msgid)
+            ->redeemGiftCard();
     }
 
     /**
@@ -631,7 +774,37 @@ class GiftCardService
                 'inferred_original_status' => $originalStatus
             ]);
 
-            // 创建兑换日志
+            // 检查是否已存在该礼品卡的日志记录
+            $existingLog = ItunesTradeAccountLog::where('code', $code)
+                ->whereIn('status', [ItunesTradeAccountLog::STATUS_PENDING, ItunesTradeAccountLog::STATUS_SUCCESS])
+                ->first();
+
+            if ($existingLog) {
+                $this->getLogger()->warning("礼品卡已存在处理记录，跳过重复处理", [
+                    'code' => $code,
+                    'existing_log_id' => $existingLog->id,
+                    'existing_status' => $existingLog->status,
+                    'account_id' => $account->id
+                ]);
+
+                // 如果已存在成功记录，直接返回结果
+                if ($existingLog->status === ItunesTradeAccountLog::STATUS_SUCCESS) {
+                    return [
+                        'success' => true,
+                        'message' => '礼品卡已兑换成功',
+                        'code' => $code,
+                        'amount' => $existingLog->amount,
+                        'account_id' => $existingLog->account_id,
+                        'log_id' => $existingLog->id,
+                        'wechat_msg' => "礼品卡 {$code} 已兑换成功（重复提交）"
+                    ];
+                }
+
+                // 如果是待处理状态，抛出异常避免重复处理
+                throw new GiftCardExchangeException("礼品卡 {$code} 正在处理中，请勿重复提交");
+            }
+
+            // 创建新的兑换日志
             $log = ItunesTradeAccountLog::create([
                 'account_id' => $account->id,
                 'plan_id' => $plan->id,
@@ -825,7 +998,7 @@ class GiftCardService
                     'room_id' => $this->roomId,
                     'room_name' => $room->room_name ?? '未知群组',
                     'event' => 1, // 兑换事件
-                    'msgid' => $this->msgid,
+                    'msgid' => $this->msgId,
                     'money' => $amount,
                     'rate' => $rate,
                     'fee' => 0.00,
@@ -836,14 +1009,14 @@ class GiftCardService
                     'remark' => 'iTunes',
                     'op_id' => '',
                     'op_name' => '',
-                    'code' => $this->code,
+                    'code' => $this->giftCardCode,
                     'content' => json_encode([
                         'account' => $account->account,
                         'original_amount' => $amount,
                         'exchange_rate' => $rate,
                         'converted_amount' => $changeAmount
                     ]),
-                    'note' => "礼品卡兑换 - {$this->code}",
+                    'note' => "礼品卡兑换 - {$this->giftCardCode}",
                     'status' => 0,
                     'is_settle' => 0,
                     'is_del' => 0
@@ -860,7 +1033,7 @@ class GiftCardService
 
                 // 构建成功消息
                 $successMessage = $this->buildSuccessMessage([
-                    'card_number' => $this->code,
+                    'card_number' => $this->giftCardCode,
                     'amount' => $amount,
                     'rate' => $rate,
                     'before_money' => $beforeMoney,
@@ -872,8 +1045,8 @@ class GiftCardService
 
 
                 Log::channel('gift_card_exchange')->info("群组 {$this->roomId} 加账处理完成", [
-                    'msgid' => $this->msgid,
-                    'card_number' =>  $this->code,
+                    'msgid' => $this->msgId,
+                    'card_number' =>  $this->giftCardCode,
                     'amount' => $amount,
                     'rate' => $rate,
                     'change_amount' => $changeAmount,

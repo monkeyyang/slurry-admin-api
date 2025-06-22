@@ -8,9 +8,19 @@ use App\Jobs\RedeemGiftCardJob;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Log;
 use Psr\Log\LoggerInterface;
+use Throwable;
 
 class BatchGiftCardService
 {
+    // 批量兑换任务的属性
+    protected array $giftCardCodes = [];
+    protected string $roomId = '';
+    protected string $cardType = '';
+    protected string $cardForm = '';
+    protected string $msgId = '';
+    protected string $wxId = '';
+    protected array $additionalParams = [];
+
     /**
      * 获取礼品卡兑换专用日志实例
      */
@@ -20,37 +30,162 @@ class BatchGiftCardService
     }
 
     /**
-     * @throws \Throwable
+     * 设置礼品卡码列表
      */
-    public function startBatchRedemption(
-        array $giftCardCodes,
-        string $roomId,
-        string $cardType,
-        string $cardForm,
-        string $msgid = '',
-    ): string {
+    public function setGiftCardCodes(array $codes): self
+    {
+        $this->giftCardCodes = $codes;
+        return $this;
+    }
+
+    /**
+     * 设置房间ID
+     */
+    public function setRoomId(string $roomId): self
+    {
+        $this->roomId = $roomId;
+        return $this;
+    }
+
+    /**
+     * 设置卡类型
+     */
+    public function setCardType(string $cardType): self
+    {
+        $this->cardType = $cardType;
+        return $this;
+    }
+
+    /**
+     * 设置卡形式
+     */
+    public function setCardForm(string $cardForm): self
+    {
+        $this->cardForm = $cardForm;
+        return $this;
+    }
+
+    /**
+     * 设置消息ID
+     */
+    public function setMsgId(string $msgId): self
+    {
+        $this->msgId = $msgId;
+        return $this;
+    }
+
+    /**
+     * 设置微信ID
+     */
+    public function setWxId(string $wxId): self
+    {
+        $this->wxId = $wxId;
+        return $this;
+    }
+
+    /**
+     * 设置额外参数
+     */
+    public function setAdditionalParam(string $key, $value): self
+    {
+        $this->additionalParams[$key] = $value;
+        return $this;
+    }
+
+    /**
+     * 批量设置额外参数
+     */
+    public function setAdditionalParams(array $params): self
+    {
+        $this->additionalParams = array_merge($this->additionalParams, $params);
+        return $this;
+    }
+
+    /**
+     * 获取额外参数
+     */
+    public function getAdditionalParam(string $key, $default = null)
+    {
+        return $this->additionalParams[$key] ?? $default;
+    }
+
+    /**
+     * 重置所有属性
+     */
+    public function reset(): self
+    {
+        $this->giftCardCodes = [];
+        $this->roomId = '';
+        $this->cardType = '';
+        $this->cardForm = '';
+        $this->msgId = '';
+        $this->wxId = '';
+        $this->additionalParams = [];
+        return $this;
+    }
+
+    /**
+     * 验证必要参数
+     */
+    protected function validateParams(): void
+    {
+        if (empty($this->giftCardCodes)) {
+            throw new \InvalidArgumentException('礼品卡列表不能为空');
+        }
+        if (empty($this->roomId)) {
+            throw new \InvalidArgumentException('群聊ID不能为空');
+        }
+        if (empty($this->cardType)) {
+            throw new \InvalidArgumentException('卡类型不能为空');
+        }
+        if (empty($this->cardForm)) {
+            throw new \InvalidArgumentException('卡形式不能为空');
+        }
+    }
+
+    /**
+     * 开始批量兑换任务
+     * @throws Throwable
+     */
+    public function startBatchRedemption(): string
+    {
+        // 验证参数
+        $this->validateParams();
+
         $batchId = Str::uuid()->toString();
 
         // 初始化批量任务状态
-        $this->initializeBatch($batchId, count($giftCardCodes), $roomId, $cardType, $cardForm);
+        $this->initializeBatch($batchId, count($this->giftCardCodes));
 
         // 分发单个任务到Redis队列
         try {
-            foreach ($giftCardCodes as $code) {
-                $job = new RedeemGiftCardJob($code, $roomId, $cardType, $cardForm, $batchId, $msgid);
+            foreach ($this->giftCardCodes as $code) {
+                $job = new RedeemGiftCardJob();
+
+                // 设置任务属性
+                $job->setGiftCardCode($code)
+                    ->setRoomId($this->roomId)
+                    ->setCardType($this->cardType)
+                    ->setCardForm($this->cardForm)
+                    ->setBatchId($batchId)
+                    ->setMsgId($this->msgId)
+                    ->setWxId($this->wxId)
+                    ->setAdditionalParams($this->additionalParams);
+
                 dispatch($job);
             }
 
             $this->getLogger()->info("批量兑换任务已启动", [
                 'batch_id' => $batchId,
-                'cards' => $giftCardCodes,
-                'total_cards' => count($giftCardCodes),
-                'room_id' => $roomId,
-                'card_type' => $cardType,
-                'card_form' => $cardForm
+                'cards' => $this->giftCardCodes,
+                'total_cards' => count($this->giftCardCodes),
+                'room_id' => $this->roomId,
+                'card_type' => $this->cardType,
+                'card_form' => $this->cardForm,
+                'additional_params' => $this->additionalParams
             ]);
 
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $this->getLogger()->error("批量兑换任务启动失败", [
                 'batch_id' => $batchId,
                 'error' => $e->getMessage(),
@@ -64,34 +199,45 @@ class BatchGiftCardService
         return $batchId;
     }
 
-    protected function initializeBatch(
-        string $batchId,
-        int $total,
+    /**
+     * 兼容旧版本的方法（已废弃，建议使用新的属性设置方式）
+     * @deprecated 使用属性设置方法替代
+     */
+    public function startBatchRedemptionLegacy(
+        array $giftCardCodes,
         string $roomId,
         string $cardType,
-        string $cardForm
-    ): void {
-        $now = now()->toISOString();
+        string $cardForm,
+        string $msgid = '',
+    ): string {
+        return $this->setGiftCardCodes($giftCardCodes)
+            ->setRoomId($roomId)
+            ->setCardType($cardType)
+            ->setCardForm($cardForm)
+            ->setMsgId($msgid)
+            ->startBatchRedemption();
+    }
 
+    /**
+     * 初始化批量任务
+     */
+    private function initializeBatch(string $batchId, int $totalCards): void
+    {
         Redis::hmset("batch:{$batchId}", [
-            'total' => $total,
+            'status' => 'processing',
+            'total' => $totalCards,
             'processed' => 0,
             'success' => 0,
             'failed' => 0,
-            'status' => 'processing',
-            'room_id' => $roomId,
-            'card_type' => $cardType,
-            'card_form' => $cardForm,
-            'created_at' => $now,
-            'updated_at' => $now
+            'room_id' => $this->roomId,
+            'card_type' => $this->cardType,
+            'card_form' => $this->cardForm,
+            'created_at' => now()->toISOString(),
+            'updated_at' => now()->toISOString()
         ]);
 
-        // 设置过期时间（7天）
-        Redis::expire("batch:{$batchId}", 7 * 24 * 3600);
-        Redis::expire("batch:{$batchId}:errors", 7 * 24 * 3600);
-        Redis::expire("batch:{$batchId}:results", 7 * 24 * 3600);
-        Redis::expire("batch:{$batchId}:success", 7 * 24 * 3600);
-        Redis::expire("batch:{$batchId}:failed", 7 * 24 * 3600);
+        // 设置过期时间为24小时
+        Redis::expire("batch:{$batchId}", 86400);
     }
 
     protected function markBatchAsCompleted(string $batchId): void

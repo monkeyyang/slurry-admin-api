@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ItunesTradeAccountLog extends Model
 {
@@ -17,6 +18,7 @@ class ItunesTradeAccountLog extends Model
 
     protected $fillable = [
         'account_id',
+        'account',
         'plan_id',
         'rate_id',
         'country_code',
@@ -26,6 +28,9 @@ class ItunesTradeAccountLog extends Model
         'exchange_time',
         'error_message',
         'code',
+        'room_id',
+        'wxid',
+        'msgid'
     ];
 
     protected $casts = [
@@ -40,7 +45,7 @@ class ItunesTradeAccountLog extends Model
     /**
      * 关联账号
      */
-    public function account(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    public function account(): BelongsTo
     {
         return $this->belongsTo(ItunesTradeAccount::class, 'account_id');
     }
@@ -48,12 +53,12 @@ class ItunesTradeAccountLog extends Model
     /**
      * 关联计划
      */
-    public function plan(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    public function plan(): BelongsTo
     {
         return $this->belongsTo(ItunesTradePlan::class, 'plan_id');
     }
 
-    public function rate(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    public function rate(): BelongsTo
     {
         return $this->belongsTo(ItunesTradeRate::class, 'rate_id');
     }
