@@ -18,7 +18,6 @@ class ItunesTradeAccountLog extends Model
 
     protected $fillable = [
         'account_id',
-        'account',
         'plan_id',
         'rate_id',
         'country_code',
@@ -62,6 +61,27 @@ class ItunesTradeAccountLog extends Model
     {
         return $this->belongsTo(ItunesTradeRate::class, 'rate_id');
     }
+
+    /**
+     * 获取群聊信息（跨库查询）
+     */
+    public function getRoomInfo()
+    {
+        if (empty($this->room_id)) {
+            return null;
+        }
+
+        return MrRoom::where('room_id', $this->room_id)->first();
+    }
+
+    /**
+     * 群聊信息访问器
+     */
+    public function getRoomInfoAttribute()
+    {
+        return $this->getRoomInfo();
+    }
+
 
     /**
      * 获取状态文本

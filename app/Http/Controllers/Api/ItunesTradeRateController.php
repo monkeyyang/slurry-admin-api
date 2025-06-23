@@ -307,8 +307,7 @@ class ItunesTradeRateController extends Controller
     public function destroy(int $id): JsonResponse
     {
         try {
-            $tradeRate = \App\Models\ItunesTradeRate::findOrFail($id);
-            $tradeRate->delete();
+            $result = $this->itunesTradeRateService->deleteTradeRate($id);
 
             Log::info('iTunes 交易汇率删除成功', [
                 'id' => $id,
@@ -317,7 +316,7 @@ class ItunesTradeRateController extends Controller
 
             return response()->json([
                 'code' => 0,
-                'message' => '删除成功',
+                'message' => $result['message'],
                 'data' => null,
             ]);
 
@@ -328,10 +327,58 @@ class ItunesTradeRateController extends Controller
             ]);
 
             return response()->json([
-                'code' => 500,
-                'message' => '删除交易汇率失败: ' . $e->getMessage(),
+                'code' => 400,
+                'message' => $e->getMessage(),
                 'data' => null,
-            ], 500);
+            ], 400);
+        }
+    }
+
+    /**
+     * 批量删除 iTunes 交易汇率
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function batchDestroy(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'ids' => 'required|array|min:1',
+                'ids.*' => 'required|integer',
+            ]);
+
+            $result = $this->itunesTradeRateService->batchDeleteTradeRates($validated['ids']);
+
+            Log::info('iTunes 交易汇率批量删除成功', [
+                'ids' => $validated['ids'],
+                'deleted_count' => $result['deleted_count'],
+                'deleted_by' => auth()->id() ?? 'System'
+            ]);
+
+            return response()->json([
+                'code' => 0,
+                'message' => $result['message'],
+                'data' => ['deleted_count' => $result['deleted_count']],
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'code' => 400,
+                'message' => '参数验证失败',
+                'data' => $e->errors(),
+            ], 400);
+        } catch (\Exception $e) {
+            Log::error('批量删除 iTunes 交易汇率失败: ' . $e->getMessage(), [
+                'data' => $request->all(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'code' => 400,
+                'message' => $e->getMessage(),
+                'data' => null,
+            ], 400);
         }
     }
 

@@ -13,13 +13,13 @@ use Throwable;
 class BatchGiftCardService
 {
     // 批量兑换任务的属性
-    protected array $giftCardCodes = [];
-    protected string $roomId = '';
-    protected string $cardType = '';
-    protected string $cardForm = '';
-    protected string $msgId = '';
-    protected string $wxId = '';
-    protected array $additionalParams = [];
+    protected array  $giftCardCodes    = [];
+    protected string $roomId           = '';
+    protected string $cardType         = '';
+    protected string $cardForm         = '';
+    protected string $msgId            = '';
+    protected string $wxId             = '';
+    protected array  $additionalParams = [];
 
     /**
      * 获取礼品卡兑换专用日志实例
@@ -30,7 +30,7 @@ class BatchGiftCardService
     }
 
     /**
-     * 设置礼品卡码列表
+     * 设置礼品卡列表
      */
     public function setGiftCardCodes(array $codes): self
     {
@@ -39,7 +39,7 @@ class BatchGiftCardService
     }
 
     /**
-     * 设置房间ID
+     * 设置群聊ID
      */
     public function setRoomId(string $roomId): self
     {
@@ -114,12 +114,12 @@ class BatchGiftCardService
      */
     public function reset(): self
     {
-        $this->giftCardCodes = [];
-        $this->roomId = '';
-        $this->cardType = '';
-        $this->cardForm = '';
-        $this->msgId = '';
-        $this->wxId = '';
+        $this->giftCardCodes    = [];
+        $this->roomId           = '';
+        $this->cardType         = '';
+        $this->cardForm         = '';
+        $this->msgId            = '';
+        $this->wxId             = '';
         $this->additionalParams = [];
         return $this;
     }
@@ -151,9 +151,8 @@ class BatchGiftCardService
     {
         // 验证参数
         $this->validateParams();
-
+        // 生成唯一队列批量ID
         $batchId = Str::uuid()->toString();
-
         // 初始化批量任务状态
         $this->initializeBatch($batchId, count($this->giftCardCodes));
 
@@ -176,20 +175,20 @@ class BatchGiftCardService
             }
 
             $this->getLogger()->info("批量兑换任务已启动", [
-                'batch_id' => $batchId,
-                'cards' => $this->giftCardCodes,
-                'total_cards' => count($this->giftCardCodes),
-                'room_id' => $this->roomId,
-                'card_type' => $this->cardType,
-                'card_form' => $this->cardForm,
+                'batch_id'          => $batchId,
+                'cards'             => $this->giftCardCodes,
+                'total_cards'       => count($this->giftCardCodes),
+                'room_id'           => $this->roomId,
+                'card_type'         => $this->cardType,
+                'card_form'         => $this->cardForm,
                 'additional_params' => $this->additionalParams
             ]);
 
         } catch (Throwable $e) {
             $this->getLogger()->error("批量兑换任务启动失败", [
                 'batch_id' => $batchId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error'    => $e->getMessage(),
+                'trace'    => $e->getTraceAsString()
             ]);
 
             $this->markBatchAsFailed($batchId);
@@ -204,12 +203,13 @@ class BatchGiftCardService
      * @deprecated 使用属性设置方法替代
      */
     public function startBatchRedemptionLegacy(
-        array $giftCardCodes,
+        array  $giftCardCodes,
         string $roomId,
         string $cardType,
         string $cardForm,
         string $msgid = '',
-    ): string {
+    ): string
+    {
         return $this->setGiftCardCodes($giftCardCodes)
             ->setRoomId($roomId)
             ->setCardType($cardType)
@@ -224,14 +224,14 @@ class BatchGiftCardService
     private function initializeBatch(string $batchId, int $totalCards): void
     {
         Redis::hmset("batch:{$batchId}", [
-            'status' => 'processing',
-            'total' => $totalCards,
-            'processed' => 0,
-            'success' => 0,
-            'failed' => 0,
-            'room_id' => $this->roomId,
-            'card_type' => $this->cardType,
-            'card_form' => $this->cardForm,
+            'status'     => 'processing',
+            'total'      => $totalCards,
+            'processed'  => 0,
+            'success'    => 0,
+            'failed'     => 0,
+            'room_id'    => $this->roomId,
+            'card_type'  => $this->cardType,
+            'card_form'  => $this->cardForm,
             'created_at' => now()->toISOString(),
             'updated_at' => now()->toISOString()
         ]);
@@ -243,7 +243,7 @@ class BatchGiftCardService
     protected function markBatchAsCompleted(string $batchId): void
     {
         Redis::hmset("batch:{$batchId}", [
-            'status' => 'completed',
+            'status'     => 'completed',
             'updated_at' => now()->toISOString()
         ]);
 
@@ -253,7 +253,7 @@ class BatchGiftCardService
     protected function markBatchAsFailed(string $batchId): void
     {
         Redis::hmset("batch:{$batchId}", [
-            'status' => 'failed',
+            'status'     => 'failed',
             'updated_at' => now()->toISOString()
         ]);
 
@@ -288,7 +288,7 @@ class BatchGiftCardService
         }
 
         Redis::hmset("batch:{$batchId}", [
-            'status' => 'cancelled',
+            'status'     => 'cancelled',
             'updated_at' => now()->toISOString()
         ]);
 
@@ -300,7 +300,7 @@ class BatchGiftCardService
     /**
      * 更新单个任务进度
      */
-    public function updateProgress(string $batchId, bool $success, string $giftCardCode, array $result = []): void
+    public function updateProgress(string $batchId, bool $success, string $giftCardCode, ?array $result = null, ?string $error = null): void
     {
         // 增加处理计数
         Redis::hincrby("batch:{$batchId}", 'processed', 1);
@@ -311,22 +311,27 @@ class BatchGiftCardService
             // 记录成功结果 - 包含详细信息
             if (!empty($result)) {
                 $successData = [
-                    'code' => $giftCardCode,
-                    'country_code' => $result['country_code'] ?? null,
+                    'code'            => $giftCardCode,
+                    'country_code'    => $result['country_code'] ?? null,
                     'original_amount' => $result['original_amount'] ?? null,
-                    'amount' => $result['amount'] ?? null,
-                    'currency' => $result['currency'] ?? null,
-                    'account_id' => $result['account_id'] ?? null,
+                    'amount'          => $result['amount'] ?? null,
+                    'currency'        => $result['currency'] ?? null,
+                    'account_id'      => $result['account_id'] ?? null,
                     'account_balance' => $result['account_balance'] ?? null,
-                    'transaction_id' => $result['transaction_id'] ?? null,
-                    'exchange_time' => $result['exchange_time'] ?? now()->toISOString(),
-                    'rate_id' => $result['rate_id'] ?? null,
-                    'plan_id' => $result['plan_id'] ?? null,
+                    'transaction_id'  => $result['transaction_id'] ?? null,
+                    'exchange_time'   => $result['exchange_time'] ?? now()->toISOString(),
+                    'rate_id'         => $result['rate_id'] ?? null,
+                    'plan_id'         => $result['plan_id'] ?? null,
                 ];
                 Redis::hset("batch:{$batchId}:success", $giftCardCode, json_encode($successData));
             }
         } else {
             Redis::hincrby("batch:{$batchId}", 'failed', 1);
+
+            // 如果提供了错误信息，记录到错误日志中
+            if (!empty($error)) {
+                Redis::hset("batch:{$batchId}:errors", $giftCardCode, $error);
+            }
         }
 
         // 更新时间戳
@@ -335,7 +340,7 @@ class BatchGiftCardService
         // 检查是否所有任务都已完成
         $batch = Redis::hgetall("batch:{$batchId}");
         if ($batch && isset($batch['total'], $batch['processed'])) {
-            $total = (int)$batch['total'];
+            $total     = (int)$batch['total'];
             $processed = (int)$batch['processed'];
 
             if ($processed >= $total && $batch['status'] === 'processing') {
@@ -351,11 +356,11 @@ class BatchGiftCardService
     {
         $errorData = [
             'gift_card_code' => $giftCardCode,
-            'error_message' => $error,
-            'country_code' => $cardInfo['country_code'] ?? null,
-            'amount' => $cardInfo['amount'] ?? null,
-            'currency' => $cardInfo['currency'] ?? null,
-            'failed_time' => now()->toISOString(),
+            'error_message'  => $error,
+            'country_code'   => $cardInfo['country_code'] ?? null,
+            'amount'         => $cardInfo['amount'] ?? null,
+            'currency'       => $cardInfo['currency'] ?? null,
+            'failed_time'    => now()->toISOString(),
         ];
 
         Redis::hset("batch:{$batchId}:failed", $giftCardCode, json_encode($errorData));
@@ -369,7 +374,7 @@ class BatchGiftCardService
      */
     public function getBatchSuccessResults(string $batchId): array
     {
-        $results = Redis::hgetall("batch:{$batchId}:success");
+        $results        = Redis::hgetall("batch:{$batchId}:success");
         $successResults = [];
 
         foreach ($results as $giftCardCode => $resultJson) {
@@ -387,7 +392,7 @@ class BatchGiftCardService
      */
     public function getBatchFailedResults(string $batchId): array
     {
-        $results = Redis::hgetall("batch:{$batchId}:failed");
+        $results       = Redis::hgetall("batch:{$batchId}:failed");
         $failedResults = [];
 
         foreach ($results as $giftCardCode => $resultJson) {
@@ -412,20 +417,20 @@ class BatchGiftCardService
         }
 
         $successResults = $this->getBatchSuccessResults($batchId);
-        $failedResults = $this->getBatchFailedResults($batchId);
+        $failedResults  = $this->getBatchFailedResults($batchId);
 
         return [
-            'batch_id' => $batchId,
-            'status' => $progress['status'],
-            'total' => (int)($progress['total'] ?? 0),
-            'processed' => (int)($progress['processed'] ?? 0),
-            'success_count' => (int)($progress['success'] ?? 0),
-            'failed_count' => (int)($progress['failed'] ?? 0),
+            'batch_id'            => $batchId,
+            'status'              => $progress['status'],
+            'total'               => (int)($progress['total'] ?? 0),
+            'processed'           => (int)($progress['processed'] ?? 0),
+            'success_count'       => (int)($progress['success'] ?? 0),
+            'failed_count'        => (int)($progress['failed'] ?? 0),
             'progress_percentage' => $progress['total'] > 0 ? round(($progress['processed'] / $progress['total']) * 100, 2) : 0,
-            'created_at' => $progress['created_at'] ?? null,
-            'updated_at' => $progress['updated_at'] ?? null,
-            'success_results' => $successResults,
-            'failed_results' => $failedResults,
+            'created_at'          => $progress['created_at'] ?? null,
+            'updated_at'          => $progress['updated_at'] ?? null,
+            'success_results'     => $successResults,
+            'failed_results'      => $failedResults,
         ];
     }
 
@@ -435,7 +440,7 @@ class BatchGiftCardService
     public function cleanupExpiredBatches(): int
     {
         $pattern = "batch:*";
-        $keys = Redis::keys($pattern);
+        $keys    = Redis::keys($pattern);
         $cleaned = 0;
 
         foreach ($keys as $key) {

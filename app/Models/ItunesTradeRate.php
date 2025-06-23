@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class ItunesTradeRate extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $table = 'itunes_trade_rates';
 
@@ -103,7 +104,7 @@ class ItunesTradeRate extends Model
 
 
     /**
-     * 获取房间信息（独立查询 - 跨库）
+     * 获取群聊信息（独立查询）
      * @return MrRoom|null
      */
     public function getRoomInfo(): ?MrRoom

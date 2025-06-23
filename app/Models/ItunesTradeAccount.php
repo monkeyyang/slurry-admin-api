@@ -4,12 +4,13 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Log;
 
 class ItunesTradeAccount extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $table = 'itunes_trade_accounts';
 
@@ -17,15 +18,15 @@ class ItunesTradeAccount extends Model
     const UPDATED_AT = 'updated_at';
 
     // 状态常量
-    const STATUS_COMPLETED = 'completed';
+    const STATUS_COMPLETED  = 'completed';
     const STATUS_PROCESSING = 'processing';
-    const STATUS_WAITING = 'waiting';
-    const STATUS_LOCKING = 'locking';
+    const STATUS_WAITING    = 'waiting';
+    const STATUS_LOCKING    = 'locking';
 
     // 登录状态常量
     const STATUS_LOGIN_ACTIVE = 'valid';
     const STATUS_LOGIN_FAILED = 'failed';
-    const STATUS_LOGGED_OUT = 'logout';
+    const STATUS_LOGGED_OUT   = 'logout';
 
     protected $fillable = [
         'account',
@@ -43,10 +44,10 @@ class ItunesTradeAccount extends Model
     ];
 
     protected $casts = [
-        'plan_id' => 'integer',
-        'room_id' => 'integer',
+        'plan_id'          => 'integer',
+        'room_id'          => 'integer',
         'current_plan_day' => 'integer',
-        'uid' => 'integer',
+        'uid'              => 'integer',
     ];
 
     protected $hidden = [
@@ -130,7 +131,7 @@ class ItunesTradeAccount extends Model
      */
     public function getStatusTextAttribute(): string
     {
-        return match($this->status) {
+        return match ($this->status) {
             self::STATUS_COMPLETED => '已完成',
             self::STATUS_PROCESSING => '执行中',
             self::STATUS_WAITING => '等待中',
@@ -148,7 +149,7 @@ class ItunesTradeAccount extends Model
             return null;
         }
 
-        return match($this->login_status) {
+        return match ($this->login_status) {
             self::STATUS_LOGIN_ACTIVE => '有效',
             self::STATUS_LOGIN_FAILED => '登录失败',
             default => '未登录',
@@ -161,6 +162,43 @@ class ItunesTradeAccount extends Model
     public function plan(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
         return $this->belongsTo(ItunesTradePlan::class, 'plan_id');
+    }
+
+    /**
+     * 获取汇率信息
+     */
+    public function getRateInfo()
+    {
+        if (empty($this->plan->rate_id)) {
+            return null;
+        }
+
+        return ItunesTradeRate::where('id', $this->plan->rate_id)->first();
+    }
+
+    public function getRateAttribute()
+    {
+        return $this->getRateInfo();
+    }
+
+    /**
+     * 获取群聊信息（跨库查询）
+     */
+    public function getRoomInfo()
+    {
+        if (empty($this->room_id)) {
+            return null;
+        }
+
+        return MrRoom::where('room_id', $this->room_id)->first();
+    }
+
+    /**
+     * 群聊信息访问器
+     */
+    public function getRoomAttribute()
+    {
+        return $this->getRoomInfo();
     }
 
     /**
@@ -230,7 +268,7 @@ class ItunesTradeAccount extends Model
     /**
      * 获取每日完成情况
      */
-   public function getDailyCompletions(): array
+    public function getDailyCompletions(): array
     {
         // 获取所有兑换日志并按天分组
         $logs = $this->exchangeLogs()
@@ -261,9 +299,9 @@ class ItunesTradeAccount extends Model
             }
 
             $completion = [
-                'day' => $day,
+                'day'    => $day,
                 'amount' => $log ? (float)$log->total_amount : 0,
-                'time' => $time,
+                'time'   => $time,
                 'status' => $log ? 'complete' : 'no_data'
             ];
 
@@ -279,28 +317,30 @@ class ItunesTradeAccount extends Model
     public function toApiArray(): array
     {
         return [
-            'id' => (string) $this->id,
-            'account' => $this->account,
-            'apiUrl' => $this->api_url,
-            'country_code' => $this->country_code,
-            'amount' => $this->amount,
-            'status' => $this->status,
-            'loginStatus' => $this->login_status,
+            'id'             => (string)$this->id,
+            'account'        => $this->account,
+            'apiUrl'         => $this->api_url,
+            'country_code'   => $this->country_code,
+            'amount'         => $this->amount,
+            'status'         => $this->status,
+            'loginStatus'    => $this->login_status,
             'currentPlanDay' => $this->current_plan_day,
-            'planId' => $this->plan_id ? (string) $this->plan_id : null,
-            'completedDays' => $this->getDailyCompletions(),
-            'user' => $this->user ? [
+            'planId'         => $this->plan_id ? (string)$this->plan_id : null,
+            'completedDays'  => $this->getDailyCompletions(),
+            'user'           => $this->user ? [
                 'nickname' => $this->user->nickname
             ] : null,
-            'country' => $this->country ? [
-                'id' => $this->country->id,
-                'code' => $this->country->code,
+            'country'        => $this->country ? [
+                'id'      => $this->country->id,
+                'code'    => $this->country->code,
                 'name_zh' => $this->country->name_zh,
                 'name_en' => $this->country->name_en
             ] : null,
-            'plan' => $this->plan,
-            'createdAt' => $this->created_at ? $this->created_at->format('Y-m-d H:i:s') : null,
-            'updatedAt' => $this->updated_at ? $this->updated_at->format('Y-m-d H:i:s') : null,
+            'plan'           => $this->plan,
+            'rate'           => $this->rate,
+            'room'           => $this->room,
+            'createdAt'      => $this->created_at ? $this->created_at->format('Y-m-d H:i:s') : null,
+            'updatedAt'      => $this->updated_at ? $this->updated_at->format('Y-m-d H:i:s') : null,
         ];
     }
 
@@ -309,7 +349,7 @@ class ItunesTradeAccount extends Model
      */
     public function toApiArrayWithPassword(): array
     {
-        $data = $this->toApiArray();
+        $data             = $this->toApiArray();
         $data['password'] = $this->getDecryptedPassword();
         return $data;
     }
@@ -324,31 +364,31 @@ class ItunesTradeAccount extends Model
         $planInfo = $this->getPlanInfo();
         if ($planInfo) {
             $data['plan'] = [
-                'id' => (string) $planInfo->id,
-                'name' => $planInfo->name,
-                'planDays' => $planInfo->plan_days,
-                'dailyAmounts' => $planInfo->daily_amounts,
-                'totalAmount' => (float) $planInfo->total_amount,
-                'floatAmount' => $planInfo->float_amount,
+                'id'                => (string)$planInfo->id,
+                'name'              => $planInfo->name,
+                'planDays'          => $planInfo->plan_days,
+                'dailyAmounts'      => $planInfo->daily_amounts,
+                'totalAmount'       => (float)$planInfo->total_amount,
+                'floatAmount'       => $planInfo->float_amount,
                 'enableRoomBinding' => $planInfo->bind_room,
-                'status' => $planInfo->status,
+                'status'            => $planInfo->status,
             ];
         }
 
         // 获取兑换日志
-        $logs = $this->exchangeLogs()->orderBy('created_at', 'desc')->get();
+        $logs                 = $this->exchangeLogs()->orderBy('created_at', 'desc')->get();
         $data['exchangeLogs'] = $logs->map(function ($log) {
             return [
-                'id' => (string) $log->id,
-                'accountId' => (string) $log->account_id,
-                'planId' => (string) $log->plan_id,
-                'day' => $log->day,
-                'code' => $log->code,
-                'amount' => (float) $log->amount,
-                'status' => $log->status,
+                'id'           => (string)$log->id,
+                'accountId'    => (string)$log->account_id,
+                'planId'       => (string)$log->plan_id,
+                'day'          => $log->day,
+                'code'         => $log->code,
+                'amount'       => (float)$log->amount,
+                'status'       => $log->status,
                 'exchangeTime' => $log->exchange_time ? $log->exchange_time->format('Y-m-d H:i:s') : null,
                 'errorMessage' => $log->error_message,
-                'createdAt' => $log->created_at ? $log->created_at->format('Y-m-d H:i:s') : null,
+                'createdAt'    => $log->created_at ? $log->created_at->format('Y-m-d H:i:s') : null,
             ];
         })->toArray();
 

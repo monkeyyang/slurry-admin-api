@@ -298,7 +298,7 @@ class GiftCardExchangeService
                 'card_type' => 1, // 默认卡类型
             ];
         } catch (Exception $e) {
-            Log::channel('gift_card_exchange')->error('礼品卡验证失败: ' . $e->getMessage());
+            Log::channel('gift_card_exchange')->error('礼品卡验证失败1: ' . $e->getMessage());
             throw $e;
         }
     }

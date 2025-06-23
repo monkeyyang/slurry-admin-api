@@ -87,6 +87,7 @@ class ItunesTradeAccountService
         $successCount = 0;
         $failCount = 0;
         $duplicateAccounts = [];
+        $restoredAccounts = [];
         $createdAccounts = [];
         $loginItems = [];
 
@@ -97,36 +98,61 @@ class ItunesTradeAccountService
                 $password = $accountData['password'];
                 $apiUrl = $accountData['apiUrl'] ?? null;
 
-                // 检查是否已存在
-                $existing = ItunesTradeAccount::where('account', $account)
+                // 检查是否已存在（包括已删除的）
+                $existing = ItunesTradeAccount::withTrashed()
+                                            ->where('account', $account)
                                             ->where('country_code', $country)
                                             ->first();
 
                 if ($existing) {
-                    $duplicateAccounts[] = $account;
-                    $failCount++;
-                    continue;
+                    if ($existing->trashed()) {
+                        // 如果是已删除的账号，恢复并更新信息
+                        $existing->restore();
+                        $existing->update([
+                            'password' => $password,
+                            'api_url' => $apiUrl,
+                            'status' => ItunesTradeAccount::STATUS_PROCESSING,
+                            'uid' => Auth::id(),
+                            'login_status' => null, // 重置登录状态
+                            'plan_id' => null, // 重置计划绑定
+                            'current_plan_day' => null,
+                        ]);
+                        
+                        $restoredAccounts[] = $existing;
+                        $loginItems[] = [
+                            'id' => $existing->id,
+                            'username' => $account,
+                            'password' => $password,
+                            'VerifyUrl' => $apiUrl
+                        ];
+                        $successCount++;
+                    } else {
+                        // 如果是有效账号，记录为重复
+                        $duplicateAccounts[] = $account;
+                        $failCount++;
+                        continue;
+                    }
+                } else {
+                    // 创建新账号
+                    $newAccount = ItunesTradeAccount::create([
+                        'account' => $account,
+                        'password' => $password,
+                        'api_url' => $apiUrl,
+                        'country_code' => $country,
+                        'status' => ItunesTradeAccount::STATUS_PROCESSING,
+                        'uid' => Auth::id()
+                    ]);
+
+                    $createdAccounts[] = $newAccount;
+                    $loginItems[] = [
+                        'id' => $newAccount->id,
+                        'username' => $account,
+                        'password' => $password,
+                        'VerifyUrl' => $apiUrl
+                    ];
+
+                    $successCount++;
                 }
-
-                // 创建新账号
-                $newAccount = ItunesTradeAccount::create([
-                    'account' => $account,
-                    'password' => $password,
-                    'api_url' => $apiUrl,
-                    'country_code' => $country,
-                    'status' => ItunesTradeAccount::STATUS_PROCESSING,
-                    'uid' => Auth::id()
-                ]);
-
-                $createdAccounts[] = $newAccount;
-                $loginItems[] = [
-                    'id' => $newAccount->id,
-                    'username' => $account,
-                    'password' => $password,
-                    'VerifyUrl' => $apiUrl
-                ];
-
-                $successCount++;
             }
 
             DB::commit();
@@ -134,11 +160,15 @@ class ItunesTradeAccountService
             // 创建登录任务
             $taskResponse = $this->createLoginTask($loginItems);
 
+            $allAccounts = collect($createdAccounts)->concat($restoredAccounts);
+
             return [
                 'successCount' => $successCount,
                 'failCount' => $failCount,
                 'duplicateAccounts' => $duplicateAccounts,
-                'accounts' => collect($createdAccounts)->map->toApiArray()->toArray(),
+                'restoredCount' => count($restoredAccounts),
+                'createdCount' => count($createdAccounts),
+                'accounts' => $allAccounts->map->toApiArray()->toArray(),
             ];
 
         } catch (\Exception $e) {

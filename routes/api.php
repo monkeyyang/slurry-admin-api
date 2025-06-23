@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\GiftCardController as ApiGiftCardController;
 use App\Http\Controllers\Api\AppleAccountController;
 use App\Http\Controllers\Api\GiftCardLogMonitorController;
 use App\Http\Controllers\Api\GiftExchangeController;
+use App\Http\Controllers\Api\ItunesTradeExecutionLogController;
 use App\Http\Controllers\Api\ItunesTradeRateController;
 use App\Http\Controllers\Api\ItunesTradePlanController;
 use App\Http\Controllers\Api\ItunesTradeAccountController;
@@ -278,6 +279,7 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('/rates', [ItunesTradeRateController::class, 'store']);
         Route::put('/rates/{id}', [ItunesTradeRateController::class, 'update']);
         Route::delete('/rates/{id}', [ItunesTradeRateController::class, 'destroy']);
+        Route::delete('/rates/batch', [ItunesTradeRateController::class, 'batchDestroy']);
         Route::post('/rates/batch-status', [ItunesTradeRateController::class, 'batchUpdateStatus']);
         Route::get('/rates-statistics', [ItunesTradeRateController::class, 'statistics']);
 
@@ -296,16 +298,26 @@ Route::group(['middleware' => ['auth:api']], function() {
 
         // iTunes交易账号路由
         Route::get('/accounts', [ItunesTradeAccountController::class, 'index']);
-        Route::get('/accounts/{id}', [ItunesTradeAccountController::class, 'show']);
         Route::post('/accounts/batch-import', [ItunesTradeAccountController::class, 'batchImport']);
-        Route::put('/accounts/{id}/status', [ItunesTradeAccountController::class, 'updateStatus']);
-        Route::delete('/accounts/{id}', [ItunesTradeAccountController::class, 'destroy']);
         Route::delete('/accounts/batch', [ItunesTradeAccountController::class, 'batchDestroy']);
-        Route::post('/accounts/{id}/bind-plan', [ItunesTradeAccountController::class, 'bindToPlan']);
-        Route::post('/accounts/{id}/unbind-plan', [ItunesTradeAccountController::class, 'unbindFromPlan']);
-        Route::put('/accounts/{id}/login-status', [ItunesTradeAccountController::class, 'updateLoginStatus']);
         Route::get('/accounts/statistics', [ItunesTradeAccountController::class, 'statistics']);
         Route::get('/accounts/available', [ItunesTradeAccountController::class, 'getAvailableAccounts']);
+        Route::get('/accounts/{id}', [ItunesTradeAccountController::class, 'show'])->where('id', '[0-9]+');
+        Route::put('/accounts/{id}/status', [ItunesTradeAccountController::class, 'updateStatus'])->where('id', '[0-9]+');
+        Route::delete('/accounts/{id}', [ItunesTradeAccountController::class, 'destroy'])->where('id', '[0-9]+');
+        Route::post('/accounts/{id}/bind-plan', [ItunesTradeAccountController::class, 'bindToPlan'])->where('id', '[0-9]+');
+        Route::post('/accounts/{id}/unbind-plan', [ItunesTradeAccountController::class, 'unbindFromPlan'])->where('id', '[0-9]+');
+        Route::put('/accounts/{id}/login-status', [ItunesTradeAccountController::class, 'updateLoginStatus'])->where('id', '[0-9]+');
+
+        // iTunes交易执行记录路由
+        Route::get('/execution-logs', [ItunesTradeExecutionLogController::class, 'index']);
+        Route::get('/execution-logs-statistics', [ItunesTradeExecutionLogController::class, 'statistics']);
+        Route::get('/execution-logs/today-statistics', [ItunesTradeExecutionLogController::class, 'todayStatistics']);
+        Route::get('/execution-logs/by-account/{accountId}', [ItunesTradeExecutionLogController::class, 'byAccount'])->where('accountId', '[0-9]+');
+        Route::get('/execution-logs/by-plan/{planId}', [ItunesTradeExecutionLogController::class, 'byPlan'])->where('planId', '[0-9]+');
+        Route::get('/execution-logs/{id}', [ItunesTradeExecutionLogController::class, 'show'])->where('id', '[0-9]+');
+        Route::delete('/execution-logs/{id}', [ItunesTradeExecutionLogController::class, 'destroy'])->where('id', '[0-9]+');
+        Route::delete('/execution-logs-batch', [ItunesTradeExecutionLogController::class, 'batchDestroy']);
 
         // 国家配置接口
         Route::get('/configs', 'App\Http\Controllers\Api\ItunesTradeController@getConfigs');

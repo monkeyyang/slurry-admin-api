@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class ItunesTradePlan extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $table = 'itunes_trade_plans';
 
@@ -165,11 +166,7 @@ class ItunesTradePlan extends Model
                 'id' => $userInfo->id,
                 'username' => $userInfo->username ?? null,
             ] : null,
-            'rate' => $rateInfo ? [
-                'id' => $rateInfo->id,
-                'name' => $rateInfo->name,
-                'rate' => $rateInfo->rate,
-            ] : null,
+            'rate' => $rateInfo,
         ];
     }
 
