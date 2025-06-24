@@ -147,6 +147,7 @@ class ItunesTradeExecutionLogService
             'room_name' => $roomName,
             'wxid' => $log->wxid,
             'msgid' => $log->msgid,
+            'batch_id' => $log->batch_id ?? null,
             'created_at' => $log->created_at ? $log->created_at->format('Y-m-d H:i:s') : null,
             'updated_at' => $log->updated_at ? $log->updated_at->format('Y-m-d H:i:s') : null,
             // 关联数据

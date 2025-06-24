@@ -239,8 +239,7 @@ class GiftCardService
 
             // 查找可用账号
             $account = $this->findAvailableAccount($plan, $this->roomId, $giftCardInfo);
-            // 更新账号绑定roomId
-            if(!empty($account->room_id)) $account->update(['room_id' => $this->roomId]);
+
             // 更新日志：找到可用账号
             $log->update([
                 'account_id' => $account->id,
@@ -804,22 +803,61 @@ class GiftCardService
         // 检查是否已存在该礼品卡的日志记录
         $existingLog = ItunesTradeAccountLog::where('code', $this->giftCardCode)
             ->whereIn('status', [ItunesTradeAccountLog::STATUS_PENDING, ItunesTradeAccountLog::STATUS_SUCCESS])
+            ->orderBy('created_at', 'desc')
             ->first();
 
         if ($existingLog) {
             $this->getLogger()->warning("礼品卡已存在处理记录", [
                 'code'            => $this->giftCardCode,
                 'existing_log_id' => $existingLog->id,
-                'existing_status' => $existingLog->status
+                'existing_status' => $existingLog->status,
+                'created_at'      => $existingLog->created_at->toDateTimeString()
             ]);
 
             // 如果已存在成功记录，抛出异常
             if ($existingLog->status === ItunesTradeAccountLog::STATUS_SUCCESS) {
-                throw new GiftCardExchangeException("礼品卡 {$this->giftCardCode} 已兑换成功，请勿重复提交");
+                throw new GiftCardExchangeException(
+                    GiftCardExchangeException::CODE_CARD_ALREADY_REDEEMED,
+                    "礼品卡 {$this->giftCardCode} 已兑换成功，请勿重复提交"
+                );
             }
 
-            // 如果是待处理状态，抛出异常避免重复处理
-            throw new GiftCardExchangeException("礼品卡 {$this->giftCardCode} 正在处理中，请勿重复提交");
+            // 如果是待处理状态，需要判断是否为超时的记录或同批次重试
+            if ($existingLog->status === ItunesTradeAccountLog::STATUS_PENDING) {
+                $timeoutMinutes = 5; // 5分钟超时
+                $isTimeout = $existingLog->created_at->addMinutes($timeoutMinutes)->isPast();
+                $isSameBatch = !empty($existingLog->batch_id) && $existingLog->batch_id === $this->batchId;
+                
+                if ($isTimeout || $isSameBatch) {
+                    // 超时的pending记录或同批次重试，标记为失败并允许重新处理
+                    $reason = $isSameBatch ? '同批次任务重试' : '处理超时';
+                    $existingLog->update([
+                        'status' => ItunesTradeAccountLog::STATUS_FAILED,
+                        'error_message' => $reason . '，创建新的处理记录'
+                    ]);
+                    
+                    $this->getLogger()->info("检测到可重试的pending记录，标记为失败并允许重试", [
+                        'code'                => $this->giftCardCode,
+                        'existing_log_id'     => $existingLog->id,
+                        'existing_batch_id'   => $existingLog->batch_id,
+                        'current_batch_id'    => $this->batchId,
+                        'is_timeout'          => $isTimeout,
+                        'is_same_batch'       => $isSameBatch,
+                        'timeout_minutes'     => $timeoutMinutes,
+                        'original_created_at' => $existingLog->created_at->toDateTimeString(),
+                        'reason'              => $reason
+                    ]);
+                    
+                    // 继续执行，创建新的日志记录
+                } else {
+                    // 未超时且不同批次的pending记录，真正的重复提交
+                    $remainingTime = now()->diffInMinutes($existingLog->created_at->addMinutes($timeoutMinutes));
+                    throw new GiftCardExchangeException(
+                        GiftCardExchangeException::CODE_OTHER_ERROR,
+                        "礼品卡 {$this->giftCardCode} 正在处理中，请等待 {$remainingTime} 分钟后重试"
+                    );
+                }
+            }
         }
 
         // 创建新的日志记录（所有可选字段先为空，随着流程推进逐步填充）
@@ -828,6 +866,7 @@ class GiftCardService
             'room_id'       => $this->roomId,
             'wxid'          => $this->wxId,
             'msgid'         => $this->msgId,
+            'batch_id'      => $this->batchId, // 批次ID用于重试判断
             'plan_id'       => null, // 找到计划后更新
             'rate_id'       => null, // 找到汇率后更新
             'code'          => $this->giftCardCode,
@@ -917,14 +956,16 @@ class GiftCardService
                         // 更新completed_days字段
                         $completedDays                      = json_decode($account->completed_days ?? '{}', true) ?: [];
                         $completedDays[(string)$currentDay] = $currentAmount;
-                        $account->update([
+                        $updateData = [
                             'amount'         => $totalAmount,  // 更新为ID总金额
                             'completed_days' => json_encode($completedDays),
-                        ]);
+                        ];
+                        // 兑换成功后更新账号绑定roomId
+                        if(empty($account->room_id)) $updateData['room_id'] = $this->roomId;
+                        $account->update($updateData);
 
                         $this->getLogger()->info("更新账号余额", [
                             'account_id' => $account->account,
-                            'account'    => $account->account,
                             'new_amount' => $totalAmount,
                             'fund_added' => $exchangeData['data']['amount'] ?? 0
                         ]);

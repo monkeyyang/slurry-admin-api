@@ -29,7 +29,8 @@ class ItunesTradeAccountLog extends Model
         'code',
         'room_id',
         'wxid',
-        'msgid'
+        'msgid',
+        'batch_id'
     ];
 
     protected $casts = [
