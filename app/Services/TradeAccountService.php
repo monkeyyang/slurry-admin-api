@@ -29,13 +29,13 @@ class TradeAccountService
         $importedByNickname = $currentUser ? ($currentUser->nickname ?? $currentUser->name) : 'System';
 
         DB::beginTransaction();
-        
+
         try {
             foreach ($data['accounts'] as $accountData) {
                 try {
                     // 检查账号是否已存在
                     $existingAccount = TradeAccount::where('account', $accountData['account'])->first();
-                    
+
                     if ($existingAccount) {
                         $duplicateAccounts[] = $accountData['account'];
                         $failCount++;
@@ -53,7 +53,7 @@ class TradeAccountService
                     $account->imported_by_user_id = $importedByUserId;
                     $account->imported_by_nickname = $importedByNickname;
                     $account->imported_at = now();
-                    
+
                     $account->save();
 
                     $accounts[] = $account->toApiArray();
@@ -201,6 +201,10 @@ class TradeAccountService
             $query->byStatus($params['status']);
         }
 
+        if (!empty($params['loginStatus'])) {
+            $query->byLoginStatus($params['loginStatus']);
+        }
+
         if (!empty($params['importedBy'])) {
             $query->byImportedBy($params['importedBy']);
         }
@@ -283,4 +287,4 @@ class TradeAccountService
         $result['account'] = trim($accountString);
         return $result;
     }
-} 
+}

@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Log;
 use Ramsey\Uuid\Uuid;
 use Ratchet\Client\WebSocket;
 use Ratchet\Client\Connector;
+use Ratchet\RFC6455\Messaging\MessageInterface;
 use React\EventLoop\Loop;
 
 class AccountMonitorService
@@ -116,8 +117,8 @@ class AccountMonitorService
     protected function handleMessage($msg): void
     {
         // 获取消息内容（处理Ratchet消息对象）
-        $messageContent = $msg instanceof \Ratchet\RFC6455\Messaging\MessageInterface ? $msg->getPayload() : (string)$msg;
-        
+        $messageContent = $msg instanceof MessageInterface ? $msg->getPayload() : (string)$msg;
+
         // 记录收到的原始消息
         $this->getLogger()->info("收到WebSocket消息", [
             'client_id' => $this->clientId,
@@ -194,7 +195,7 @@ class AccountMonitorService
     protected function processInitData(array $data): void
     {
         $accounts = $data['value'] ?? [];
-        
+
         $this->getLogger()->info("开始处理初始化数据", [
             'client_id' => $this->clientId,
             'total_accounts' => is_array($accounts) ? count($accounts) : 0,
@@ -230,7 +231,7 @@ class AccountMonitorService
     protected function processUpdateData(array $data): void
     {
         $accounts = $data['value'] ?? [];
-        
+
         $this->getLogger()->info("开始处理更新数据", [
             'client_id' => $this->clientId,
             'total_accounts' => is_array($accounts) ? count($accounts) : 0,
@@ -265,37 +266,37 @@ class AccountMonitorService
 
     protected function processDeleteData(array $data): void
     {
-        $accounts = $data['value'] ?? [];
-        
+//        $accounts = $data['value'] ?? [];
+
         $this->getLogger()->info("开始处理删除数据", [
             'client_id' => $this->clientId,
-            'total_accounts' => is_array($accounts) ? count($accounts) : 0,
+            'total_accounts' => count($data),
             'full_data' => $data
         ]);
 
         // 检查数据是否为空或null
-        if (empty($accounts) || !is_array($accounts)) {
+        if (empty($data)) {
             $this->getLogger()->info("删除数据为空，跳过处理", [
                 'client_id' => $this->clientId,
-                'value_type' => gettype($accounts),
-                'value_content' => $accounts
+                'value_type' => gettype($data),
+                'value_content' => $data
             ]);
             return;
         }
 
         // 标记账号为已登出
-        foreach ($accounts as $index => $accountInfo) {
+        foreach ($data as $index => $accountInfo) {
             $this->getLogger()->debug("处理删除账号", [
                 'client_id' => $this->clientId,
                 'index' => $index,
                 'account_info' => $accountInfo
             ]);
-            $this->markAccountLoggedOut($accountInfo['username']);
+            $this->markAccountLoggedOut($accountInfo['key']);
         }
 
         $this->getLogger()->info("删除数据处理完成", [
             'client_id' => $this->clientId,
-            'processed_count' => count($accounts)
+            'processed_count' => count($data)
         ]);
     }
 
@@ -311,12 +312,12 @@ class AccountMonitorService
 
         try {
             DB::transaction(function() use ($accountInfo, $username) {
-                $account = ItunesTradeAccount::where('account', $username)->first();
+                $account = ItunesTradeAccount::withTrashed()->where('account', $username)->first();
 
                 if ($account) {
                     $newLoginStatus = $accountInfo['code'] === 0
                         ? ItunesTradeAccount::STATUS_LOGIN_ACTIVE
-                        : ItunesTradeAccount::STATUS_LOGIN_FAILED;
+                        : ItunesTradeAccount::STATUS_LOGIN_INVALID;
 
                     // 处理金额：移除货币符号并转换为数字
                     $amount = null;
@@ -374,19 +375,19 @@ class AccountMonitorService
 
         try {
             DB::transaction(function() use ($username) {
-                $account = ItunesTradeAccount::where('account', $username)->first();
+                $account = ItunesTradeAccount::withTrashed()->where('account', $username)->first();
 
                 if ($account) {
                     $oldLoginStatus = $account->login_status;
                     $account->update([
-                        'login_status' => ItunesTradeAccount::STATUS_LOGGED_OUT,
+                        'login_status' => ItunesTradeAccount::STATUS_LOGIN_INVALID,
                     ]);
 
                     $this->getLogger()->info("账号登出状态更新成功", [
                         'client_id' => $this->clientId,
                         'username' => $username,
                         'old_login_status' => $oldLoginStatus,
-                        'new_login_status' => ItunesTradeAccount::STATUS_LOGGED_OUT
+                        'new_login_status' => ItunesTradeAccount::STATUS_LOGIN_INVALID
                     ]);
                 } else {
                     $this->getLogger()->warning("账号不存在，无法标记登出", [
@@ -431,7 +432,7 @@ class AccountMonitorService
             'client_id' => $this->clientId,
             'timestamp' => now()->toISOString()
         ]);
-        
+
         $this->loop->run();
     }
 

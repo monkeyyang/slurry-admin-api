@@ -24,9 +24,8 @@ class ItunesTradeAccount extends Model
     const STATUS_LOCKING    = 'locking';
 
     // 登录状态常量
-    const STATUS_LOGIN_ACTIVE = 'valid';
-    const STATUS_LOGIN_FAILED = 'failed';
-    const STATUS_LOGGED_OUT   = 'logout';
+    const STATUS_LOGIN_ACTIVE = 'valid';    // 有效
+    const STATUS_LOGIN_INVALID = 'invalid'; // 失效
 
     protected $fillable = [
         'account',
@@ -151,8 +150,8 @@ class ItunesTradeAccount extends Model
 
         return match ($this->login_status) {
             self::STATUS_LOGIN_ACTIVE => '有效',
-            self::STATUS_LOGIN_FAILED => '登录失败',
-            default => '未登录',
+            self::STATUS_LOGIN_INVALID => '失效',
+            default => '未知',
         };
     }
 

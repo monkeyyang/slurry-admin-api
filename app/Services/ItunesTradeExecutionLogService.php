@@ -138,6 +138,7 @@ class ItunesTradeExecutionLogService
             'country_code' => $log->country_code,
             'day' => $log->day,
             'amount' => (float) $log->amount,
+            'after_amount' => (float) $log->after_amount,
             'status' => $log->status,
             'status_text' => $log->status_text,
             'exchange_time' => $log->exchange_time ? $log->exchange_time->format('Y-m-d H:i:s') : null,

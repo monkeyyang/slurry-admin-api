@@ -54,6 +54,9 @@ class FixAccountDataInconsistency extends Command
             // 4. 检查可能无限等待的账号
             $this->checkInfiniteWaitingAccounts($isDryRun);
 
+            // 5. 检查current_plan_day与实际执行进度不一致的账号
+            $this->checkCurrentDayInconsistency($isDryRun);
+
             $this->info('检查完成！');
 
         } catch (\Exception $e) {
@@ -106,36 +109,35 @@ class FixAccountDataInconsistency extends Command
      */
     private function checkAccountsWithoutPlan(bool $isDryRun): void
     {
-        $this->info('');
-        $this->info('2. 检查没有计划但有计划相关字段的账号...');
-
-        // 查找所有没有计划但有计划相关字段的账号
-        $accountsWithoutPlan = ItunesTradeAccount::whereNull('plan_id')
-            ->whereNotNull('current_plan_day')
-            ->with('plan')
-            ->get()
-            ->filter(function ($account) {
-                if ($account->plan) {
-                    return false; // 有计划的账号
-                }
-                return true; // 没有计划的账号
-            });
-
-        if ($accountsWithoutPlan->isEmpty()) {
-            $this->info('未发现没有计划但有计划相关字段的账号');
-            return;
-        }
-
-        $this->getLogger()->warning("发现 {$accountsWithoutPlan->count()} 个账号没有计划但有计划相关字段");
-
-        foreach ($accountsWithoutPlan as $account) {
-            $this->processAccountsWithoutPlan($account, $isDryRun);
-        }
-
-        if ($isDryRun) {
-            $this->info('');
-            $this->info('以上是模拟结果，要实际修复请运行: php artisan fix:account-data-inconsistency');
-        }
+//        $this->info('');
+//        $this->info('2. 检查没有计划但有计划相关字段的账号...');
+//
+//        // 查找所有没有计划但有计划相关字段的账号
+//        $accountsWithoutPlan = ItunesTradeAccount::whereNull('plan_id')
+//            ->with('plan')
+//            ->get()
+//            ->filter(function ($account) {
+//                if ($account->plan) {
+//                    return false; // 有计划的账号
+//                }
+//                return true; // 没有计划的账号
+//            });
+////        var_dump($accountsWithoutPlan->toArray());exit;
+//        if ($accountsWithoutPlan->isEmpty()) {
+//            $this->info('未发现没有计划但有计划相关字段的账号');
+//            return;
+//        }
+//
+//        $this->getLogger()->warning("发现 {$accountsWithoutPlan->count()} 个账号没有计划但有计划相关字段");
+//
+//        foreach ($accountsWithoutPlan as $account) {
+//            $this->processAccountsWithoutPlan($account, $isDryRun);
+//        }
+//
+//        if ($isDryRun) {
+//            $this->info('');
+//            $this->info('以上是模拟结果，要实际修复请运行: php artisan fix:account-data-inconsistency');
+//        }
     }
 
     /**
@@ -175,7 +177,7 @@ class FixAccountDataInconsistency extends Command
 
             // 获取该账号所有成功的兑换天数
             $successfulDays = $account->exchangeLogs->pluck('day')->unique()->sort()->values()->toArray();
-            
+
             // 检查是否有缺失的天数
             $expectedDays = range(1, $account->plan->plan_days);
             $missingDays = array_diff($expectedDays, $successfulDays);
@@ -186,14 +188,14 @@ class FixAccountDataInconsistency extends Command
                     ->sortByDesc('exchange_time')
                     ->first();
                 $lastExchangeTime = $lastSuccessLog ? Carbon::parse($lastSuccessLog->exchange_time) : null;
-                
+
                 // 计算距离现在的时间间隔
                 $hoursFromLastExchange = $lastExchangeTime ? $lastExchangeTime->diffInHours(now()) : 0;
                 $requiredDayInterval = $account->plan->day_interval ?? 24;
-                
+
                 // 判断应该设置的状态
                 $shouldBeWaiting = $lastExchangeTime && ($hoursFromLastExchange < $requiredDayInterval);
-                
+
                 $accountsWithMissingDays[] = [
                     'account' => $account,
                     'type' => 'completed_with_missing_days',
@@ -239,27 +241,27 @@ class FixAccountDataInconsistency extends Command
         foreach ($accountsWithMissingDays as $item) {
             $account = $item['account'];
             $missingDays = $item['missing_days'];
-            
+
             $this->warn("- 账号: {$account->account} (ID: {$account->id})");
             $this->warn("  类型: " . ($item['type'] === 'waiting_without_logs' ? '等待状态无记录' : '已完成缺少天数'));
             $this->warn("  计划天数: {$item['plan_days']}");
             $this->warn("  已有记录天数: " . (empty($item['successful_days']) ? '无' : implode(', ', $item['successful_days'])));
             $this->warn("  缺失天数: " . implode(', ', $missingDays));
-            
+
             if ($item['type'] === 'waiting_without_logs') {
                 $this->warn("  建议状态: PROCESSING (开始第1天)");
             } else {
                 $this->warn("  最后兑换时间: " . ($item['last_exchange_time'] ? $item['last_exchange_time']->format('Y-m-d H:i:s') : '无'));
                 $this->warn("  距离现在: {$item['hours_from_last']} 小时");
                 $this->warn("  要求间隔: {$item['required_interval']} 小时");
-                
+
                 if ($item['should_be_waiting']) {
                     $this->warn("  建议状态: WAITING (未满足日期间隔)");
                 } else {
                     $this->warn("  建议状态: PROCESSING (可以进入下一天)");
                 }
             }
-            
+
             if (!$isDryRun) {
                 $this->processMissingDayRecords($account, $missingDays, $item['should_be_waiting'], $item['type']);
             }
@@ -668,8 +670,289 @@ class FixAccountDataInconsistency extends Command
     }
 
     /**
-     * 重新登录账号
+     * 检查current_plan_day与实际执行进度不一致的账号
      */
+    private function checkCurrentDayInconsistency(bool $isDryRun): void
+    {
+        $this->info('');
+        $this->info('5. 检查current_plan_day与实际执行进度不一致的账号...');
+
+        // 查找所有有计划且状态为processing或locking的账号
+        $activeAccounts = ItunesTradeAccount::whereIn('status', [
+                ItunesTradeAccount::STATUS_PROCESSING,
+////                ItunesTradeAccount::STATUS_LOCKING,
+//                ItunesTradeAccount::STATUS_WAITING
+            ])
+            ->with(['plan', 'exchangeLogs' => function($query) {
+                $query->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+                      ->orderBy('day', 'desc')
+                      ->orderBy('exchange_time', 'desc');
+            }])
+            ->get();
+
+        $inconsistentAccounts = [];
+
+        foreach ($activeAccounts as $account) {
+//            if (!$account->plan) {
+//                continue;
+//            }
+
+            $currentPlanDay = $account->current_plan_day;
+
+            // 获取最后一次成功兑换的天数
+            $lastSuccessLog = $account->exchangeLogs->first();
+            $lastCompletedDay = $lastSuccessLog ? $lastSuccessLog->day : 0;
+
+            // 获取所有已完成的天数
+            $completedDays = $account->exchangeLogs
+                ->pluck('day')
+                ->unique()
+                ->sort()
+                ->values()
+                ->toArray();
+
+            // 检查是否存在不一致
+            $shouldBeDay = $this->calculateCorrectCurrentDay($account, $completedDays, $lastSuccessLog);
+
+            if ($currentPlanDay != $shouldBeDay) {
+                $inconsistentAccounts[] = [
+                    'account' => $account,
+                    'current_plan_day' => $currentPlanDay,
+                    'should_be_day' => $shouldBeDay,
+                    'last_completed_day' => $lastCompletedDay,
+                    'completed_days' => $completedDays,
+                    'last_success_log' => $lastSuccessLog
+                ];
+            }
+        }
+
+        if (empty($inconsistentAccounts)) {
+            $this->info('未发现current_plan_day不一致的账号');
+            return;
+        }
+
+        $this->getLogger()->warning("发现 " . count($inconsistentAccounts) . " 个账号的current_plan_day与实际进度不一致");
+
+        foreach ($inconsistentAccounts as $item) {
+            $this->processCurrentDayInconsistency($item, $isDryRun);
+        }
+
+        if ($isDryRun) {
+            $this->info('');
+            $this->info('以上是模拟结果，要实际修复请运行: php artisan fix:account-data-inconsistency');
+        }
+    }
+
+         /**
+      * 计算正确的当前计划天数
+      */
+     private function calculateCorrectCurrentDay(ItunesTradeAccount $account, array $completedDays, $lastSuccessLog): int
+     {
+         if (empty($completedDays)) {
+             return 1; // 没有完成记录，应该是第1天
+         }
+
+         // 对于没有计划的账号（历史原因解绑），使用特殊逻辑
+         if (!$account->plan) {
+             return $this->calculateCurrentDayForUnboundAccount($account, $completedDays, $lastSuccessLog);
+         }
+
+         $planDays = $account->plan->plan_days;
+         $lastCompletedDay = max($completedDays);
+
+         // 如果所有天数都已完成，账号应该被标记为完成
+         if (count($completedDays) >= $planDays) {
+             return $planDays + 1; // 表示应该完成
+         }
+
+         // 检查是否应该进入下一天
+         if ($lastSuccessLog) {
+             $lastExchangeTime = Carbon::parse($lastSuccessLog->exchange_time);
+             $dayInterval = $account->plan->day_interval ?? 24; // 默认24小时间隔
+             $hoursFromLastExchange = $lastExchangeTime->diffInHours(now());
+
+             if ($hoursFromLastExchange >= $dayInterval) {
+                 // 已经超过间隔时间，应该进入下一天
+                 return $lastCompletedDay + 1;
+             } else {
+                 // 还在间隔时间内，应该等待
+                 return $lastCompletedDay;
+             }
+         }
+
+         return $lastCompletedDay + 1;
+     }
+
+     /**
+      * 为解绑计划的账号计算正确的当前天数
+      */
+     private function calculateCurrentDayForUnboundAccount(ItunesTradeAccount $account, array $completedDays, $lastSuccessLog): int
+     {
+         $maxPlanDays = 3; // 最大计划天数为3天
+         $lastCompletedDay = max($completedDays);
+
+         // 如果已经完成了3天，应该标记为完成
+         if ($lastCompletedDay >= $maxPlanDays) {
+             return $maxPlanDays + 1; // 表示应该完成
+         }
+
+         // 获取最后一天的累计金额
+         $lastDayAmount = ItunesTradeAccountLog::where('account_id', $account->id)
+             ->where('day', $lastCompletedDay)
+             ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+             ->sum('amount');
+
+         // 如果最后一天累计金额达到或超过600，进入下一天
+         if ($lastDayAmount >= 600) {
+             $nextDay = $lastCompletedDay + 1;
+             // 如果下一天超过3天，应该完成
+             if ($nextDay > $maxPlanDays) {
+                 return $maxPlanDays + 1; // 表示应该完成
+             }
+             return $nextDay;
+         } else {
+             // 金额不够600，继续当前天
+             return $lastCompletedDay;
+         }
+     }
+
+    /**
+     * 处理current_plan_day不一致的账号
+     */
+    private function processCurrentDayInconsistency(array $item, bool $isDryRun): void
+    {
+        $account = $item['account'];
+        $currentPlanDay = $item['current_plan_day'];
+        $shouldBeDay = $item['should_be_day'];
+        $completedDays = $item['completed_days'];
+        $lastSuccessLog = $item['last_success_log'];
+
+        $this->line("处理账号: {$account->account}");
+        $this->line("  当前计划天数: {$currentPlanDay}");
+        $this->line("  应该是天数: {$shouldBeDay}");
+        $this->line("  已完成天数: " . implode(', ', $completedDays));
+
+        if ($lastSuccessLog) {
+            $lastExchangeTime = Carbon::parse($lastSuccessLog->exchange_time);
+            $this->line("  最后兑换时间: " . $lastExchangeTime->format('Y-m-d H:i:s'));
+            $this->line("  距离现在: " . $lastExchangeTime->diffForHumans());
+        }
+
+                 // 检查是否应该完成（有计划的检查plan_days，无计划的检查是否超过3天）
+         $maxDays = $account->plan ? $account->plan->plan_days : 3;
+
+         if ($shouldBeDay > $maxDays) {
+             // 应该完成
+             $this->warn("  问题: 账号应该已完成但状态未更新");
+             if (!$isDryRun) {
+                 if ($account->plan) {
+                     $this->markAccountCompleted($account);
+                 } else {
+                     // 无计划的账号，直接标记为完成
+                     $this->markUnboundAccountCompleted($account, $completedDays);
+                 }
+                 $this->info("  修复: 已标记为完成状态");
+             } else {
+                 $this->info("  建议: 标记为完成状态");
+             }
+         } else {
+             // 更新当前天数和状态
+             $newStatus = ItunesTradeAccount::STATUS_PROCESSING; // 默认为processing
+
+             // 如果有计划，根据时间间隔判断状态
+             if ($account->plan) {
+                 $dayInterval = $account->plan->day_interval ?? 24;
+                 $hoursFromLastExchange = $lastSuccessLog ?
+                     Carbon::parse($lastSuccessLog->exchange_time)->diffInHours(now()) : $dayInterval;
+
+                 $newStatus = $hoursFromLastExchange >= $dayInterval ?
+                     ItunesTradeAccount::STATUS_PROCESSING :
+                     ItunesTradeAccount::STATUS_WAITING;
+             }
+             // 无计划的账号始终设为processing
+
+             $this->warn("  问题: current_plan_day不正确");
+             $this->info("  建议: 更新到第{$shouldBeDay}天，状态为" .
+                 ($newStatus === ItunesTradeAccount::STATUS_PROCESSING ? 'PROCESSING' : 'WAITING'));
+
+             if (!$isDryRun) {
+                 // 更新completed_days字段
+                 $completedDaysData = json_decode($account->completed_days ?? '{}', true) ?: [];
+                 foreach ($completedDays as $day) {
+                     $dailyAmount = ItunesTradeAccountLog::where('account_id', $account->id)
+                         ->where('day', $day)
+                         ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+                         ->sum('amount');
+                     $completedDaysData[(string)$day] = $dailyAmount;
+                 }
+
+                 $account->update([
+                     'current_plan_day' => $shouldBeDay,
+                     'status' => $newStatus,
+                     'completed_days' => json_encode($completedDaysData)
+                 ]);
+
+                 $this->info("  修复: 已更新到第{$shouldBeDay}天，状态为" .
+                     ($newStatus === ItunesTradeAccount::STATUS_PROCESSING ? 'PROCESSING' : 'WAITING'));
+
+                 $this->getLogger()->info('修复current_plan_day不一致', [
+                     'account_id' => $account->id,
+                     'account' => $account->account,
+                     'old_current_plan_day' => $currentPlanDay,
+                     'new_current_plan_day' => $shouldBeDay,
+                     'new_status' => $newStatus,
+                     'completed_days' => $completedDays,
+                     'updated_completed_days' => $completedDaysData,
+                     'has_plan' => !is_null($account->plan)
+                 ]);
+             }
+         }
+
+                 $this->line('');
+     }
+
+     /**
+      * 标记无计划账号为完成状态
+      */
+     private function markUnboundAccountCompleted(ItunesTradeAccount $account, array $completedDays): void
+     {
+         // 计算completed_days数据
+         $completedDaysData = [];
+         foreach ($completedDays as $day) {
+             $dailyAmount = ItunesTradeAccountLog::where('account_id', $account->id)
+                 ->where('day', $day)
+                 ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+                 ->sum('amount');
+             $completedDaysData[(string)$day] = $dailyAmount;
+         }
+
+         $account->update([
+             'status' => ItunesTradeAccount::STATUS_COMPLETED,
+             'current_plan_day' => null,
+             'plan_id' => null, // 确保计划ID为空
+             'completed_days' => json_encode($completedDaysData),
+         ]);
+
+         $this->getLogger()->info('无计划账号标记完成（数据修复）', [
+             'account_id' => $account->id,
+             'account' => $account->account,
+             'total_amount' => $account->amount,
+             'completed_days_count' => count($completedDays),
+             'final_completed_days' => $completedDaysData
+         ]);
+
+         // 发送完成通知
+         $msg = "[强]无计划账号完成通知（数据修复）\n";
+         $msg .= "---------------\n";
+         $msg .= $account->account . "\n";
+         $msg .= "完成天数: " . implode(', ', $completedDays);
+
+         send_msg_to_wechat('44769140035@chatroom', $msg);
+     }
+
+     /**
+      * 重新登录账号
+      */
     private function reloginAccount(ItunesTradeAccount $account): array
     {
         try {

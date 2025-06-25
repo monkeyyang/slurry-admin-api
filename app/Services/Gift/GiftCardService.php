@@ -522,32 +522,57 @@ class GiftCardService
             'bind_room'       => $plan->bind_room
         ]);
 
-        // 1. 优先查找状态为processing的账号
-        $account = $this->findProcessingAccount($plan, $roomId, $lastCheckedId);
-        if ($account) {
-            $this->getLogger()->info("找到processing状态账号", ['account_id' => $account->id]);
+        // 一次性获取所有候选账号，避免频繁数据库查询
+        $candidateAccounts = $this->getAllCandidateAccounts($plan, $roomId);
+        
+        if (empty($candidateAccounts)) {
+            $this->getLogger()->error("没有找到任何候选账号", [
+                'plan_id' => $plan->id,
+                'room_id' => $roomId
+            ]);
+            throw new Exception("未找到可用的兑换账号");
+        }
+
+        $this->getLogger()->info("找到候选账号", [
+            'plan_id' => $plan->id,
+            'candidate_count' => count($candidateAccounts),
+            'candidate_ids' => array_column($candidateAccounts->toArray(), 'id')
+        ]);
+
+        // 按优先级排序并逐一验证
+        $sortedAccounts = $this->sortAccountsByPriority($candidateAccounts, $plan, $roomId);
+        
+        foreach ($sortedAccounts as $index => $account) {
+            $this->getLogger()->info("验证候选账号", [
+                'account_id' => $account->id,
+                'account' => $account->account,
+                'attempt' => $index + 1,
+                'total_candidates' => count($sortedAccounts)
+            ]);
+            
             if ($this->validateAndLockAccount($account, $plan, $giftCardInfo)) {
+                $this->getLogger()->info("成功找到并锁定可用账号", [
+                    'account_id' => $account->id,
+                    'account' => $account->account,
+                    'attempt' => $index + 1,
+                    'total_candidates' => count($sortedAccounts)
+                ]);
                 return $account;
             } else {
-                $this->getLogger()->info("processing账号验证失败或锁定失败，继续查找", ['account_id' => $account->id]);
-                // 递归查找下一个账号
-                return $this->findAvailableAccount($plan, $roomId, $giftCardInfo, $account->id);
+                $this->getLogger()->info("账号验证失败或锁定失败，继续下一个", [
+                    'account_id' => $account->id,
+                    'account' => $account->account,
+                    'attempt' => $index + 1
+                ]);
             }
         }
 
-        // 2. 查找状态为waiting且天数为1的账号，
-        // 暂时注释 06-18，waiting状态将在计划任务中执行
-//        $account = $this->findWaitingAccount($plan, $lastCheckedId);
-//        if ($account) {
-//            $this->getLogger()->info("找到waiting状态账号", ['account_id' => $account->id]);
-//            if ($this->validateAndLockAccount($account, $plan, $giftCardInfo)) {
-//                return $account;
-//            } else {
-//                $this->getLogger()->info("waiting账号验证失败或锁定失败，继续查找", ['account_id' => $account->id]);
-//                // 递归查找下一个账号
-//                return $this->findAvailableAccount($plan, $roomId, $giftCardInfo, $account->id);
-//            }
-//        }
+        $this->getLogger()->error("所有候选账号都不可用", [
+            'plan_id' => $plan->id,
+            'room_id' => $roomId,
+            'total_checked' => count($sortedAccounts),
+            'checked_account_ids' => array_column($sortedAccounts->toArray(), 'id')
+        ]);
 
         throw new Exception("未找到可用的兑换账号");
     }
@@ -597,69 +622,85 @@ class GiftCardService
     }
 
     /**
-     * 查询执行中的账号
-     * 增加筛选，初次绑定了计划后不可再修改除非该计划已被删除，可重新绑定计划
+     * 获取所有候选账号（一次性查询，避免频繁数据库访问）
+     */
+    private function getAllCandidateAccounts(ItunesTradePlan $plan, string $roomId): \Illuminate\Database\Eloquent\Collection
+    {
+        // 基础查询条件：processing状态且登录有效
+        $query = ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_PROCESSING)
+            ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_ACTIVE);
+
+        // 如果计划要求绑定群聊，优先考虑群聊绑定
+        if ($plan->bind_room && !empty($roomId)) {
+            // 查找：绑定当前计划的账号 OR 绑定当前群聊的账号 OR 未绑定计划的账号
+            $query->where(function ($q) use ($plan, $roomId) {
+                $q->where('plan_id', $plan->id)  // 绑定当前计划
+                  ->orWhere('room_id', $roomId)  // 绑定当前群聊
+                  ->orWhereNull('plan_id');      // 未绑定计划
+            });
+        } else {
+            // 不要求群聊绑定：查找绑定当前计划的账号 OR 未绑定计划的账号
+            $query->where(function ($q) use ($plan) {
+                $q->where('plan_id', $plan->id)  // 绑定当前计划
+                  ->orWhereNull('plan_id');      // 未绑定计划
+            });
+        }
+
+        return $query->get();
+    }
+
+    /**
+     * 按优先级排序账号
+     */
+    private function sortAccountsByPriority(\Illuminate\Database\Eloquent\Collection $accounts, ItunesTradePlan $plan, string $roomId): \Illuminate\Database\Eloquent\Collection
+    {
+        return $accounts->sort(function ($a, $b) use ($plan, $roomId) {
+            // 优先级1：绑定当前计划且绑定对应群聊的账号
+            $aPriority1 = ($a->plan_id == $plan->id && $a->room_id == $roomId) ? 1 : 0;
+            $bPriority1 = ($b->plan_id == $plan->id && $b->room_id == $roomId) ? 1 : 0;
+            if ($aPriority1 != $bPriority1) {
+                return $bPriority1 - $aPriority1; // 降序
+            }
+
+            // 优先级2：绑定当前计划的账号
+            $aPriority2 = ($a->plan_id == $plan->id) ? 1 : 0;
+            $bPriority2 = ($b->plan_id == $plan->id) ? 1 : 0;
+            if ($aPriority2 != $bPriority2) {
+                return $bPriority2 - $aPriority2; // 降序
+            }
+
+            // 优先级3：绑定对应群聊的账号
+            if ($plan->bind_room && !empty($roomId)) {
+                $aPriority3 = ($a->room_id == $roomId) ? 1 : 0;
+                $bPriority3 = ($b->room_id == $roomId) ? 1 : 0;
+                if ($aPriority3 != $bPriority3) {
+                    return $bPriority3 - $aPriority3; // 降序
+                }
+            }
+
+            // 优先级4：按余额降序排列（余额高的优先）
+            if ($a->amount != $b->amount) {
+                return $b->amount <=> $a->amount; // 降序
+            }
+
+            // 优先级5：按ID升序排列（ID小的优先，保证稳定排序）
+            return $a->id <=> $b->id; // 升序
+        })->values(); // 重新索引
+    }
+
+    /**
+     * 查询执行中的账号（保留原方法，但不再使用）
+     * @deprecated 已被 getAllCandidateAccounts 和 sortAccountsByPriority 替代
      */
     private function findProcessingAccount(
         ItunesTradePlan $plan,
         string          $roomId,
-        int             $lastCheckedId
+        int             $lastCheckedId,
+        array           $checkedAccountIds = []
     ): ?ItunesTradeAccount
     {
-        // 基础查询条件
-        $baseQuery = function () use ($plan, $lastCheckedId) {
-            return ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_PROCESSING)
-                ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_ACTIVE)
-                ->where('id', '>', $lastCheckedId)
-                ->orderBy('id', 'asc');
-        };
-
-        // 1. 首先查找绑定当前计划且绑定对应群聊的账号
-        if ($plan->bind_room && !empty($roomId)) {
-            $account = (clone $baseQuery())
-                ->where('plan_id', $plan->id)
-                ->where('room_id', $roomId)
-                ->first();
-
-            if ($account) {
-                $this->getLogger()->info("找到绑定群聊和计划的processing账号", [
-                    'account_id' => $account->id,
-                    'room_id'    => $roomId,
-                    'plan_id'    => $plan->id
-                ]);
-                return $account;
-            }
-        }
-
-        // 2. 查找绑定当前计划但不限定群聊的账号
-        $account = (clone $baseQuery())
-            ->where('plan_id', $plan->id)
-            ->first();
-
-        if ($account) {
-            return $account;
-        }
-
-        // 3. 查找未绑定计划但绑定对应群聊的账号
-        if ($plan->bind_room && !empty($roomId)) {
-            $account = (clone $baseQuery())
-                ->whereNull('plan_id')
-                ->where('room_id', $roomId)
-                ->first();
-
-            if ($account) {
-                $this->getLogger()->info("找到绑定群聊但未绑定计划的processing账号", [
-                    'account_id' => $account->id,
-                    'room_id'    => $roomId
-                ]);
-                return $account;
-            }
-        }
-
-        // 4. 最后查找未绑定计划的账号
-        return (clone $baseQuery())
-            ->whereNull('plan_id')
-            ->first();
+        // 此方法已被新的批量查询方法替代，保留以防回滚需要
+        return null;
     }
 
     /**
@@ -667,15 +708,25 @@ class GiftCardService
      */
     private function findWaitingAccount(
         ItunesTradePlan $plan,
-        int             $lastCheckedId
+        int             $lastCheckedId,
+        array           $checkedAccountIds = []
     ): ?ItunesTradeAccount
     {
-        return ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_WAITING)
+        $query = ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_WAITING)
             ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_ACTIVE)
-            ->where('current_plan_day', 1)
-            ->where('id', '>', $lastCheckedId)
-            ->orderBy('id', 'asc')
-            ->first();
+            ->where('current_plan_day', 1);
+        
+        // 排除已检查过的账号ID
+        if (!empty($checkedAccountIds)) {
+            $query->whereNotIn('id', $checkedAccountIds);
+        }
+        
+        // 如果是第一次查找，使用lastCheckedId；否则查找所有未检查的账号
+        if (empty($checkedAccountIds) && $lastCheckedId > 0) {
+            $query->where('id', '>', $lastCheckedId);
+        }
+        
+        return $query->orderBy('id', 'asc')->first();
     }
 
     /**
@@ -741,11 +792,17 @@ class GiftCardService
         $dailyAmounts = $plan->daily_amounts ?? [];
         $dailyLimit   = $dailyAmounts[$currentDay - 1] ?? 0;
 
-        // 计算可用额度（计划额度 + 浮动额度 - 已使用额度）
-        $availableDailyAmount = $dailyLimit + $plan->float_amount - $dailySpent;
-        $requiredAmount       = $giftCardInfo['amount'];
+        // 计算可用额度（计划额度 + 浮动额度 - 已使用额度），使用 BC Math 保证精度
+        $availableDailyAmount = bcsub(
+            bcadd($dailyLimit, $plan->float_amount, 2),  // 先加浮动额度
+            $dailySpent,  // 再减已使用额度
+            2  // 保留2位小数
+        );
 
-        $isValid = $availableDailyAmount >= $requiredAmount;
+        $requiredAmount = $giftCardInfo['amount'];
+
+        // 比较可用额度是否足够，使用 bccomp 避免精度问题
+        $isValid = (bccomp($availableDailyAmount, $requiredAmount, 2) >= 0);
 
         $this->getLogger()->info(
             $isValid ? "当日额度验证通过" : "当日额度不足",
@@ -773,19 +830,19 @@ class GiftCardService
     ): bool
     {
         // 获取账号已成功兑换的总额
-        $totalSpent = ItunesTradeAccountLog::where('account_id', $account->id)
-            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
-            ->sum('amount');
+//        $totalSpent = ItunesTradeAccountLog::where('account_id', $account->id)
+//            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+//            ->sum('amount');
 
-        // 检查加上当前兑换金额后是否超过总限额
-        $totalAfterExchange = $totalSpent + $giftCardInfo['amount'];
-        $isValid            = $totalAfterExchange <= $plan->total_amount;
+        // 检查加上当前兑换金额后是否超过总限额（使用 bcadd 和 bccomp 确保精度）
+        $totalAfterExchange = bcadd($account->amount, $giftCardInfo['amount'], 2);
+        $isValid            = (bccomp($totalAfterExchange, $plan->total_amount, 2) <= 0);
 
         $this->getLogger()->info(
             $isValid ? "总额度验证通过" : "超出总额度限制",
             [
                 'account_id'           => $account->account,
-                'total_spent'          => $totalSpent,
+                'total_spent'          => $account->amount,
                 'current_amount'       => $giftCardInfo['amount'],
                 'total_after_exchange' => $totalAfterExchange,
                 'total_amount_limit'   => $plan->total_amount,
@@ -827,15 +884,15 @@ class GiftCardService
                 $timeoutMinutes = 5; // 5分钟超时
                 $isTimeout = $existingLog->created_at->addMinutes($timeoutMinutes)->isPast();
                 $isSameBatch = !empty($existingLog->batch_id) && $existingLog->batch_id === $this->batchId;
-                
+
                 if ($isTimeout || $isSameBatch) {
                     // 超时的pending记录或同批次重试，标记为失败并允许重新处理
                     $reason = $isSameBatch ? '同批次任务重试' : '处理超时';
                     $existingLog->update([
                         'status' => ItunesTradeAccountLog::STATUS_FAILED,
-                        'error_message' => $reason . '，创建新的处理记录'
+//                        'error_message' => $reason . '，创建新的处理记录'
                     ]);
-                    
+
                     $this->getLogger()->info("检测到可重试的pending记录，标记为失败并允许重试", [
                         'code'                => $this->giftCardCode,
                         'existing_log_id'     => $existingLog->id,
@@ -847,7 +904,7 @@ class GiftCardService
                         'original_created_at' => $existingLog->created_at->toDateTimeString(),
                         'reason'              => $reason
                     ]);
-                    
+
                     // 继续执行，创建新的日志记录
                 } else {
                     // 未超时且不同批次的pending记录，真正的重复提交
@@ -942,12 +999,7 @@ class GiftCardService
                 $exchangeData = $this->parseExchangeResult($exchangeResult, $account, $rate, $code);
 
                 if ($exchangeData['success']) {
-                    // 更新日志状态为成功，注意：amount字段在创建时已经设置为礼品卡面额
-                    // 这里不需要重复更新amount字段，只更新状态即可
-                    $log->update([
-                        'status'        => ItunesTradeAccountLog::STATUS_SUCCESS,
-                        'error_message' => null,
-                    ]);
+
 
                     // 更新账号余额为API返回的总金额
                     $currentAmount = $exchangeData['data']['amount'] ?? 0;
@@ -963,6 +1015,15 @@ class GiftCardService
                         // 兑换成功后更新账号绑定roomId
                         if(empty($account->room_id)) $updateData['room_id'] = $this->roomId;
                         $account->update($updateData);
+
+                        // 更新日志兑换后金额
+                        // 更新日志状态为成功，注意：amount字段在创建时已经设置为礼品卡面额
+                        // 这里不需要重复更新amount字段，只更新状态即可
+                        $log->update([
+                            'status'        => ItunesTradeAccountLog::STATUS_SUCCESS,
+                            'after_amount'  => $totalAmount,
+                            'error_message' => null,
+                        ]);
 
                         $this->getLogger()->info("更新账号余额", [
                             'account_id' => $account->account,

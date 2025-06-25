@@ -352,7 +352,7 @@ class GiftCardExchangeService
 
 //        $task->markAsProcessing();
 
-        for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
+        for ($attempt = 0; $attempt < 500; $attempt++) {
             $result = $this->giftCardApiClient->getCardQueryTaskStatus($taskId);
 
             if ($result['code'] !== 0) {

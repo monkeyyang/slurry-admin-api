@@ -3,11 +3,13 @@
 namespace App\Services;
 
 use App\Models\ItunesTradeAccount;
+use Exception;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class ItunesTradeAccountService
 {
@@ -85,10 +87,9 @@ class ItunesTradeAccountService
     public function batchImportAccounts(string $country, array $accountsData): array
     {
         $successCount = 0;
-        $failCount = 0;
-        $duplicateAccounts = [];
         $restoredAccounts = [];
         $createdAccounts = [];
+        $updatedAccounts = [];
         $loginItems = [];
 
         DB::beginTransaction();
@@ -97,7 +98,13 @@ class ItunesTradeAccountService
                 $account = $accountData['account'];
                 $password = $accountData['password'];
                 $apiUrl = $accountData['apiUrl'] ?? null;
-
+//                $loginItems[] = [
+//
+//                            'username' => $account,
+//                            'password' => $password,
+//                            'VerifyUrl' => $apiUrl
+//                        ];
+//                var_dump($loginItems);exit;
                 // 检查是否已存在（包括已删除的）
                 $existing = ItunesTradeAccount::withTrashed()
                                             ->where('account', $account)
@@ -117,7 +124,7 @@ class ItunesTradeAccountService
                             'plan_id' => null, // 重置计划绑定
                             'current_plan_day' => null,
                         ]);
-                        
+
                         $restoredAccounts[] = $existing;
                         $loginItems[] = [
                             'id' => $existing->id,
@@ -127,10 +134,22 @@ class ItunesTradeAccountService
                         ];
                         $successCount++;
                     } else {
-                        // 如果是有效账号，记录为重复
-                        $duplicateAccounts[] = $account;
-                        $failCount++;
-                        continue;
+                        // 如果是有效账号，更新其信息
+                        $existing->update([
+                            'password' => $password,
+                            'api_url' => $apiUrl,
+                            'uid' => Auth::id(),
+                            'login_status' => null, // 重置登录状态，需要重新验证
+                        ]);
+
+                        $updatedAccounts[] = $existing;
+                        $loginItems[] = [
+                            'id' => $existing->id,
+                            'username' => $account,
+                            'password' => $password,
+                            'VerifyUrl' => $apiUrl
+                        ];
+                        $successCount++;
                     }
                 } else {
                     // 创建新账号
@@ -159,24 +178,28 @@ class ItunesTradeAccountService
 
             // 创建登录任务
             $taskResponse = $this->createLoginTask($loginItems);
-
-            $allAccounts = collect($createdAccounts)->concat($restoredAccounts);
+            Log::channel('websocket_monitor')->info('登录回调：', $taskResponse);
+            $allAccounts = collect($createdAccounts)
+                ->concat($restoredAccounts)
+                ->concat($updatedAccounts);
 
             return [
                 'successCount' => $successCount,
-                'failCount' => $failCount,
-                'duplicateAccounts' => $duplicateAccounts,
                 'restoredCount' => count($restoredAccounts),
                 'createdCount' => count($createdAccounts),
+                'updatedCount' => count($updatedAccounts),
                 'accounts' => $allAccounts->map->toApiArray()->toArray(),
             ];
 
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             DB::rollBack();
             throw $e;
         }
     }
 
+    /**
+     * @throws Exception
+     */
     protected function createLoginTask(array $items)
     {
         $payload = ['list' => array_map(function ($item) {
@@ -191,7 +214,7 @@ class ItunesTradeAccountService
         $response = Http::post('http://47.76.200.188:8080/api/login_poll/new', $payload)->json();
 
         if ($response['code'] !== 0) {
-            throw new \Exception("创建登录任务失败: ".$response['msg']);
+            throw new Exception("创建登录任务失败: ".$response['msg']);
         }
 
 //        // 保存任务记录
@@ -231,6 +254,31 @@ class ItunesTradeAccountService
     }
 
     /**
+     * 请求接口删除账号登录态
+     *
+     * @param array $items
+     * @return mixed
+     * @throws Exception
+     */
+    protected function deleteApiLoginUsers(array $items): mixed
+    {
+        $payload = ['list' => array_map(function ($item) {
+            return [
+                'username' => $item['username'],
+            ];
+        }, $items)];
+
+        $response = Http::post('http://47.76.200.188:8080/api/del_users', $payload)->json();
+
+        if ($response['code'] !== 0) {
+            throw new Exception("删除接口账户登录失败: ".$response['msg']);
+        }
+
+        return $response['data'];
+    }
+
+
+    /**
      * 删除账号
      */
     public function deleteAccount(int $id): bool
@@ -240,8 +288,17 @@ class ItunesTradeAccountService
         if (!$account) {
             return false;
         }
-
-        return $account->delete();
+        $giftCardApiClient = new GiftCardApiClient();
+        try {
+            $loginAccount = [
+                'username' => $account->account,
+            ];
+            $deleteLoginRespond = $giftCardApiClient->deleteUserLogins($loginAccount);
+            Log::channel('websocket_monitor')->info('删除的账号：'. json_encode($deleteLoginRespond));
+            return $account->delete();
+        } catch (Exception $e) {
+            return false;
+        }
     }
 
     /**

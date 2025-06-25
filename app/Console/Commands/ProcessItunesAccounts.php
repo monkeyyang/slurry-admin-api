@@ -133,13 +133,15 @@ class ProcessItunesAccounts extends Command
                 'issue' => '计划已被删除，需要解绑'
             ]);
 
-            // 解绑计划并重置相关字段
+            // 解绑计划并重置相关字段（不更新时间戳）
+            $account->timestamps = false;
             $account->update([
                 'plan_id' => null,
                 //'current_plan_day' => null,
                 'status' => ItunesTradeAccount::STATUS_WAITING,
                 // 'completed_days' => null
             ]);
+            $account->timestamps = true;
 
             $this->getLogger()->info("账号 {$account->account} 计划解绑完成", [
                 'action' => '清除plan_id',
@@ -181,8 +183,10 @@ class ProcessItunesAccounts extends Command
                 return;
             }
 
-            // 如果不应该完成，将当前天数重置为计划的最后一天
+            // 如果不应该完成，将当前天数重置为计划的最后一天（不更新时间戳）
+            $account->timestamps = false;
             $account->update(['current_plan_day' => $planDays]);
+            $account->timestamps = true;
 
             $this->getLogger()->info("账号 {$account->account} 当前天数已修复", [
                 'old_current_day' => $currentDay,
@@ -247,7 +251,9 @@ class ProcessItunesAccounts extends Command
 
         if (!$lastSuccessLog) {
             $this->getLogger()->info("账号 {$account->account} 没有成功的兑换记录，更新状态为PROCESSING");
+            $account->timestamps = false;
             $account->update(['status' => 'processing']);
+            $account->timestamps = true;
             return;
         }
 
@@ -262,8 +268,10 @@ class ProcessItunesAccounts extends Command
 
         // 检查账号当日金额是否达到计划当日金额
 
-        // 状态改为等待
+        // 状态改为等待（不更新时间戳）
+        $account->timestamps = false;
         $account->update(['status' => ItunesTradeAccount::STATUS_WAITING]);
+        $account->timestamps = true;
 
         $this->getLogger()->info('锁定账号状态转换为等待', [
             'account_id' => $account->account,
@@ -288,12 +296,14 @@ class ProcessItunesAccounts extends Command
                 'current_plan_day' => $account->current_plan_day
             ]);
 
-            // 清除计划相关字段，设为等待状态
+            // 清除计划相关字段，设为等待状态（不更新时间戳）
+            $account->timestamps = false;
             $account->update([
                 'plan_id' => null,
                 'current_plan_day' => null,
                 'status' => ItunesTradeAccount::STATUS_WAITING
             ]);
+            $account->timestamps = true;
             return;
         }
 
@@ -315,10 +325,13 @@ class ProcessItunesAccounts extends Command
 
         if (!$lastSuccessLog) {
             // 没有成功兑换记录的账号，设为第1天处理中状态
+            // 更新账号状态为PROCESSING，开始计划执行（不更新时间戳）
+            $account->timestamps = false;
             $account->update([
                 'status' => ItunesTradeAccount::STATUS_PROCESSING,
                 'current_plan_day' => 1
             ]);
+            $account->timestamps = true;
             $this->getLogger()->info("账号 {$account->account} 没有成功的兑换记录，设为第1天处理中状态", [
                 'account_id' => $account->account,
                 'old_status' => 'WAITING',
@@ -591,8 +604,10 @@ class ProcessItunesAccounts extends Command
             $this->getLogger()->info("更新账号 {$account->account} 第{$day}天完成情况: {$dailyAmount}");
         }
 
-        // 保存更新后的completed_days
+        // 保存更新后的completed_days（不更新时间戳）
+        $account->timestamps = false;
         $account->update(['completed_days' => json_encode($completedDays)]);
+        $account->timestamps = true;
 
         $this->getLogger()->info("账号 {$account->account} 所有天数数据已更新", [
             'plan_days' => $plan->plan_days,
@@ -638,12 +653,15 @@ class ProcessItunesAccounts extends Command
             $completedDays[(string)$day] = $dailyAmount;
         }
 
+        // 标记为完成状态（不更新时间戳）
+        $account->timestamps = false;
         $account->update([
             'status' => ItunesTradeAccount::STATUS_COMPLETED,
             'current_plan_day' => null,
             'plan_id' => null,
             'completed_days' => json_encode($completedDays),
         ]);
+        $account->timestamps = true;
 
         $this->getLogger()->info('账号计划完成', [
             'account_id' => $account->account,
@@ -714,11 +732,14 @@ class ProcessItunesAccounts extends Command
             $completedDays[(string)$day] = $dailyAmount;
         }
 
+        // 进入下一天（不更新时间戳）
+        $account->timestamps = false;
         $account->update([
             'current_plan_day' => $nextDay,
             'status' => ItunesTradeAccount::STATUS_PROCESSING,
             'completed_days' => json_encode($completedDays),
         ]);
+        $account->timestamps = true;
 
         $this->getLogger()->info('账号进入下一天', [
             'account_id' => $account->account,
@@ -847,8 +868,10 @@ class ProcessItunesAccounts extends Command
                     }
                 }
             } else {
-                // 余额充足，状态改为processing
+                // 余额充足，状态改为processing（不更新时间戳）
+                $account->timestamps = false;
                 $account->update(['status' => ItunesTradeAccount::STATUS_PROCESSING]);
+                $account->timestamps = true;
 
                 $this->getLogger()->info('等待账号状态转换为执行中', [
                     'account_id' => $account->account,

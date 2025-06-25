@@ -13,7 +13,7 @@ class ItunesTradeAccountLog extends Model
     protected $table = 'itunes_trade_account_logs';
 
     const STATUS_SUCCESS = 'success';
-    const STATUS_FAILED = 'failed';
+    const STATUS_FAILED  = 'failed';
     const STATUS_PENDING = 'pending';
 
     protected $fillable = [
@@ -23,6 +23,7 @@ class ItunesTradeAccountLog extends Model
         'country_code',
         'day',
         'amount',
+        'after_amount',
         'status',
         'exchange_time',
         'error_message',
@@ -34,11 +35,12 @@ class ItunesTradeAccountLog extends Model
     ];
 
     protected $casts = [
-        'account_id' => 'integer',
-        'plan_id' => 'integer',
-        'rate_id' => 'integer',
-        'day' => 'integer',
-        'amount' => 'decimal:2',
+        'account_id'    => 'integer',
+        'plan_id'       => 'integer',
+        'rate_id'       => 'integer',
+        'day'           => 'integer',
+        'amount'        => 'decimal:2',
+        'after_amount'  => 'decimal:2',
         'exchange_time' => 'datetime',
     ];
 
@@ -89,7 +91,7 @@ class ItunesTradeAccountLog extends Model
      */
     public function getStatusTextAttribute(): string
     {
-        return match($this->status) {
+        return match ($this->status) {
             self::STATUS_SUCCESS => '成功',
             self::STATUS_FAILED => '失败',
             self::STATUS_PENDING => '处理中',

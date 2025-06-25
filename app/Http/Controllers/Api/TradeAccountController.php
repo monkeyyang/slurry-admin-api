@@ -31,7 +31,8 @@ class TradeAccountController extends Controller
             $params = $request->validate([
                 'account' => 'nullable|string',
                 'country' => 'nullable|string',
-                'status' => ['nullable', Rule::in(['active', 'inactive', 'blocked'])],
+                'status' => ['nullable', Rule::in(['processing', 'waiting', 'locking', 'completed'])],
+                'loginStatus' => ['nullable', Rule::in(['invalid', 'valid'])],
                 'importedBy' => 'nullable|string',
                 'startTime' => 'nullable|date',
                 'endTime' => 'nullable|date',
@@ -67,7 +68,7 @@ class TradeAccountController extends Controller
     {
         try {
             $account = TradeAccount::with('countryInfo')->findOrFail($id);
-            
+
             return response()->json([
                 'code' => 0,
                 'message' => 'ok',
@@ -174,13 +175,13 @@ class TradeAccountController extends Controller
     {
         try {
             $account = TradeAccount::findOrFail($id);
-            
+
             $accountInfo = [
                 'id' => $account->id,
                 'account' => $account->account,
                 'country' => $account->country
             ];
-            
+
             $account->delete();
 
             Log::info('Account deleted', [
@@ -241,4 +242,4 @@ class TradeAccountController extends Controller
             ]);
         }
     }
-} 
+}
