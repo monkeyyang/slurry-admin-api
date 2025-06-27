@@ -346,6 +346,11 @@ class ItunesTradeAccountController extends Controller
         }
     }
 
+    public function lockStatus()
+    {
+
+    }
+
     /**
      * 获取可用账号
      */

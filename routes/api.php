@@ -309,6 +309,10 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('/accounts/{id}/unbind-plan', [ItunesTradeAccountController::class, 'unbindFromPlan'])->where('id', '[0-9]+');
         Route::put('/accounts/{id}/login-status', [ItunesTradeAccountController::class, 'updateLoginStatus'])->where('id', '[0-9]+');
 
+        // iTunes账号被封回调路由
+        Route::post('/accounts-status-lock', [ItunesTradeAccountController::class, 'lockStatus'])->where('id', '[0-9]+');
+
+
         // iTunes交易执行记录路由
         Route::get('/execution-logs', [ItunesTradeExecutionLogController::class, 'index']);
         Route::get('/execution-logs-statistics', [ItunesTradeExecutionLogController::class, 'statistics']);

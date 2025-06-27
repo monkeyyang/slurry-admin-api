@@ -49,7 +49,8 @@ class RedeemGiftCardJob implements ShouldQueue
         '账号余额不足',
         '超出每日限额',
         '超出总限额',
-        '不符合倍数要求'
+        '不符合倍数要求',
+        '已兑换成功，请勿重复提交'  // 添加防重复提交的错误类型
     ];
 
     // 系统错误，需要重试
@@ -61,7 +62,9 @@ class RedeemGiftCardJob implements ShouldQueue
         '系统繁忙',
         'Connection refused',
         'timeout',
-        'Server Error'
+        'Server Error',
+        '登录失败，需要重新验证账号',  // 登录失败类型错误，需要重试
+        'redis: nil'  // Redis连接失败
     ];
 
     /**
@@ -228,14 +231,29 @@ class RedeemGiftCardJob implements ShouldQueue
                 'attempt'           => $this->attempts()
             ]);
 
-            // 发送微信消息
+            // 发送微信消息 - 使用try-catch避免影响主流程
             if (!in_array($this->roomId, ['brother-card@api', 'no-send-msg@api'])) {
-                send_msg_to_wechat($this->roomId, $result['wechat_msg']);
+                try {
+                    send_msg_to_wechat($this->roomId, $result['wechat_msg']);
+                } catch (Throwable $e) {
+                    $this->getLogger()->warning("微信消息发送失败，但不影响兑换结果", [
+                        'card_code' => $this->giftCardCode,
+                        'error' => $e->getMessage()
+                    ]);
+                }
             }
 
             // 更新批量任务进度 - 成功
             if (!empty($this->batchId)) {
-                $batchService->updateProgress($this->batchId, true, $this->giftCardCode, $result);
+                try {
+                    $batchService->updateProgress($this->batchId, true, $this->giftCardCode, $result);
+                } catch (Throwable $e) {
+                    $this->getLogger()->warning("批量任务进度更新失败，但不影响兑换结果", [
+                        'batch_id' => $this->batchId,
+                        'card_code' => $this->giftCardCode,
+                        'error' => $e->getMessage()
+                    ]);
+                }
             }
 
         } catch (Throwable $e) {
@@ -255,40 +273,81 @@ class RedeemGiftCardJob implements ShouldQueue
                     'attempt'           => $this->attempts()
                 ]);
 
-                // 发送失败消息
+                // 发送失败消息 - 使用try-catch避免二次失败
                 if (!in_array($this->roomId, ['brother-card@api', 'no-send-msg@api'])) {
-                    send_msg_to_wechat($this->roomId, "兑换失败\n-------------------------\n" . $this->giftCardCode . "\n" . $e->getMessage());
+                    try {
+                        send_msg_to_wechat($this->roomId, "兑换失败\n-------------------------\n" . $this->giftCardCode . "\n" . $e->getMessage());
+                    } catch (Throwable $msgError) {
+                        $this->getLogger()->warning("失败消息发送失败", [
+                            'card_code' => $this->giftCardCode,
+                            'error' => $msgError->getMessage()
+                        ]);
+                    }
                 }
 
                 // 更新批量任务进度 - 失败
                 if (!empty($this->batchId)) {
-                    $batchService->updateProgress($this->batchId, false, $this->giftCardCode, null, $e->getMessage());
+                    try {
+                        $batchService->updateProgress($this->batchId, false, $this->giftCardCode, null, $e->getMessage());
+                    } catch (Throwable $progressError) {
+                        $this->getLogger()->warning("批量任务进度更新失败", [
+                            'batch_id' => $this->batchId,
+                            'card_code' => $this->giftCardCode,
+                            'error' => $progressError->getMessage()
+                        ]);
+                    }
                 }
 
                 // 不抛出异常，避免重试
                 return;
             }
 
-            // 系统错误，记录详细信息并重新抛出异常以触发重试
-            $this->getLogger()->error("礼品卡兑换任务失败（系统错误）", [
-                'job_id'            => $this->job->getJobId(),
-                'card_code'         => $this->giftCardCode,
-                'room_id'           => $this->roomId,
-                'batch_id'          => $this->batchId,
-                'error'             => $e->getMessage(),
-                'execution_time_ms' => $executionTime,
-                'attempt'           => $this->attempts(),
-                'max_tries'         => $this->tries,
-                'trace'             => $e->getTraceAsString()
-            ]);
+            // 使用统一的重试判断逻辑
+            if ($this->shouldRetry($e)) {
+                // 需要重试的异常（系统错误、未分类错误）
+                $this->getLogger()->error("礼品卡兑换失败，将进行重试", [
+                    'job_id'            => $this->job->getJobId(),
+                    'card_code'         => $this->giftCardCode,
+                    'room_id'           => $this->roomId,
+                    'batch_id'          => $this->batchId,
+                    'error'             => $e->getMessage(),
+                    'error_type'        => $this->getErrorType($e),
+                    'execution_time_ms' => $executionTime,
+                    'attempt'           => $this->attempts(),
+                    'max_tries'         => $this->tries,
+                    'trace'             => $e->getTraceAsString()
+                ]);
 
-            // 更新批量任务进度 - 失败（但可能会重试）
-            if (!empty($this->batchId)) {
-                $batchService->updateProgress($this->batchId, false, $this->giftCardCode, null, $e->getMessage());
+                // 更新批量任务进度 - 失败（但可能会重试）
+                if (!empty($this->batchId)) {
+                    try {
+                        $batchService->updateProgress($this->batchId, false, $this->giftCardCode, null, $e->getMessage());
+                    } catch (Throwable $progressError) {
+                        $this->getLogger()->warning("批量任务进度更新失败", [
+                            'batch_id' => $this->batchId,
+                            'error' => $progressError->getMessage()
+                        ]);
+                    }
+                }
+
+                // 重新抛出异常以触发重试机制
+                throw $e;
+            } else {
+                // 不需要重试的异常（后续处理错误）
+                $this->getLogger()->warning("后续处理失败，但不重试（兑换可能已成功）", [
+                    'job_id'            => $this->job->getJobId(),
+                    'card_code'         => $this->giftCardCode,
+                    'batch_id'          => $this->batchId,
+                    'error'             => $e->getMessage(),
+                    'error_type'        => $this->getErrorType($e),
+                    'execution_time_ms' => $executionTime,
+                    'attempt'           => $this->attempts(),
+                    'reason'            => $this->getNoRetryReason($e)
+                ]);
+
+                // 不抛出异常，避免重试
+                return;
             }
-
-            // 重新抛出异常以触发重试机制
-            throw $e;
         }
     }
 
@@ -307,25 +366,8 @@ class RedeemGiftCardJob implements ShouldQueue
     }
 
     /**
-     * 判断是否为系统错误
-     */
-    protected function isSystemError(Throwable $e): bool
-    {
-        $message = $e->getMessage();
-
-        // 优先检查是否为已知的系统错误
-        foreach (self::SYSTEM_ERRORS as $systemError) {
-            if (stripos($message, $systemError) !== false) {
-                return true;
-            }
-        }
-
-        // 如果不是已知的系统错误，检查是否为业务错误
-        return !$this->isBusinessError($e);
-    }
-
-    /**
-     * 判断是否为业务逻辑错误
+     * 判断是否为业务逻辑错误（不需要重试）
+     * 这类错误重试也无法解决，如：卡无效、已兑换、重复提交等
      */
     protected function isBusinessError(Throwable $e): bool
     {
@@ -338,6 +380,135 @@ class RedeemGiftCardJob implements ShouldQueue
         }
 
         return false;
+    }
+
+    /**
+     * 判断是否为后续处理异常（不需要重试）
+     * 核心业务已成功，只是附加功能失败，如：微信消息发送、批量进度更新等
+     */
+    protected function isPostProcessingError(Throwable $e): bool
+    {
+        $message = $e->getMessage();
+        $trace = $e->getTraceAsString();
+
+        // 后续处理异常：微信消息发送、批量任务进度更新等
+        $postProcessingErrors = [
+            'send_msg_to_wechat',         // 微信消息发送失败
+            'updateProgress',             // 批量任务进度更新失败
+            'BatchGiftCardService',       // 批量服务相关错误
+            'recordError',                // 错误记录失败
+            'event(',                     // 事件触发失败
+            'Event::dispatch',            // 事件分发失败
+            'TradeLogCreated',            // 交易日志事件失败
+        ];
+
+        // 检查是否为后续处理异常
+        foreach ($postProcessingErrors as $postError) {
+            if (stripos($message, $postError) !== false || stripos($trace, $postError) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 判断是否为系统错误（需要重试）
+     * 这类错误可能是临时性的，重试可能会成功，如：网络错误、数据库连接失败等
+     */
+    protected function isSystemError(Throwable $e): bool
+    {
+        $message = $e->getMessage();
+        $trace = $e->getTraceAsString();
+
+        // 已知的系统错误模式
+        $systemErrors = array_merge(self::SYSTEM_ERRORS, [
+            'validateGiftCard',           // 验证礼品卡失败
+            'findMatchingRate',           // 查找汇率失败
+            'findAvailablePlan',          // 查找计划失败
+            'findAvailableAccount',       // 查找账号失败
+            'executeRedemption',          // 执行兑换失败
+            'GiftCardService::redeem',    // 兑换服务失败
+            'Database',                   // 数据库相关错误
+            'Connection',                 // 连接相关错误
+            'QueryException',             // 查询异常
+            'PDOException',               // PDO异常
+            'Redis',                      // Redis相关错误
+            'API',                        // API调用失败
+            'Http',                       // HTTP请求失败
+            'Curl',                       // CURL错误
+            'Socket',                     // Socket错误
+            'login failed',               // 登录失败
+            'need login',                 // 需要登录
+            'session expired',            // 会话过期
+            'authentication failed',     // 认证失败
+            'unauthorized',               // 未授权
+            'login required'              // 需要登录
+        ]);
+
+        // 检查是否为系统错误
+        foreach ($systemErrors as $systemError) {
+            if (stripos($message, $systemError) !== false || stripos($trace, $systemError) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 判断异常是否需要重试
+     * 统一的重试判断逻辑
+     */
+    protected function shouldRetry(Throwable $e): bool
+    {
+        // 1. 业务逻辑错误：不重试（如卡无效、已兑换等）
+        if ($this->isBusinessError($e)) {
+            return false;
+        }
+
+        // 2. 后续处理错误：不重试（核心业务已成功）
+        if ($this->isPostProcessingError($e)) {
+            return false;
+        }
+
+        // 3. 系统错误：重试（如网络问题、数据库连接失败等）
+        if ($this->isSystemError($e)) {
+            return true;
+        }
+
+        // 4. 未明确分类的错误：保守起见，重试
+        return true;
+    }
+
+    /**
+     * 获取错误类型（用于日志记录）
+     */
+    protected function getErrorType(Throwable $e): string
+    {
+        if ($this->isBusinessError($e)) {
+            return 'business_error';
+        } elseif ($this->isPostProcessingError($e)) {
+            return 'post_processing_error';
+        } elseif ($this->isSystemError($e)) {
+            return 'system_error';
+        } else {
+            return 'unknown_error';
+        }
+    }
+
+    /**
+     * 获取不重试的原因（用于日志记录）
+     */
+    protected function getNoRetryReason(Throwable $e): string
+    {
+        if ($this->isBusinessError($e)) {
+            return '业务逻辑错误，重试无法解决';
+        } elseif ($this->isPostProcessingError($e)) {
+            return '核心业务可能已成功，仅后续处理失败';
+        } else {
+            return '未知原因';
+        }
     }
 
     /**

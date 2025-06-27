@@ -50,7 +50,8 @@ class GiftCardService
         '账号余额不足',
         '超出每日限额',
         '超出总限额',
-        '不符合倍数要求'
+        '不符合倍数要求',
+        '已兑换成功，请勿重复提交'  // 添加防重复提交的错误类型
     ];
 
     public function __construct(GiftCardExchangeService $exchangeService)
@@ -1114,6 +1115,25 @@ class GiftCardService
                     'trace' => $this->isSystemError($e) ? $e->getTraceAsString() : null
                 ]);
 
+                // 检查是否为登录失败错误
+                if ($this->isLoginFailureError($e)) {
+                    // 将账号登录状态设为无效
+                    $account->update([
+                        'login_status' => ItunesTradeAccount::STATUS_LOGIN_INVALID
+                    ]);
+
+                    $this->getLogger()->warning("检测到登录失败错误，已将账号登录状态设为无效", [
+                        'account_id' => $account->id,
+                        'account' => $account->account,
+                        'error' => $e->getMessage(),
+                        'old_login_status' => $account->getOriginal('login_status'),
+                        'new_login_status' => ItunesTradeAccount::STATUS_LOGIN_INVALID
+                    ]);
+
+                    // 创建一个新的异常用于重试（明确标记为登录失败类型）
+                    throw new Exception("登录失败，需要重新验证账号：" . $e->getMessage(), 0, $e);
+                }
+
                 // 触发日志更新事件
                 event(new TradeLogCreated($log->fresh()));
 
@@ -1761,5 +1781,37 @@ class GiftCardService
                 'error' => $e->getMessage()
             ];
         }
+    }
+
+    /**
+     * 检查是否为登录失败错误
+     *
+     * @param Exception $e 异常对象
+     * @return bool true=登录失败错误, false=其他错误
+     */
+    private function isLoginFailureError(Exception $e): bool
+    {
+        $message = $e->getMessage();
+        
+        // 登录失败相关的错误模式
+        $loginFailurePatterns = [
+            '登录失败',
+            'redis: nil',
+            'login failed',
+            'need login',
+            'session expired',
+            'authentication failed',
+            'invalid credentials',
+            'unauthorized',
+            'login required'
+        ];
+        
+        foreach ($loginFailurePatterns as $pattern) {
+            if (stripos($message, $pattern) !== false) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 }
