@@ -51,7 +51,13 @@ class GiftCardService
         '超出每日限额',
         '超出总限额',
         '不符合倍数要求',
-        '已兑换成功，请勿重复提交'  // 添加防重复提交的错误类型
+        '已兑换成功，请勿重复提交',  // 添加防重复提交的错误类型
+        '无法充满计划额度且无法预留最小倍数额度',  // 新增智能账号选择错误
+        '账号容量不足，需要换账号',  // 新增账号容量错误
+        '剩余金额不符合倍数要求',  // 新增倍数验证错误
+        '剩余金额不匹配固定面额要求',  // 新增固定面额验证错误
+        '不符合固定面额要求',  // 新增固定面额错误
+        '剩余金额不符合约束要求'  // 新增通用约束错误
     ];
 
     public function __construct(GiftCardExchangeService $exchangeService)
@@ -536,7 +542,8 @@ class GiftCardService
             'plan_id'         => $plan->id,
             'room_id'         => $roomId,
             'last_checked_id' => $lastCheckedId,
-            'bind_room'       => $plan->bind_room
+            'bind_room'       => $plan->bind_room,
+            'card_amount'     => $giftCardInfo['amount']
         ]);
 
         // 一次性获取所有候选账号，避免频繁数据库查询
@@ -556,8 +563,8 @@ class GiftCardService
             'candidate_ids' => array_column($candidateAccounts->toArray(), 'id')
         ]);
 
-        // 按优先级排序并逐一验证
-        $sortedAccounts = $this->sortAccountsByPriority($candidateAccounts, $plan, $roomId);
+        // 按优先级排序并逐一验证（传入礼品卡信息用于精确排序）
+        $sortedAccounts = $this->sortAccountsByPriority($candidateAccounts, $plan, $roomId, $giftCardInfo);
         
         foreach ($sortedAccounts as $index => $account) {
             $this->getLogger()->info("验证候选账号", [
@@ -669,9 +676,48 @@ class GiftCardService
     /**
      * 按优先级排序账号
      */
-    private function sortAccountsByPriority(\Illuminate\Database\Eloquent\Collection $accounts, ItunesTradePlan $plan, string $roomId): \Illuminate\Database\Eloquent\Collection
+    private function sortAccountsByPriority(\Illuminate\Database\Eloquent\Collection $accounts, ItunesTradePlan $plan, string $roomId, array $giftCardInfo): \Illuminate\Database\Eloquent\Collection
     {
-        return $accounts->sort(function ($a, $b) use ($plan, $roomId) {
+        // 预先获取汇率信息用于容量验证
+        $rate = $plan->rate;
+        $multipleBase = 0;
+        $fixedAmounts = [];
+        $constraintType = $rate ? $rate->amount_constraint : ItunesTradeRate::AMOUNT_CONSTRAINT_ALL;
+        
+        if ($rate) {
+            if ($constraintType === ItunesTradeRate::AMOUNT_CONSTRAINT_MULTIPLE) {
+                $multipleBase = $rate->multiple_base ?? 0;
+            } elseif ($constraintType === ItunesTradeRate::AMOUNT_CONSTRAINT_FIXED) {
+                $fixedAmounts = $rate->fixed_amounts ?? [];
+                if (is_string($fixedAmounts)) {
+                    $decodedAmounts = json_decode($fixedAmounts, true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($decodedAmounts)) {
+                        $fixedAmounts = $decodedAmounts;
+                    }
+                }
+            }
+        }
+
+        // 【性能优化】预先批量查询所有账号的每日已兑换金额，避免在排序中重复查询
+        $accountIds = $accounts->pluck('id')->toArray();
+        $dailySpentData = $this->batchGetDailySpentAmounts($accountIds, $plan);
+
+        $this->getLogger()->info("排序性能优化", [
+            'account_count' => count($accountIds),
+            'daily_spent_queries' => count($dailySpentData),
+            'constraint_type' => $constraintType
+        ]);
+
+        return $accounts->sort(function ($a, $b) use ($plan, $roomId, $multipleBase, $fixedAmounts, $constraintType, $giftCardInfo, $dailySpentData) {
+            // 优先级0：基于容量验证的智能排序
+            $aCapacityType = $this->getAccountCapacityTypeOptimized($a, $plan, $multipleBase, $fixedAmounts, $constraintType, $giftCardInfo, $dailySpentData);
+            $bCapacityType = $this->getAccountCapacityTypeOptimized($b, $plan, $multipleBase, $fixedAmounts, $constraintType, $giftCardInfo, $dailySpentData);
+            
+            // 容量类型优先级：1=能充满，2=可预留，3=不适合
+            if ($aCapacityType != $bCapacityType) {
+                return $aCapacityType - $bCapacityType; // 升序，值小的优先
+            }
+
             // 优先级1：绑定当前计划且绑定对应群聊的账号
             $aPriority1 = ($a->plan_id == $plan->id && $a->room_id == $roomId) ? 1 : 0;
             $bPriority1 = ($b->plan_id == $plan->id && $b->room_id == $roomId) ? 1 : 0;
@@ -703,6 +749,98 @@ class GiftCardService
             // 优先级5：按ID升序排列（ID小的优先，保证稳定排序）
             return $a->id <=> $b->id; // 升序
         })->values(); // 重新索引
+    }
+
+    /**
+     * 批量获取账号的每日已兑换金额（性能优化）
+     */
+    private function batchGetDailySpentAmounts(array $accountIds, ItunesTradePlan $plan): array
+    {
+        if (empty($accountIds)) {
+            return [];
+        }
+
+        // 一次性查询所有账号的每日兑换记录
+        $results = DB::table('itunes_trade_account_logs')
+            ->select('account_id', 'day', DB::raw('SUM(amount) as daily_spent'))
+            ->whereIn('account_id', $accountIds)
+            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+            ->groupBy('account_id', 'day')
+            ->get();
+
+        // 组织数据结构：[account_id => [day => daily_spent]]
+        $dailySpentData = [];
+        foreach ($results as $result) {
+            $dailySpentData[$result->account_id][$result->day] = (float)$result->daily_spent;
+        }
+
+        return $dailySpentData;
+    }
+
+    /**
+     * 获取账号容量类型（优化版本，使用预查询的数据）
+     */
+    private function getAccountCapacityTypeOptimized(
+        ItunesTradeAccount $account, 
+        ItunesTradePlan $plan, 
+        int $multipleBase, 
+        array $fixedAmounts, 
+        string $constraintType, 
+        array $giftCardInfo, 
+        array $dailySpentData
+    ): int {
+        $cardAmount = $giftCardInfo['amount'];
+        $currentDay = $account->current_plan_day ?? 1;
+        
+        // 获取当天的计划额度
+        $dailyAmounts = $plan->daily_amounts ?? [];
+        $dailyLimit = $dailyAmounts[$currentDay - 1] ?? 0;
+        
+        // 从预查询的数据中获取当天已成功兑换的总额
+        $dailySpent = $dailySpentData[$account->id][$currentDay] ?? 0;
+        
+        // 计算当天剩余需要额度（包含浮动额度）
+        $remainingDailyAmount = bcadd($dailyLimit, $plan->float_amount, 2);
+        $remainingDailyAmount = bcsub($remainingDailyAmount, $dailySpent, 2);
+        
+        // 类型1：能够充满计划额度（不超出）
+        if (bccomp($cardAmount, $remainingDailyAmount, 2) <= 0) {
+            return 1;
+        }
+        
+        // 类型2和3：根据约束类型判断是否可以预留
+        $remainingAfterUse = bcsub($cardAmount, $remainingDailyAmount, 2);
+        
+        switch ($constraintType) {
+            case ItunesTradeRate::AMOUNT_CONSTRAINT_MULTIPLE:
+                if ($multipleBase > 0 && bccomp($remainingAfterUse, $multipleBase, 2) >= 0) {
+                    $modResult = fmod((float)$remainingAfterUse, (float)$multipleBase);
+                    if ($modResult == 0) {
+                        return 2; // 可以预留倍数额度
+                    }
+                }
+                break;
+                
+            case ItunesTradeRate::AMOUNT_CONSTRAINT_FIXED:
+                if (is_array($fixedAmounts) && !empty($fixedAmounts)) {
+                    $remainingFloat = (float)$remainingAfterUse;
+                    foreach ($fixedAmounts as $fixedAmount) {
+                        if (abs($remainingFloat - (float)$fixedAmount) < 0.01) {
+                            return 2; // 可以预留固定面额
+                        }
+                    }
+                }
+                break;
+                
+            case ItunesTradeRate::AMOUNT_CONSTRAINT_ALL:
+                if (bccomp($remainingAfterUse, '0', 2) > 0) {
+                    return 2; // 可以预留剩余额度（全面额）
+                }
+                break;
+        }
+        
+        // 类型3：不太适合
+        return 3;
     }
 
     /**
@@ -764,16 +902,6 @@ class GiftCardService
             return false;
         }
 
-        // 检查总额度
-        if (!$this->validateTotalAmount($account, $plan, $giftCardInfo)) {
-            return false;
-        }
-
-        // 检查当日额度
-        if (!$this->validateDailyAmount($account, $plan, $giftCardInfo)) {
-            return false;
-        }
-
         // 检查国家匹配
         if (!empty($account->country_code) &&
             $account->country_code !== $giftCardInfo['country_code']) {
@@ -785,7 +913,253 @@ class GiftCardService
             return false;
         }
 
+        // 新增：智能账号选择验证
+        if (!$this->validateAccountCapacity($account, $plan, $giftCardInfo)) {
+            return false;
+        }
+
+        // 检查总额度
+        if (!$this->validateTotalAmount($account, $plan, $giftCardInfo)) {
+            return false;
+        }
+
+        // 检查当日额度
+        if (!$this->validateDailyAmount($account, $plan, $giftCardInfo)) {
+            return false;
+        }
+
         return true;
+    }
+
+    /**
+     * 智能账号容量验证：检查账号是否能充满计划额度或预留最小额度
+     */
+    private function validateAccountCapacity(
+        ItunesTradeAccount $account,
+        ItunesTradePlan    $plan,
+        array              $giftCardInfo
+    ): bool
+    {
+        $cardAmount = $giftCardInfo['amount'];
+        $currentDay = $account->current_plan_day ?? 1;
+        
+        // 获取当天的计划额度
+        $dailyAmounts = $plan->daily_amounts ?? [];
+        $dailyLimit = $dailyAmounts[$currentDay - 1] ?? 0;
+        
+        // 获取当天已成功兑换的总额
+        $dailySpent = ItunesTradeAccountLog::where('account_id', $account->id)
+            ->where('day', $currentDay)
+            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+            ->sum('amount');
+        
+        // 计算当天剩余需要额度（包含浮动额度）
+        $remainingDailyAmount = bcadd($dailyLimit, $plan->float_amount, 2);
+        $remainingDailyAmount = bcsub($remainingDailyAmount, $dailySpent, 2);
+        
+        // 获取汇率的约束要求
+        $rate = $plan->rate;
+        $constraintType = $rate ? $rate->amount_constraint : ItunesTradeRate::AMOUNT_CONSTRAINT_ALL;
+        $multipleBase = 0;
+        $fixedAmounts = [];
+        
+        if ($rate) {
+            if ($constraintType === ItunesTradeRate::AMOUNT_CONSTRAINT_MULTIPLE) {
+                $multipleBase = $rate->multiple_base ?? 0;
+            } elseif ($constraintType === ItunesTradeRate::AMOUNT_CONSTRAINT_FIXED) {
+                $fixedAmounts = $rate->fixed_amounts ?? [];
+                // 如果是字符串，尝试JSON解码
+                if (is_string($fixedAmounts)) {
+                    $decodedAmounts = json_decode($fixedAmounts, true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($decodedAmounts)) {
+                        $fixedAmounts = $decodedAmounts;
+                    }
+                }
+            }
+        }
+        
+        $this->getLogger()->info("智能账号容量验证开始", [
+            'account_id' => $account->account,
+            'card_amount' => $cardAmount,
+            'current_day' => $currentDay,
+            'daily_limit' => $dailyLimit,
+            'float_amount' => $plan->float_amount,
+            'daily_spent' => $dailySpent,
+            'remaining_daily_amount' => $remainingDailyAmount,
+            'constraint_type' => $constraintType,
+            'multiple_base' => $multipleBase,
+            'fixed_amounts' => $fixedAmounts
+        ]);
+        
+        // 情况1：检查是否能够充满计划额度（不超出）
+        if (bccomp($cardAmount, $remainingDailyAmount, 2) <= 0) {
+            $this->getLogger()->info("账号能够充满计划额度，验证通过", [
+                'account_id' => $account->account,
+                'card_amount' => $cardAmount,
+                'remaining_daily_amount' => $remainingDailyAmount,
+                'validation_type' => '能够充满计划额度'
+            ]);
+            return true;
+        }
+        
+        // 情况2：如果不能充满，检查是否可以预留符合约束的最小额度
+        $remainingAfterUse = bcsub($cardAmount, $remainingDailyAmount, 2);
+        
+        // 根据不同的约束类型进行验证
+        switch ($constraintType) {
+            case ItunesTradeRate::AMOUNT_CONSTRAINT_MULTIPLE:
+                return $this->validateMultipleConstraintCapacity($account, $cardAmount, $remainingDailyAmount, $remainingAfterUse, $multipleBase);
+                
+            case ItunesTradeRate::AMOUNT_CONSTRAINT_FIXED:
+                return $this->validateFixedConstraintCapacity($account, $cardAmount, $remainingDailyAmount, $remainingAfterUse, $fixedAmounts);
+                
+            case ItunesTradeRate::AMOUNT_CONSTRAINT_ALL:
+                return $this->validateAllConstraintCapacity($account, $cardAmount, $remainingDailyAmount, $remainingAfterUse);
+                
+            default:
+                $this->getLogger()->warning("未知的约束类型，按全面额处理", [
+                    'account_id' => $account->account,
+                    'constraint_type' => $constraintType
+                ]);
+                return $this->validateAllConstraintCapacity($account, $cardAmount, $remainingDailyAmount, $remainingAfterUse);
+        }
+    }
+    
+    /**
+     * 验证倍数约束的容量
+     */
+    private function validateMultipleConstraintCapacity(
+        ItunesTradeAccount $account,
+        string $cardAmount,
+        string $remainingDailyAmount,
+        string $remainingAfterUse,
+        int $multipleBase
+    ): bool {
+        if ($multipleBase <= 0) {
+            $this->getLogger()->info("倍数基数无效，按全面额处理", [
+                'account_id' => $account->account,
+                'multiple_base' => $multipleBase
+            ]);
+            return $this->validateAllConstraintCapacity($account, $cardAmount, $remainingDailyAmount, $remainingAfterUse);
+        }
+        
+        // 检查剩余金额是否能满足最小倍数要求
+        if (bccomp($remainingAfterUse, $multipleBase, 2) >= 0) {
+            // 检查剩余金额是否为倍数的整数倍
+            $modResult = fmod((float)$remainingAfterUse, (float)$multipleBase);
+            
+            if ($modResult == 0) {
+                $this->getLogger()->info("账号可以预留倍数额度，验证通过", [
+                    'account_id' => $account->account,
+                    'card_amount' => $cardAmount,
+                    'remaining_daily_amount' => $remainingDailyAmount,
+                    'remaining_after_use' => $remainingAfterUse,
+                    'multiple_base' => $multipleBase,
+                    'mod_result' => $modResult,
+                    'validation_type' => '可以预留倍数额度'
+                ]);
+                return true;
+            } else {
+                $this->getLogger()->info("剩余金额不是倍数的整数倍，验证失败", [
+                    'account_id' => $account->account,
+                    'remaining_after_use' => $remainingAfterUse,
+                    'multiple_base' => $multipleBase,
+                    'mod_result' => $modResult
+                ]);
+            }
+        } else {
+            $this->getLogger()->info("剩余金额不足最小倍数要求，验证失败", [
+                'account_id' => $account->account,
+                'remaining_after_use' => $remainingAfterUse,
+                'multiple_base' => $multipleBase
+            ]);
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 验证固定面额约束的容量
+     */
+    private function validateFixedConstraintCapacity(
+        ItunesTradeAccount $account,
+        string $cardAmount,
+        string $remainingDailyAmount,
+        string $remainingAfterUse,
+        array $fixedAmounts
+    ): bool {
+        if (empty($fixedAmounts) || !is_array($fixedAmounts)) {
+            $this->getLogger()->info("固定面额配置无效，按全面额处理", [
+                'account_id' => $account->account,
+                'fixed_amounts' => $fixedAmounts
+            ]);
+            return $this->validateAllConstraintCapacity($account, $cardAmount, $remainingDailyAmount, $remainingAfterUse);
+        }
+        
+        // 检查剩余金额是否匹配任何固定面额
+        $remainingFloat = (float)$remainingAfterUse;
+        $isMatched = false;
+        $matchedAmount = null;
+        
+        foreach ($fixedAmounts as $fixedAmount) {
+            $fixedFloat = (float)$fixedAmount;
+            
+            // 精确匹配
+            if (abs($remainingFloat - $fixedFloat) < 0.01) {
+                $isMatched = true;
+                $matchedAmount = $fixedAmount;
+                break;
+            }
+        }
+        
+        if ($isMatched) {
+            $this->getLogger()->info("账号可以预留固定面额，验证通过", [
+                'account_id' => $account->account,
+                'card_amount' => $cardAmount,
+                'remaining_daily_amount' => $remainingDailyAmount,
+                'remaining_after_use' => $remainingAfterUse,
+                'fixed_amounts' => $fixedAmounts,
+                'matched_amount' => $matchedAmount,
+                'validation_type' => '可以预留固定面额'
+            ]);
+            return true;
+        } else {
+            $this->getLogger()->info("剩余金额不匹配任何固定面额，验证失败", [
+                'account_id' => $account->account,
+                'remaining_after_use' => $remainingAfterUse,
+                'fixed_amounts' => $fixedAmounts
+            ]);
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 验证全面额约束的容量
+     */
+    private function validateAllConstraintCapacity(
+        ItunesTradeAccount $account,
+        string $cardAmount,
+        string $remainingDailyAmount,
+        string $remainingAfterUse
+    ): bool {
+        // 全面额约束下，只要剩余金额大于0就认为可以预留
+        if (bccomp($remainingAfterUse, '0', 2) > 0) {
+            $this->getLogger()->info("账号可以预留剩余额度（全面额），验证通过", [
+                'account_id' => $account->account,
+                'card_amount' => $cardAmount,
+                'remaining_daily_amount' => $remainingDailyAmount,
+                'remaining_after_use' => $remainingAfterUse,
+                'validation_type' => '可以预留剩余额度（全面额）'
+            ]);
+            return true;
+        } else {
+            $this->getLogger()->info("剩余金额不足，验证失败", [
+                'account_id' => $account->account,
+                'remaining_after_use' => $remainingAfterUse
+            ]);
+            return false;
+        }
     }
 
     /**
@@ -1857,5 +2231,78 @@ class GiftCardService
         }
         
         return false;
+    }
+
+    /**
+     * 获取账号容量类型（用于排序）
+     * @deprecated 使用 getAccountCapacityTypeOptimized 以获得更好性能
+     */
+    private function getAccountCapacityType(ItunesTradeAccount $account, ItunesTradePlan $plan, int $multipleBase, array $giftCardInfo): int
+    {
+        $cardAmount = $giftCardInfo['amount'];
+        $currentDay = $account->current_plan_day ?? 1;
+        
+        // 获取当天的计划额度
+        $dailyAmounts = $plan->daily_amounts ?? [];
+        $dailyLimit = $dailyAmounts[$currentDay - 1] ?? 0;
+        
+        // 获取当天已成功兑换的总额
+        $dailySpent = ItunesTradeAccountLog::where('account_id', $account->id)
+            ->where('day', $currentDay)
+            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+            ->sum('amount');
+        
+        // 计算当天剩余需要额度（包含浮动额度）
+        $remainingDailyAmount = bcadd($dailyLimit, $plan->float_amount, 2);
+        $remainingDailyAmount = bcsub($remainingDailyAmount, $dailySpent, 2);
+        
+        // 类型1：能够充满计划额度（不超出）
+        if (bccomp($cardAmount, $remainingDailyAmount, 2) <= 0) {
+            return 1;
+        }
+        
+        // 类型2和3：根据约束类型判断是否可以预留
+        $rate = $plan->rate;
+        $constraintType = $rate ? $rate->amount_constraint : ItunesTradeRate::AMOUNT_CONSTRAINT_ALL;
+        $remainingAfterUse = bcsub($cardAmount, $remainingDailyAmount, 2);
+        
+        switch ($constraintType) {
+            case ItunesTradeRate::AMOUNT_CONSTRAINT_MULTIPLE:
+                if ($multipleBase > 0 && bccomp($remainingAfterUse, $multipleBase, 2) >= 0) {
+                    $modResult = fmod((float)$remainingAfterUse, (float)$multipleBase);
+                    if ($modResult == 0) {
+                        return 2; // 可以预留倍数额度
+                    }
+                }
+                break;
+                
+            case ItunesTradeRate::AMOUNT_CONSTRAINT_FIXED:
+                $fixedAmounts = $rate->fixed_amounts ?? [];
+                if (is_string($fixedAmounts)) {
+                    $decodedAmounts = json_decode($fixedAmounts, true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($decodedAmounts)) {
+                        $fixedAmounts = $decodedAmounts;
+                    }
+                }
+                
+                if (is_array($fixedAmounts) && !empty($fixedAmounts)) {
+                    $remainingFloat = (float)$remainingAfterUse;
+                    foreach ($fixedAmounts as $fixedAmount) {
+                        if (abs($remainingFloat - (float)$fixedAmount) < 0.01) {
+                            return 2; // 可以预留固定面额
+                        }
+                    }
+                }
+                break;
+                
+            case ItunesTradeRate::AMOUNT_CONSTRAINT_ALL:
+                if (bccomp($remainingAfterUse, '0', 2) > 0) {
+                    return 2; // 可以预留剩余额度（全面额）
+                }
+                break;
+        }
+        
+        // 类型3：不太适合
+        return 3;
     }
 }

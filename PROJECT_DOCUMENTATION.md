@@ -476,10 +476,51 @@ curl -X GET /api/test/apple-account/batch-query
 - ✅ WebSocket实时通信
 - ✅ 监控与日志系统
 
+## 核心命令
+
+### iTunes账号处理命令
+```bash
+# ProcessItunesAccounts - iTunes账号状态转换和登录管理
+php artisan itunes:process-accounts                    # 完整处理流程
+php artisan itunes:process-accounts --logout-only      # 仅执行登出操作
+php artisan itunes:process-accounts --login-only       # 仅执行登录操作
+php artisan itunes:process-accounts --fix-task=TASK_ID # 修复任务数据
+
+# RefreshInvalidLoginAccounts - 刷新失效登录账号
+php artisan itunes:refresh-invalid-login               # 刷新所有失效账号
+php artisan itunes:refresh-invalid-login --account=user@icloud.com  # 刷新指定账号
+
+# CleanupPendingRecords - 清理pending记录
+php artisan cleanup:pending-records                    # 清理超时pending记录
+php artisan cleanup:pending-records --preview          # 预览模式
+```
+
+### 队列处理命令
+```bash
+# 启动队列工作进程
+php artisan queue:work --queue=gift-card-redeem
+php artisan queue:work --queue=forecast-crawler
+
+# 监控队列状态
+php artisan queue:monitor gift-card-redeem:5 forecast-crawler:10
+```
+
+### 监控命令
+```bash
+# 监控礼品卡日志
+php artisan monitor:gift-card-logs
+
+# 启动账号监控
+php artisan start:account-monitor
+```
+
 ## 技术支持
 
 ### 文档资源
+- `COMMANDS_SUMMARY.md` - 所有命令汇总说明
+- `PROCESS_ITUNES_ACCOUNTS_README.md` - iTunes账号处理命令详细说明
 - `REFRESH_LOGIN_ACCOUNTS_README.md` - 账号登录刷新说明
+- `PENDING_EXCHANGE_RECORDS_ANALYSIS.md` - 兑换记录修复分析
 - `GIFT_CARD_SERVICE_REFACTOR_GUIDE.md` - 礼品卡服务重构指南
 - `WEBSOCKET_TROUBLESHOOTING.md` - WebSocket故障排除
 - `UBUNTU_DEPLOYMENT.md` - Ubuntu部署指南

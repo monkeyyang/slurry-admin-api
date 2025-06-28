@@ -651,6 +651,45 @@ class ProcessItunesAccounts extends Command
             return;
         }
 
+        // 检查是否为计划的最后一天
+        $currentDay = $account->current_plan_day ?? 1;
+        $isLastDay = $currentDay >= $account->plan->plan_days;
+        
+        if ($isLastDay) {
+            // 最后一天需要检查是否达到总目标
+            $lastSuccessLog = ItunesTradeAccountLog::where('account_id', $account->id)
+                ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+                ->orderBy('exchange_time', 'desc')
+                ->first();
+            
+            $currentTotalAmount = $lastSuccessLog ? $lastSuccessLog->after_amount : 0;
+            
+            if ($currentTotalAmount >= $account->plan->total_amount) {
+                // 已达到目标，标记为完成
+                $this->getLogger()->info("账号 {$account->account} 最后一天已达到目标，标记为完成", [
+                    'current_day' => $currentDay,
+                    'plan_days' => $account->plan->plan_days,
+                    'current_total_amount' => $currentTotalAmount,
+                    'plan_total_amount' => $account->plan->total_amount,
+                    'reason' => 'LOCKING状态最后一天达到目标'
+                ]);
+                $this->markAccountCompleted($account);
+                return;
+            } else {
+                // 未达到目标，继续处理
+                $remainingAmount = $account->plan->total_amount - $currentTotalAmount;
+                $this->getLogger()->info("账号 {$account->account} 最后一天未达到目标，继续处理", [
+                    'current_day' => $currentDay,
+                    'plan_days' => $account->plan->plan_days,
+                    'current_total_amount' => $currentTotalAmount,
+                    'plan_total_amount' => $account->plan->total_amount,
+                    'remaining_amount' => $remainingAmount,
+                    'reason' => 'LOCKING状态最后一天继续执行'
+                ]);
+                // 继续执行后续的WAITING状态逻辑
+            }
+        }
+
         // 更改状态为等待（不更新时间戳）
         $account->timestamps = false;
         $account->update(['status' => ItunesTradeAccount::STATUS_WAITING]);
@@ -951,7 +990,22 @@ class ProcessItunesAccounts extends Command
             return false;
         }
 
-        return $account->amount >= $account->plan->total_amount;
+        // 获取最后一条成功兑换记录的after_amount（兑换后总金额）
+        $lastSuccessLog = ItunesTradeAccountLog::where('account_id', $account->id)
+            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+            ->orderBy('exchange_time', 'desc')
+            ->first();
+
+        $currentTotalAmount = $lastSuccessLog ? $lastSuccessLog->after_amount : 0;
+
+        $this->getLogger()->info("账号 {$account->account} 完成检查", [
+            'current_total_amount' => $currentTotalAmount,
+            'plan_total_amount' => $account->plan->total_amount,
+            'account_amount' => $account->amount,
+            'is_completed' => $currentTotalAmount >= $account->plan->total_amount
+        ]);
+
+        return $currentTotalAmount >= $account->plan->total_amount;
     }
 
     /**
@@ -979,6 +1033,14 @@ class ProcessItunesAccounts extends Command
             $completedDays[(string)$day] = $dailyAmount;
         }
 
+        // 获取最后一条成功兑换记录的after_amount（当前总金额）
+        $lastSuccessLog = ItunesTradeAccountLog::where('account_id', $account->id)
+            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+            ->orderBy('exchange_time', 'desc')
+            ->first();
+        
+        $currentTotalAmount = $lastSuccessLog ? $lastSuccessLog->after_amount : 0;
+
         // 标记为完成状态（不更新时间戳）
         $account->timestamps = false;
         $account->update([
@@ -992,7 +1054,8 @@ class ProcessItunesAccounts extends Command
         $this->getLogger()->info('账号计划完成', [
             'account_id' => $account->account,
             'account' => $account->account,
-            'total_amount' => $account->amount,
+            'current_total_amount' => $currentTotalAmount,
+            'account_amount' => $account->amount,
             'plan_total_amount' => $account->plan->total_amount ?? 0,
             'plan_days' => $account->plan->plan_days,
             'final_completed_days' => $completedDays
@@ -1004,7 +1067,7 @@ class ProcessItunesAccounts extends Command
         // 发送完成通知
         $msg = "[强]兑换目标达成通知\n";
         $msg .= "---------------\n";
-        $msg .= $account->account."[".$account->amount."]";
+        $msg .= $account->account."[".$currentTotalAmount."]";
 
         send_msg_to_wechat('44769140035@chatroom', $msg);
     }
