@@ -212,7 +212,7 @@ class ItunesTradeAccountService
         }, $items)];
 
         $response = Http::post('http://47.76.200.188:8080/api/login_poll/new', $payload)->json();
-
+        Log::channel('websocket_monitor')->info('发送登录请求', $response);
         if ($response['code'] !== 0) {
             throw new Exception("创建登录任务失败: ".$response['msg']);
         }
