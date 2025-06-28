@@ -47,7 +47,7 @@ class ItunesTradeAccountService
 
         // 分页参数
         $pageNum = $params['pageNum'] ?? 1;
-        $pageSize = min($params['pageSize'] ?? 20, 100);
+        $pageSize = min($params['pageSize'] ?? 20, 10000);
 
         // 执行分页查询
         $result = $query->orderBy('updated_at', 'desc')
@@ -120,9 +120,9 @@ class ItunesTradeAccountService
                             'api_url' => $apiUrl,
                             'status' => ItunesTradeAccount::STATUS_PROCESSING,
                             'uid' => Auth::id(),
-                            'login_status' => null, // 重置登录状态
+                            'login_status' => 'invalid', // 重置登录状态
                             'plan_id' => null, // 重置计划绑定
-                            'current_plan_day' => null,
+                            'current_plan_day' => 1,
                         ]);
 
                         $restoredAccounts[] = $existing;
@@ -139,7 +139,7 @@ class ItunesTradeAccountService
                             'password' => $password,
                             'api_url' => $apiUrl,
                             'uid' => Auth::id(),
-                            'login_status' => null, // 重置登录状态，需要重新验证
+                            'login_status' => 'invalid', // 重置登录状态，需要重新验证
                         ]);
 
                         $updatedAccounts[] = $existing;

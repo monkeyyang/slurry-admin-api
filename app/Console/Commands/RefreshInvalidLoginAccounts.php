@@ -72,7 +72,7 @@ class RefreshInvalidLoginAccounts extends Command
             } else {
                 $this->info("找到 {$accounts->count()} 个账号");
             }
-            
+
             // 显示查询条件用于调试
             if (!empty($specifiedAccounts)) {
                 $this->line("查询条件：指定账号 - " . implode(', ', $specifiedAccounts));
@@ -122,7 +122,7 @@ class RefreshInvalidLoginAccounts extends Command
     private function getAccountsNeedingLoginRefresh(array $specifiedAccounts = [])
     {
         $this->info("开始查询符合条件的账号...");
-        
+
         $query = ItunesTradeAccount::query()->with(['plan', 'country']);
 
         // 如果指定了特定账号，则只查询这些账号
@@ -139,7 +139,10 @@ class RefreshInvalidLoginAccounts extends Command
         }
 
         // 登录状态为失效的账号
-        $query->whereIn('login_status', [ItunesTradeAccount::STATUS_LOGIN_INVALID, NULL]);
+        $query->where(function ($q) {
+            $q->where('login_status', ItunesTradeAccount::STATUS_LOGIN_INVALID)
+              ->orWhereNull('login_status');
+        });
         $this->line("登录状态为 invalid 或 NULL 的账号");
 
         // 添加调试信息：显示SQL查询
@@ -361,7 +364,7 @@ class RefreshInvalidLoginAccounts extends Command
             fclose($file);
 
             $this->info("✓ 成功导出 {$processedCount} 个账号到 {$filename}");
-            
+
             // 检查是否有数据丢失
             if ($processedCount < $totalCount) {
                 $this->warn("⚠ 警告：预期导出 {$totalCount} 个账号，实际只导出了 {$processedCount} 个账号");
@@ -413,9 +416,9 @@ class RefreshInvalidLoginAccounts extends Command
         ini_set('memory_limit', '1024M');
         // 设置最大执行时间
         set_time_limit(300); // 5分钟
-        
+
         $this->info("正在生成HTML内容，共 {$accounts->count()} 个账号...");
-        
+
         $html = '<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -675,11 +678,11 @@ class RefreshInvalidLoginAccounts extends Command
         $processedCount = 0;
         $totalCount = $accounts->count();
         $htmlRows = []; // 使用数组收集HTML行，最后一次性拼接
-        
+
         foreach ($accounts as $account) {
             try {
                 $processedCount++;
-                
+
                 // 每处理50个账号显示一次进度（更频繁的进度更新）
                 if ($processedCount % 50 == 0 || $processedCount == $totalCount) {
                     $this->line("处理进度: {$processedCount}/{$totalCount}");
@@ -775,13 +778,13 @@ class RefreshInvalidLoginAccounts extends Command
                 continue;
             }
         }
-        
+
         $this->info("HTML内容生成完成，共处理 {$processedCount} 个账号");
         $this->info("正在拼接HTML内容...");
 
         // 一次性拼接所有HTML行，这比逐个拼接更高效
         $html .= implode("\n", $htmlRows);
-        
+
         $html .= '</tbody>
         </table>
 

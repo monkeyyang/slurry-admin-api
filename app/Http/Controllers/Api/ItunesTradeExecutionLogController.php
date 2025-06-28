@@ -29,8 +29,8 @@ class ItunesTradeExecutionLogController extends Controller
         try {
             $params = $request->validate([
                 'page' => 'nullable|integer|min:1',
-                'pageNum' => 'nullable|integer|min:1', 
-                'pageSize' => 'nullable|integer|min:1|max:100',
+                'pageNum' => 'nullable|integer|min:1',
+                'pageSize' => 'nullable|integer|min:1|max:1000',
                 'keyword' => 'nullable|string|max:255',
                 'accountId' => 'nullable|integer',
                 'account_id' => 'nullable|integer',

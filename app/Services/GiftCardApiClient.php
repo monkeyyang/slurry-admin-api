@@ -73,14 +73,26 @@ class GiftCardApiClient
     /**
      * 删除用户登录
      *
-     * @param array $accounts 需要删除的账号列表
+     * @param array $accounts 需要删除的账号列表，格式：[['username' => 'xxx'], ...]
      * @return array 删除结果
      */
     public function deleteUserLogins(array $accounts): array
     {
         try {
+            // 确保参数格式正确
+            $formattedAccounts = [];
+            foreach ($accounts as $account) {
+                if (is_array($account) && isset($account['username'])) {
+                    $formattedAccounts[] = ['username' => $account['username']];
+                } elseif (is_string($account)) {
+                    $formattedAccounts[] = ['username' => $account];
+                } elseif (is_object($account) && isset($account->account)) {
+                    $formattedAccounts[] = ['username' => $account->account];
+                }
+            }
+
             $response = Http::post("{$this->baseUrl}/del_users", [
-                'list' => $accounts
+                'list' => $formattedAccounts
             ]);
 
             if (!$response->successful()) {

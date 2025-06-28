@@ -168,11 +168,13 @@ class ItunesTradeAccount extends Model
      */
     public function getRateInfo()
     {
-        if (empty($this->plan->rate_id)) {
+        // 首先检查是否有计划信息
+        $planInfo = $this->getPlanInfo();
+        if (!$planInfo || empty($planInfo->rate_id)) {
             return null;
         }
 
-        return ItunesTradeRate::where('id', $this->plan->rate_id)->first();
+        return ItunesTradeRate::where('id', $planInfo->rate_id)->first();
     }
 
     public function getRateAttribute()

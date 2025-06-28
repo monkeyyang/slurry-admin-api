@@ -31,9 +31,14 @@ class Kernel extends ConsoleKernel
 //                 ->name('check_plan_day_progress')
 //                 ->withoutOverlapping();
 
-        // 每5分钟处理iTunes账号状态转换
-        $schedule->command('itunes:process-accounts')->everyFiveMinutes()
+        // 每分钟处理iTunes账号状态转换和登录管理
+        $schedule->command('itunes:process-accounts')->everyMinute()
                  ->name('process_itunes_accounts')
+                 ->withoutOverlapping();
+
+        // 每10分钟清理超时的pending记录（兜底机制）
+        $schedule->command('cleanup:pending-records --timeout=10')->everyTenMinutes()
+                 ->name('cleanup_pending_records')
                  ->withoutOverlapping();
     }
 

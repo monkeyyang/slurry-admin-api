@@ -33,7 +33,7 @@ class ItunesTradeAccountController extends Controller
                 'startTime' => 'nullable|date',
                 'endTime' => 'nullable|date|after_or_equal:startTime',
                 'pageNum' => 'nullable|integer|min:1',
-                'pageSize' => 'nullable|integer|min:1|max:100',
+                'pageSize' => 'nullable|integer|min:1|max:10000',
             ]);
 
             $result = $this->accountService->getAccountsWithPagination($params);

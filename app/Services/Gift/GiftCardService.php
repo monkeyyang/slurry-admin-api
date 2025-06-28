@@ -198,93 +198,109 @@ class GiftCardService
      */
     public function redeemGiftCard(): array
     {
-        // 验证参数
         $this->validateParams();
 
-        // 立即创建日志记录，记录所有兑换尝试（包括失败的）
-        $log = $this->createInitialLog();
-
+        $log = null;
         try {
-            $this->getLogger()->info("开始兑换礼品卡", [
-                'code'              => $this->giftCardCode,
-                'room_id'           => $this->roomId,
-                'wxid'              => $this->wxId,
-                'msgid'             => $this->msgId,
-                'card_type'         => $this->cardType,
-                'card_form'         => $this->cardForm,
-                'batch_id'          => $this->batchId,
-                'additional_params' => $this->additionalParams,
-                'log_id'            => $log->id
-            ]);
+            // 1. 创建初始日志记录（状态为pending）
+            $log = $this->createInitialLog();
 
-            // 验证礼品卡
+            // 2. 验证礼品卡
             $giftCardInfo = $this->validateGiftCard($this->giftCardCode);
 
-            // 更新日志：礼品卡验证成功，记录金额和国家信息
+            // 3. 更新日志的礼品卡信息
             $log->update([
-                'amount' => $giftCardInfo['amount'],
+                'amount'       => $giftCardInfo['amount'],
                 'country_code' => $giftCardInfo['country_code']
             ]);
 
-            // 查找匹配的汇率
+            // 4. 查找匹配的汇率
             $rate = $this->findMatchingRate($giftCardInfo, $this->roomId, $this->cardType, $this->cardForm);
 
-            // 更新日志：找到匹配汇率
-            $log->update(['rate_id' => $rate->id]);
-
-            // 查找可用的计划
+            // 5. 查找可用的计划
             $plan = $this->findAvailablePlan($rate->id);
 
-            // 更新日志：找到可用计划
-            $log->update(['plan_id' => $plan->id]);
-
-            // 查找可用账号
+            // 6. 查找可用的账号
             $account = $this->findAvailableAccount($plan, $this->roomId, $giftCardInfo);
 
-            // 更新日志：找到可用账号
+            // 7. 更新日志的账号和计划信息
             $log->update([
                 'account_id' => $account->id,
-                'day' => $account->current_plan_day ?? 1
+                'plan_id'    => $plan->id,
+                'rate_id'    => $rate->id,
+                'day'        => $account->current_plan_day ?? 1
             ]);
 
-            // 执行兑换
-            $result = $this->executeRedemption($this->giftCardCode, $giftCardInfo, $rate, $plan, $account, $this->batchId, $log);
-
-            $this->getLogger()->info("礼品卡兑换成功", [
-                'code'     => $this->giftCardCode,
-                'result'   => $result,
-                'batch_id' => $this->batchId,
-                'log_id'   => $log->id
-            ]);
+            // 8. 执行兑换
+            $result = $this->executeRedemption(
+                $this->giftCardCode,
+                $giftCardInfo,
+                $rate,
+                $plan,
+                $account,
+                $this->batchId,
+                $log
+            );
 
             return $result;
 
         } catch (Exception $e) {
-            // 更新日志为失败状态，记录错误信息
+            // 确保所有异常都能正确更新pending记录状态
+            $this->handleRedemptionException($e, $log);
+            throw $e;
+        }
+    }
+
+    /**
+     * 处理兑换异常，确保pending记录状态得到正确更新
+     */
+    private function handleRedemptionException(Exception $e, ?ItunesTradeAccountLog $log): void
+    {
+        $errorMessage = $e->getMessage();
+        $errorContext = [
+            'gift_card_code' => $this->giftCardCode,
+            'room_id'        => $this->roomId,
+            'batch_id'       => $this->batchId,
+            'error'          => $errorMessage,
+            'error_type'     => get_class($e),
+            'log_id'         => $log?->id
+        ];
+
+        // 如果没有创建日志记录，说明在初始阶段就失败了
+        if (!$log) {
+            $this->getLogger()->error("兑换在初始阶段失败，未创建日志记录", $errorContext);
+            return;
+        }
+
+        // 检查当前日志状态
+        $log->refresh(); // 刷新数据，确保获取最新状态
+        if ($log->status !== ItunesTradeAccountLog::STATUS_PENDING) {
+            $this->getLogger()->info("日志状态已不是pending，无需更新", array_merge($errorContext, [
+                'current_status' => $log->status
+            ]));
+            return;
+        }
+
+        // 尝试更新pending记录状态为失败
+        try {
             $log->update([
-                'status' => ItunesTradeAccountLog::STATUS_FAILED,
-                'error_message' => $e->getMessage()
+                'status'        => ItunesTradeAccountLog::STATUS_FAILED,
+                'error_message' => $errorMessage
             ]);
 
             // 触发日志更新事件
             event(new TradeLogCreated($log->fresh()));
 
-            // 根据错误类型决定是否记录堆栈跟踪
-            $logData = [
-                'code'     => $this->giftCardCode,
-                'error'    => $e->getMessage(),
-                'batch_id' => $this->batchId,
-                'log_id'   => $log->id
-            ];
+            $this->getLogger()->info("已更新pending记录状态为失败", array_merge($errorContext, [
+                'updated_status' => ItunesTradeAccountLog::STATUS_FAILED
+            ]));
 
-            // 只有系统错误才记录堆栈跟踪，业务逻辑错误不记录
-            if ($this->isSystemError($e)) {
-                $logData['trace'] = $e->getTraceAsString();
-            }
-
-            $this->getLogger()->error("礼品卡兑换失败", $logData);
-
-            throw $e;
+        } catch (Exception $updateException) {
+            // 如果更新日志状态也失败了，记录这个严重错误
+            $this->getLogger()->critical("更新pending记录状态失败", array_merge($errorContext, [
+                'update_error' => $updateException->getMessage(),
+                'update_trace' => $updateException->getTraceAsString()
+            ]));
         }
     }
 
@@ -991,45 +1007,28 @@ class GiftCardService
 
             try {
                 // 调用兑换API
-                $exchangeResult = $this->callExchangeApi($account, $plan, $code);
-                if (!$exchangeResult) {
-                    throw new Exception("兑换API返回数据格式错误");
-                }
+                $exchangeData = $this->callExchangeApi($account, $plan, $code);
 
                 // 解析兑换结果
-                $exchangeData = $this->parseExchangeResult($exchangeResult, $account, $rate, $code);
+                $result = $this->parseExchangeResult($exchangeData, $account, $rate, $code);
 
-                if ($exchangeData['success']) {
+                if ($result['success']) {
+                    // 兑换成功，更新日志状态
+                    $log->update([
+                        'status'           => ItunesTradeAccountLog::STATUS_SUCCESS,
+                        'after_amount'     => $result['data']['total_amount'] ?? 0,
+                        'error_message'    => null // 清除可能的错误信息
+                    ]);
 
-
-                    // 更新账号余额为API返回的总金额
-                    $currentAmount = $exchangeData['data']['amount'] ?? 0;
-                    $totalAmount   = $exchangeData['data']['total_amount'] ?? 0;
-                    if ($currentAmount > 0) {
-                        // 更新completed_days字段
-                        $completedDays                      = json_decode($account->completed_days ?? '{}', true) ?: [];
-                        $completedDays[(string)$currentDay] = $currentAmount;
-                        $updateData = [
-                            'amount'         => $totalAmount,  // 更新为ID总金额
-                            'completed_days' => json_encode($completedDays),
-                        ];
-                        // 兑换成功后更新账号绑定roomId
-                        if(empty($account->room_id)) $updateData['room_id'] = $this->roomId;
-                        $account->update($updateData);
-
-                        // 更新日志兑换后金额
-                        // 更新日志状态为成功，注意：amount字段在创建时已经设置为礼品卡面额
-                        // 这里不需要重复更新amount字段，只更新状态即可
-                        $log->update([
-                            'status'        => ItunesTradeAccountLog::STATUS_SUCCESS,
-                            'after_amount'  => $totalAmount,
-                            'error_message' => null,
-                        ]);
+                    // 更新账号余额
+                    if (isset($result['data']['total_amount'])) {
+                        $totalAmount = $this->parseBalance((string)$result['data']['total_amount']);
+                        $account->update(['amount' => $totalAmount]);
 
                         $this->getLogger()->info("更新账号余额", [
                             'account_id' => $account->account,
                             'new_amount' => $totalAmount,
-                            'fund_added' => $exchangeData['data']['amount'] ?? 0
+                            'fund_added' => $result['data']['amount'] ?? 0
                         ]);
                     }
 
@@ -1039,7 +1038,7 @@ class GiftCardService
                         'account_id'       => $account->account,
                         'status_kept'      => 'LOCKING (待计划任务处理)',
                         'original_amount'  => $giftCardInfo['amount'],
-                        'exchanged_amount' => $exchangeData['data']['amount'] ?? 0
+                        'exchanged_amount' => $result['data']['amount'] ?? 0
                     ]);
 
                     // 触发日志更新事件
@@ -1050,6 +1049,7 @@ class GiftCardService
 
                     // 执行加账处理
                     $buildWechatMsg = $this->processAccountBilling($giftCardInfo['amount'], $rate, $account);
+                    
                     // 返回成功结果
                     return [
                         'success'          => true,
@@ -1060,83 +1060,104 @@ class GiftCardService
                         'rate_id'          => $rate->id,
                         'country_code'     => $giftCardInfo['country_code'],
                         'original_amount'  => $giftCardInfo['amount'],
-                        'exchanged_amount' => $exchangeData['data']['amount'] ?? 0,
+                        'exchanged_amount' => $result['data']['amount'] ?? 0,
                         'rate'             => $rate->rate,
-                        'total_amount'     => $exchangeData['data']['total_amount'] ?? 0,
+                        'total_amount'     => $result['data']['total_amount'] ?? 0,
                         'currency'         => $giftCardInfo['currency'] ?? 'USD',
                         'exchange_time'    => $log->exchange_time ? $log->exchange_time->toISOString() : null,
-                        'message'          => $exchangeData['message'],
-                        'details'          => $exchangeData['data']['details'] ?? null,
+                        'message'          => $result['message'],
+                        'details'          => $result['data']['details'] ?? null,
                         'wechat_msg'       => $buildWechatMsg
                     ];
                 } else {
-                    // 兑换失败，更新日志
+                    // 兑换失败，更新日志状态
+                    $errorMessage = $result['message'] ?? '兑换失败';
                     $log->update([
                         'status'        => ItunesTradeAccountLog::STATUS_FAILED,
-                        'error_message' => $exchangeData['message']
+                        'error_message' => $errorMessage
                     ]);
 
                     $this->getLogger()->error("兑换失败", [
                         'code'       => $code,
                         'account_id' => $account->account,
                         'log_id'     => $log->id,
-                        'error'      => $exchangeData['message']
+                        'error'      => $errorMessage
                     ]);
 
                     // 兑换失败，恢复账号到锁定前的状态
-//                    $account->update([
-//                        'status' => $originalStatus,
-//                    ]);
-//
-//                    $this->getLogger()->info("兑换失败，恢复账号状态", [
-//                        'account_id' => $account->id,
-//                        'status_restored' => "LOCKING -> {$originalStatus}",
-//                        'error' => $exchangeData['message']
-//                    ]);
+                    // 注释掉账号状态恢复，让计划任务统一处理
+                    // $account->update(['status' => $originalStatus]);
 
                     // 触发日志更新事件
                     event(new TradeLogCreated($log->fresh()));
 
-                    throw new Exception("兑换失败: " . $exchangeData['message']);
+                    // 构建失败的微信消息
+                    $failureWechatMsg = "兑换失败\n-------------------------\n" . $code . "\n" . $errorMessage;
+
+                    return [
+                        'success' => false,
+                        'log_id'  => $log->id,
+                        'message' => $errorMessage,
+                        'data'    => $result['data'] ?? [],
+                        'wechat_msg' => $failureWechatMsg
+                    ];
                 }
 
             } catch (Exception $e) {
-                // 处理异常情况
-                $log->update([
-                    'status'        => ItunesTradeAccountLog::STATUS_FAILED,
-                    'error_message' => $e->getMessage()
-                ]);
+                // 捕获所有异常，确保pending记录状态得到更新
+                $errorMessage = $e->getMessage();
+                $errorDetails = [
+                    'code'       => $code,
+                    'account_id' => $account->account,
+                    'log_id'     => $log->id,
+                    'error'      => $errorMessage,
+                    'trace'      => $e->getTraceAsString(),
+                    'error_type' => get_class($e)
+                ];
 
-                $this->getLogger()->error("兑换过程发生异常", [
-                    'code' => $code,
-                    'account_id' => $account->id,
-                    'log_id' => $log->id,
-                    'error' => $e->getMessage(),
-                    'trace' => $this->isSystemError($e) ? $e->getTraceAsString() : null
-                ]);
+                $this->getLogger()->error("兑换过程发生异常", $errorDetails);
 
-                // 检查是否为登录失败错误
-                if ($this->isLoginFailureError($e)) {
-                    // 将账号登录状态设为无效
-                    $account->update([
-                        'login_status' => ItunesTradeAccount::STATUS_LOGIN_INVALID
+                // 更新日志状态为失败，记录详细错误信息
+                try {
+                    $log->update([
+                        'status'        => ItunesTradeAccountLog::STATUS_FAILED,
+                        'error_message' => $errorMessage
                     ]);
 
-                    $this->getLogger()->warning("检测到登录失败错误，已将账号登录状态设为无效", [
-                        'account_id' => $account->id,
-                        'account' => $account->account,
-                        'error' => $e->getMessage(),
-                        'old_login_status' => $account->getOriginal('login_status'),
-                        'new_login_status' => ItunesTradeAccount::STATUS_LOGIN_INVALID
+                    // 触发日志更新事件
+                    event(new TradeLogCreated($log->fresh()));
+
+                    $this->getLogger()->info("已更新pending记录状态为失败", [
+                        'log_id' => $log->id,
+                        'code'   => $code
                     ]);
 
-                    // 创建一个新的异常用于重试（明确标记为登录失败类型）
-                    throw new Exception("登录失败，需要重新验证账号：" . $e->getMessage(), 0, $e);
+                } catch (Exception $updateException) {
+                    // 如果更新日志状态也失败了，记录这个严重错误
+                    $this->getLogger()->critical("更新pending记录状态失败", [
+                        'log_id'         => $log->id,
+                        'code'           => $code,
+                        'original_error' => $errorMessage,
+                        'update_error'   => $updateException->getMessage()
+                    ]);
                 }
 
-                // 触发日志更新事件
-                event(new TradeLogCreated($log->fresh()));
+                // 兑换异常，恢复账号到锁定前的状态
+                // 注释掉账号状态恢复，让计划任务统一处理
+                // try {
+                //     $account->update(['status' => $originalStatus]);
+                //     $this->getLogger()->info("已恢复账号状态", [
+                //         'account_id' => $account->id,
+                //         'status_restored' => "LOCKING -> {$originalStatus}"
+                //     ]);
+                // } catch (Exception $statusException) {
+                //     $this->getLogger()->error("恢复账号状态失败", [
+                //         'account_id' => $account->id,
+                //         'error' => $statusException->getMessage()
+                //     ]);
+                // }
 
+                // 重新抛出异常，让上层处理
                 throw $e;
             }
         });
@@ -1304,10 +1325,13 @@ class GiftCardService
     {
         // 检查基本数据结构
         if (!isset($exchangeResult['data']['items']) || !is_array($exchangeResult['data']['items'])) {
+            $errorMessage = '兑换结果数据结构错误';
+            $failureWechatMsg = "兑换失败\n-------------------------\n" . $code . "\n" . $errorMessage;
             return [
                 'success' => false,
-                'message' => '兑换结果数据结构错误',
-                'data'    => []
+                'message' => $errorMessage,
+                'data'    => [],
+                'wechat_msg' => $failureWechatMsg
             ];
         }
 
@@ -1323,10 +1347,13 @@ class GiftCardService
         }
 
         if (!$matchedItem) {
+            $errorMessage = '未找到匹配的兑换项目';
+            $failureWechatMsg = "兑换失败\n-------------------------\n" . $code . "\n" . $errorMessage;
             return [
                 'success' => false,
-                'message' => '未找到匹配的兑换项目',
-                'data'    => []
+                'message' => $errorMessage,
+                'data'    => [],
+                'wechat_msg' => $failureWechatMsg
             ];
         }
 
@@ -1367,14 +1394,17 @@ class GiftCardService
             ];
         } else {
             // 兑换失败
+            $errorMessage = sprintf(
+                "%s:%s兑换失败\n原因：%s",
+                $account->account,
+                $code,
+                $matchedItem['msg'] ?? '未知原因'
+            );
+            $failureWechatMsg = "兑换失败\n-------------------------\n" . $code . "\n" . ($matchedItem['msg'] ?? '未知原因');
+            
             return [
                 'success' => false,
-                'message' => sprintf(
-                    "%s:%s兑换失败\n原因：%s",
-                    $account->account,
-                    $code,
-                    $matchedItem['msg'] ?? '未知原因'
-                ),
+                'message' => $errorMessage,
                 'data'    => [
                     'account'      => $account->account,
                     'amount'       => 0,
@@ -1388,7 +1418,8 @@ class GiftCardService
                         'country_code' => $this->countryCode,
                         'api_response' => $result
                     ])
-                ]
+                ],
+                'wechat_msg' => $failureWechatMsg
             ];
         }
     }
@@ -1477,7 +1508,13 @@ class GiftCardService
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
             // 检查超时
             if (time() - $startTime > $timeoutSeconds) {
-                throw new Exception('兑换任务执行超时');
+                $this->getLogger()->error('兑换任务执行超时', [
+                    'task_id' => $taskId,
+                    'timeout_seconds' => $timeoutSeconds,
+                    'attempts' => $attempt,
+                    'gift_card_code' => $this->giftCardCode
+                ]);
+                throw new Exception("兑换任务执行超时（{$timeoutSeconds}秒），任务ID: {$taskId}");
             }
 
             try {
@@ -1487,7 +1524,8 @@ class GiftCardService
                     $this->getLogger()->error('查询兑换任务状态失败', [
                         'task_id' => $taskId,
                         'attempt' => $attempt,
-                        'error'   => $redeemResult['msg'] ?? '未知错误'
+                        'error'   => $redeemResult['msg'] ?? '未知错误',
+                        'gift_card_code' => $this->giftCardCode
                     ]);
 
                     // 如果是网络错误，继续重试
@@ -1504,7 +1542,8 @@ class GiftCardService
                     $this->getLogger()->error('兑换任务状态数据结构无效', [
                         'task_id'  => $taskId,
                         'attempt'  => $attempt,
-                        'response' => $redeemResult
+                        'response' => $redeemResult,
+                        'gift_card_code' => $this->giftCardCode
                     ]);
 
                     if ($attempt < $maxAttempts) {
@@ -1522,7 +1561,8 @@ class GiftCardService
                     $this->getLogger()->info('当前兑换任务状态', [
                         'task_id' => $taskId,
                         'attempt' => $attempt,
-                        'status'  => $status
+                        'status'  => $status,
+                        'gift_card_code' => $this->giftCardCode
                     ]);
                 }
 
@@ -1530,7 +1570,8 @@ class GiftCardService
                     $this->getLogger()->info('兑换任务完成', [
                         'task_id'  => $taskId,
                         'attempt'  => $attempt,
-                        'response' => $redeemResult
+                        'response' => $redeemResult,
+                        'gift_card_code' => $this->giftCardCode
                     ]);
 
                     // 验证完成状态的数据结构
@@ -1548,7 +1589,8 @@ class GiftCardService
                     $this->getLogger()->error('兑换任务执行失败', [
                         'task_id' => $taskId,
                         'attempt' => $attempt,
-                        'error'   => $errorMsg
+                        'error'   => $errorMsg,
+                        'gift_card_code' => $this->giftCardCode
                     ]);
                     throw new Exception('兑换任务执行失败: ' . $errorMsg);
 
@@ -1562,7 +1604,8 @@ class GiftCardService
                     $this->getLogger()->warning('未知的任务状态', [
                         'task_id' => $taskId,
                         'attempt' => $attempt,
-                        'status'  => $status
+                        'status'  => $status,
+                        'gift_card_code' => $this->giftCardCode
                     ]);
                     usleep($sleepMicroseconds);
                     continue;
@@ -1572,7 +1615,8 @@ class GiftCardService
                 $this->getLogger()->error('查询任务状态时发生异常', [
                     'task_id' => $taskId,
                     'attempt' => $attempt,
-                    'error'   => $e->getMessage()
+                    'error'   => $e->getMessage(),
+                    'gift_card_code' => $this->giftCardCode
                 ]);
 
                 // 如果不是最后一次尝试，继续重试
@@ -1585,7 +1629,7 @@ class GiftCardService
             }
         }
 
-        throw new Exception('兑换任务执行超时或达到最大重试次数');
+        throw new Exception("兑换任务执行超时或达到最大重试次数，任务ID: {$taskId}，礼品卡: {$this->giftCardCode}");
     }
 
     /**

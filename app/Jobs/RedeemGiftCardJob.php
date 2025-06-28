@@ -12,6 +12,7 @@ use App\Services\Gift\BatchGiftCardService;
 use Illuminate\Support\Facades\Log;
 use Psr\Log\LoggerInterface;
 use Throwable;
+use App\Models\ItunesTradeAccountLog;
 
 class RedeemGiftCardJob implements ShouldQueue
 {
@@ -234,7 +235,15 @@ class RedeemGiftCardJob implements ShouldQueue
             // 发送微信消息 - 使用try-catch避免影响主流程
             if (!in_array($this->roomId, ['brother-card@api', 'no-send-msg@api'])) {
                 try {
-                    send_msg_to_wechat($this->roomId, $result['wechat_msg']);
+                    // 检查是否存在wechat_msg键
+                    if (isset($result['wechat_msg']) && !empty($result['wechat_msg'])) {
+                        send_msg_to_wechat($this->roomId, $result['wechat_msg']);
+                    } else {
+                        $this->getLogger()->warning("兑换结果中缺少微信消息内容", [
+                            'card_code' => $this->giftCardCode,
+                            'result_keys' => array_keys($result)
+                        ]);
+                    }
                 } catch (Throwable $e) {
                     $this->getLogger()->warning("微信消息发送失败，但不影响兑换结果", [
                         'card_code' => $this->giftCardCode,
@@ -556,16 +565,6 @@ class RedeemGiftCardJob implements ShouldQueue
      */
     public function failed(Throwable $exception): void
     {
-        // 如果是业务逻辑错误，已经在handle方法中处理过了，不需要重复处理
-        if ($this->isBusinessError($exception)) {
-            $this->getLogger()->info("业务逻辑错误已在handle方法中处理", [
-                'job_id'    => $this->job?->getJobId(),
-                'card_code' => $this->giftCardCode,
-                'error'     => $exception->getMessage()
-            ]);
-            return;
-        }
-
         $this->getLogger()->error("礼品卡兑换任务最终失败", [
             'job_id'    => $this->job?->getJobId(),
             'card_code' => $this->giftCardCode,
@@ -577,9 +576,19 @@ class RedeemGiftCardJob implements ShouldQueue
             'trace'     => $exception->getTraceAsString()
         ]);
 
+        // 尝试更新pending记录状态
+        $this->updatePendingRecordOnFailure($exception);
+
         // 发送最终失败消息
         if (!in_array($this->roomId, ['brother-card@api', 'no-send-msg@api'])) {
-            send_msg_to_wechat($this->roomId, "兑换失败\n-------------------------\n" . $this->giftCardCode . "\n" . $exception->getMessage());
+            try {
+                send_msg_to_wechat($this->roomId, "兑换失败\n-------------------------\n" . $this->giftCardCode . "\n" . $exception->getMessage());
+            } catch (Throwable $msgError) {
+                $this->getLogger()->warning("失败消息发送失败", [
+                    'card_code' => $this->giftCardCode,
+                    'error' => $msgError->getMessage()
+                ]);
+            }
         }
 
         // 确保更新批量任务进度
@@ -594,6 +603,72 @@ class RedeemGiftCardJob implements ShouldQueue
                     'error'     => $e->getMessage()
                 ]);
             }
+        }
+    }
+
+    /**
+     * 在任务最终失败时更新pending记录状态
+     */
+    private function updatePendingRecordOnFailure(Throwable $exception): void
+    {
+        try {
+            // 查找对应的pending记录
+            $pendingRecord = ItunesTradeAccountLog::where('code', $this->giftCardCode)
+                ->where('status', ItunesTradeAccountLog::STATUS_PENDING)
+                ->orderBy('created_at', 'desc')
+                ->first();
+
+            if (!$pendingRecord) {
+                $this->getLogger()->info("未找到对应的pending记录", [
+                    'card_code' => $this->giftCardCode,
+                    'batch_id' => $this->batchId
+                ]);
+                return;
+            }
+
+            // 检查记录是否与当前任务相关（通过batch_id或时间判断）
+            $isRelatedRecord = false;
+            
+            if (!empty($this->batchId) && $pendingRecord->batch_id === $this->batchId) {
+                $isRelatedRecord = true;
+            } elseif (empty($this->batchId) && empty($pendingRecord->batch_id)) {
+                // 非批量任务，检查时间是否接近（5分钟内）
+                $timeDiff = abs($pendingRecord->created_at->diffInMinutes(now()));
+                if ($timeDiff <= 5) {
+                    $isRelatedRecord = true;
+                }
+            }
+
+            if (!$isRelatedRecord) {
+                $this->getLogger()->info("找到的pending记录与当前任务不相关", [
+                    'card_code' => $this->giftCardCode,
+                    'record_id' => $pendingRecord->id,
+                    'record_batch_id' => $pendingRecord->batch_id,
+                    'current_batch_id' => $this->batchId,
+                    'record_created_at' => $pendingRecord->created_at
+                ]);
+                return;
+            }
+
+            // 更新pending记录状态
+            $errorMessage = "队列任务最终失败: " . $exception->getMessage();
+            $pendingRecord->update([
+                'status' => ItunesTradeAccountLog::STATUS_FAILED,
+                'error_message' => $errorMessage
+            ]);
+
+            $this->getLogger()->info("已更新pending记录状态为失败", [
+                'record_id' => $pendingRecord->id,
+                'card_code' => $this->giftCardCode,
+                'error_message' => $errorMessage
+            ]);
+
+        } catch (Throwable $e) {
+            $this->getLogger()->error("更新pending记录状态失败", [
+                'card_code' => $this->giftCardCode,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
         }
     }
 }
