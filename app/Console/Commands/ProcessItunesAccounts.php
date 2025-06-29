@@ -40,9 +40,9 @@ class ProcessItunesAccounts extends Command
         $logoutOnly = $this->option('logout-only');
         $loginOnly = $this->option('login-only');
         $fixTask = $this->option('fix-task');
-        
+
         $this->getLogger()->info("==================================[{$date}]===============================");
-        
+
         if ($logoutOnly) {
             $this->getLogger()->info("开始执行登出操作...");
         } elseif ($loginOnly) {
@@ -150,7 +150,7 @@ class ProcessItunesAccounts extends Command
         try {
             // 从API获取登录任务状态
             $statusResponse = $this->giftCardApiClient->getLoginTaskStatus($taskId);
-            
+
             if ($statusResponse['code'] !== 0) {
                 $this->getLogger()->error("获取任务状态失败: " . ($statusResponse['msg'] ?? '未知错误'));
                 return;
@@ -371,7 +371,7 @@ class ProcessItunesAccounts extends Command
         try {
             // 创建登录任务
             $response = $this->giftCardApiClient->createLoginTask($loginData);
-            
+
             if ($response['code'] !== 0) {
                 $this->getLogger()->error("创建登录任务失败: " . ($response['msg'] ?? '未知错误'));
                 return;
@@ -405,7 +405,7 @@ class ProcessItunesAccounts extends Command
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
             try {
                 $statusResponse = $this->giftCardApiClient->getLoginTaskStatus($taskId);
-                
+
                 if ($statusResponse['code'] !== 0) {
                     $this->getLogger()->error("查询登录任务状态失败: " . ($statusResponse['msg'] ?? '未知错误'));
                     break;
@@ -420,7 +420,7 @@ class ProcessItunesAccounts extends Command
                 foreach ($items as $item) {
                     if ($item['status'] === 'completed') {
                         $this->processLoginResult($item, $accounts);
-                        
+
                         // 如果登录成功，增加成功计数
                         if (strpos($item['msg'], 'login successful') !== false || strpos($item['msg'], '登录成功') !== false) {
                             $successCount++;
@@ -519,7 +519,7 @@ class ProcessItunesAccounts extends Command
 
         try {
             $response = $this->giftCardApiClient->deleteUserLogins($logoutData);
-            
+
             if ($response['code'] !== 0) {
                 $this->getLogger()->error("批量登出失败: " . ($response['msg'] ?? '未知错误'));
                 return;
@@ -625,18 +625,47 @@ class ProcessItunesAccounts extends Command
     {
         $this->getLogger()->info("正在处理锁定状态账号: {$account->account}");
 
+        // 1. 未绑定计划的账号，不处理，不发送消息
+        if (!$account->plan) {
+            $this->getLogger()->debug("账号 {$account->account} 未绑定计划，跳过处理", [
+                'account_id' => $account->account,
+                'status' => $account->status,
+                'plan_id' => $account->plan_id,
+                'reason' => '未绑定计划，不处理不发送消息'
+            ]);
+            return;
+        }
+
         // Get last success log
         $lastSuccessLog = ItunesTradeAccountLog::where('account_id', $account->id)
             ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
             ->orderBy('exchange_time', 'desc')
             ->first();
 
+        // 2. 如果有执行记录，检查最后一条成功记录的当日天数是否为最后一天
+        if ($lastSuccessLog) {
+            $lastSuccessDay = $lastSuccessLog->day;
+            $planTotalDays = $account->plan->plan_days;
+            
+            // 如果最后一条成功记录的天数不是最后一天，不处理，不发送消息
+            if ($lastSuccessDay < $planTotalDays) {
+                $this->getLogger()->debug("账号 {$account->account} 最后成功记录不是最后一天，跳过处理", [
+                    'account_id' => $account->account,
+                    'last_success_day' => $lastSuccessDay,
+                    'plan_total_days' => $planTotalDays,
+                    'current_plan_day' => $account->current_plan_day,
+                    'reason' => '最后成功记录不是最后一天，不处理不发送消息'
+                ]);
+                return;
+            }
+        }
+
         if (!$lastSuccessLog) {
             $this->getLogger()->info("账号 {$account->account} 没有成功兑换记录，更新状态为PROCESSING");
             $account->timestamps = false;
             $account->update(['status' => 'processing']);
             $account->timestamps = true;
-            
+
             // 状态变更为处理中时请求登录
             $this->requestAccountLogin($account);
             return;
@@ -654,16 +683,16 @@ class ProcessItunesAccounts extends Command
         // 检查是否为计划的最后一天
         $currentDay = $account->current_plan_day ?? 1;
         $isLastDay = $currentDay >= $account->plan->plan_days;
-        
+
         if ($isLastDay) {
             // 最后一天需要检查是否达到总目标
             $lastSuccessLog = ItunesTradeAccountLog::where('account_id', $account->id)
                 ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
                 ->orderBy('exchange_time', 'desc')
                 ->first();
-            
+
             $currentTotalAmount = $lastSuccessLog ? $lastSuccessLog->after_amount : 0;
-            
+
             if ($currentTotalAmount >= $account->plan->total_amount) {
                 // 已达到目标，标记为完成
                 $this->getLogger()->info("账号 {$account->account} 最后一天已达到目标，标记为完成", [
@@ -713,22 +742,14 @@ class ProcessItunesAccounts extends Command
     {
         $this->getLogger()->info("正在处理等待状态账号: {$account->account}");
 
+        // 1. 未绑定计划的账号，不处理，不发送消息
         if (!$account->plan) {
-            $this->getLogger()->warning("账号 {$account->account} 没有关联的计划，清除计划相关字段，设置为等待状态（不更新时间戳）", [
+            $this->getLogger()->debug("账号 {$account->account} 未绑定计划，跳过处理", [
                 'account_id' => $account->account,
-                'old_status' => $account->status,
+                'status' => $account->status,
                 'plan_id' => $account->plan_id,
-                'current_plan_day' => $account->current_plan_day
+                'reason' => '未绑定计划，不处理不发送消息'
             ]);
-
-            // 清除计划相关字段，设置为等待状态（不更新时间戳）
-            $account->timestamps = false;
-            $account->update([
-                'plan_id' => null,
-                'current_plan_day' => null,
-                'status' => ItunesTradeAccount::STATUS_WAITING
-            ]);
-            $account->timestamps = true;
             return;
         }
 
@@ -748,6 +769,24 @@ class ProcessItunesAccounts extends Command
             ->orderBy('exchange_time', 'desc')
             ->first();
 
+        // 2. 如果有执行记录，检查最后一条成功记录的当日天数是否为最后一天
+        if ($lastSuccessLog) {
+            $lastSuccessDay = $lastSuccessLog->day;
+            $planTotalDays = $account->plan->plan_days;
+            
+            // 如果最后一条成功记录的天数不是最后一天，不处理，不发送消息
+            if ($lastSuccessDay < $planTotalDays) {
+                $this->getLogger()->debug("账号 {$account->account} 最后成功记录不是最后一天，跳过处理", [
+                    'account_id' => $account->account,
+                    'last_success_day' => $lastSuccessDay,
+                    'plan_total_days' => $planTotalDays,
+                    'current_plan_day' => $account->current_plan_day,
+                    'reason' => '最后成功记录不是最后一天，不处理不发送消息'
+                ]);
+                return;
+            }
+        }
+
         if (!$lastSuccessLog) {
             // 没有成功兑换记录的账号，设置为第1天处理状态
             $account->timestamps = false;
@@ -756,10 +795,10 @@ class ProcessItunesAccounts extends Command
                 'current_plan_day' => 1
             ]);
             $account->timestamps = true;
-            
+
             // 状态变更为处理中时请求登录
             $this->requestAccountLogin($account);
-            
+
             $this->getLogger()->info("账号 {$account->account} 没有成功兑换记录，设置为第1天处理状态", [
                 'account_id' => $account->account,
                 'old_status' => 'WAITING',
@@ -792,34 +831,85 @@ class ProcessItunesAccounts extends Command
         $this->getLogger()->info("账号 {$account->account} 天数检查: 间隔 {$intervalHours} 小时，要求天数间隔 {$requiredDayInterval} 小时");
 
         // 检查是否超过最大等待时间（防止无限等待）
-        $maxWaitingHours = max($requiredDayInterval * 2, 48); // 最大等待时间是天数间隔的2倍，但不少于48小时
-        if ($intervalHours >= $maxWaitingHours) {
-            $this->getLogger()->warning("账号 {$account->account} 等待时间过长，强制标记为完成", [
+        // 只有在以下情况才强制完成：
+        // 1. 已经是最后一天，或者
+        // 2. 已经达到总目标金额，或者
+        // 3. 等待时间超过7天（极端情况）
+        $maxWaitingHours = 24 * 7; // 最大等待7天
+        $isLastDay = $currentDay >= $account->plan->plan_days;
+        $hasReachedTarget = $this->isAccountCompleted($account);
+        
+        if ($intervalHours >= $maxWaitingHours && ($isLastDay || $hasReachedTarget)) {
+            $this->getLogger()->warning("账号 {$account->account} 等待时间过长且满足完成条件，强制标记为完成", [
                 'interval_hours' => $intervalHours,
                 'max_waiting_hours' => $maxWaitingHours,
-                'current_day' => $account->current_plan_day ?? 1,
+                'current_day' => $currentDay,
                 'plan_days' => $account->plan->plan_days,
-                'reason' => '超过最大等待时间限制'
+                'is_last_day' => $isLastDay,
+                'has_reached_target' => $hasReachedTarget,
+                'reason' => '超过最大等待时间限制且满足完成条件'
             ]);
             $this->markAccountCompleted($account);
+            return;
+        } elseif ($intervalHours >= $maxWaitingHours) {
+            // 等待时间过长但不满足完成条件，重置为处理状态继续执行
+            $this->getLogger()->warning("账号 {$account->account} 等待时间过长但未满足完成条件，重置为处理状态", [
+                'interval_hours' => $intervalHours,
+                'max_waiting_hours' => $maxWaitingHours,
+                'current_day' => $currentDay,
+                'plan_days' => $account->plan->plan_days,
+                'reason' => '等待时间过长，重置继续执行'
+            ]);
+            
+            // 重置为处理状态，继续执行计划
+            $account->timestamps = false;
+            $account->update(['status' => ItunesTradeAccount::STATUS_PROCESSING]);
+            $account->timestamps = true;
+            
+            // 请求登录
+            $this->requestAccountLogin($account);
             return;
         }
 
         // 检查是否为计划的最后一天
-        $currentDay = $account->current_plan_day ?? 1;
         $isLastDay = $currentDay >= $account->plan->plan_days;
 
         if ($intervalHours >= $requiredDayInterval) {
             if ($isLastDay) {
-                // 最后一天且天数间隔已超过，标记为完成
-                $this->getLogger()->info("账号 {$account->account} 为计划最后一天且天数间隔已超过，标记为完成", [
-                    'current_day' => $currentDay,
-                    'plan_days' => $account->plan->plan_days,
-                    'interval_hours' => $intervalHours,
-                    'required_day_interval' => $requiredDayInterval,
-                    'reason' => '最后一天超时完成'
-                ]);
-                $this->markAccountCompleted($account);
+                // 最后一天且天数间隔已超过，检查是否达到总目标
+                if ($this->isAccountCompleted($account)) {
+                    $this->getLogger()->info("账号 {$account->account} 最后一天已达到总目标，标记为完成", [
+                        'current_day' => $currentDay,
+                        'plan_days' => $account->plan->plan_days,
+                        'interval_hours' => $intervalHours,
+                        'required_day_interval' => $requiredDayInterval,
+                        'reason' => '最后一天达到总目标'
+                    ]);
+                    $this->markAccountCompleted($account);
+                } else {
+                    // 最后一天但未达到总目标，检查是否超过48小时
+                    if ($intervalHours >= 48) {
+                        // 超过48小时，解绑计划让账号可以重新绑定其他计划
+                        $this->getLogger()->info("账号 {$account->account} 最后一天超过48小时未达到总目标，解绑计划", [
+                            'current_day' => $currentDay,
+                            'plan_days' => $account->plan->plan_days,
+                            'interval_hours' => $intervalHours,
+                            'current_total_amount' => $this->getCurrentTotalAmount($account),
+                            'plan_total_amount' => $account->plan->total_amount,
+                            'reason' => '最后一天超时解绑，可重新绑定其他计划'
+                        ]);
+                        $this->unbindAccountPlan($account);
+                    } else {
+                        // 未超过48小时，继续处理
+                        $this->getLogger()->info("账号 {$account->account} 最后一天未达到总目标，继续处理", [
+                            'current_day' => $currentDay,
+                            'plan_days' => $account->plan->plan_days,
+                            'interval_hours' => $intervalHours,
+                            'reason' => '最后一天继续执行直到达到目标或超过48小时'
+                        ]);
+                        $this->checkDailyPlanCompletion($account);
+                    }
+                }
             } else {
                 // 不是最后一天，进入下一天
                 $this->advanceToNextDay($account);
@@ -850,7 +940,7 @@ class ProcessItunesAccounts extends Command
             ]];
 
             $response = $this->giftCardApiClient->createLoginTask($loginData);
-            
+
             if ($response['code'] === 0) {
                 $this->getLogger()->info("成功为账号 {$account->account} 创建登录任务", [
                     'task_id' => $response['data']['task_id'] ?? null
@@ -881,12 +971,12 @@ class ProcessItunesAccounts extends Command
             ]];
 
             $response = $this->giftCardApiClient->deleteUserLogins($logoutData);
-            
+
             if ($response['code'] === 0) {
                 $account->update([
                     'login_status' => ItunesTradeAccount::STATUS_LOGIN_INVALID
                 ]);
-                
+
                 $this->getLogger()->info("账号 {$account->account} 登出成功" . ($reason ? " ({$reason})" : ''));
             } else {
                 $this->getLogger()->error("账号 {$account->account} 登出失败: " . ($response['msg'] ?? '未知错误'));
@@ -1038,7 +1128,7 @@ class ProcessItunesAccounts extends Command
             ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
             ->orderBy('exchange_time', 'desc')
             ->first();
-        
+
         $currentTotalAmount = $lastSuccessLog ? $lastSuccessLog->after_amount : 0;
 
         // 标记为完成状态（不更新时间戳）
@@ -1069,7 +1159,7 @@ class ProcessItunesAccounts extends Command
         $msg .= "---------------\n";
         $msg .= $account->account."[".$currentTotalAmount."]";
 
-        send_msg_to_wechat('44769140035@chatroom', $msg);
+       send_msg_to_wechat('44769140035@chatroom', $msg);
     }
 
     /**
@@ -1131,6 +1221,66 @@ class ProcessItunesAccounts extends Command
             'status_changed' => 'WAITING -> PROCESSING',
             'reason' => '天数间隔已超过，进入下一天',
             'completed_days' => $completedDays
+        ]);
+    }
+
+    /**
+     * 获取账号当前总金额
+     */
+    private function getCurrentTotalAmount(ItunesTradeAccount $account): float
+    {
+        $lastSuccessLog = ItunesTradeAccountLog::where('account_id', $account->id)
+            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+            ->orderBy('exchange_time', 'desc')
+            ->first();
+
+        return $lastSuccessLog ? $lastSuccessLog->after_amount : 0;
+    }
+
+    /**
+     * 解绑账号计划
+     */
+    private function unbindAccountPlan(ItunesTradeAccount $account): void
+    {
+        // 获取现有的completed_days数据
+        $completedDays = json_decode($account->completed_days ?? '{}', true) ?: [];
+
+        // 根据计划天数更新每天的数据
+        if ($account->plan) {
+            for ($day = 1; $day <= $account->plan->plan_days; $day++) {
+                // 计算该天的累计兑换金额
+                $dailyAmount = ItunesTradeAccountLog::where('account_id', $account->id)
+                    ->where('day', $day)
+                    ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+                    ->sum('amount');
+
+                // 更新该天的数据
+                $completedDays[(string)$day] = $dailyAmount;
+            }
+        }
+
+        // 解绑计划并设置为等待状态（不更新时间戳）
+        $account->timestamps = false;
+        $account->update([
+            'plan_id' => null,
+            'current_plan_day' => null,
+            'status' => ItunesTradeAccount::STATUS_WAITING,
+            'completed_days' => json_encode($completedDays),
+        ]);
+        $account->timestamps = true;
+
+        // 请求登出账号
+        $this->requestAccountLogout($account, 'plan unbound');
+
+        $this->getLogger()->info('账号计划解绑完成', [
+            'account_id' => $account->account,
+            'account' => $account->account,
+            'old_status' => 'WAITING',
+            'new_status' => 'WAITING',
+            'plan_id_cleared' => true,
+            'current_plan_day_cleared' => true,
+            'reason' => '最后一天超时未完成，解绑计划以便重新绑定',
+            'final_completed_days' => $completedDays
         ]);
     }
 

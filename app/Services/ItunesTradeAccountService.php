@@ -322,7 +322,7 @@ class ItunesTradeAccountService
 
         $account->update([
             'plan_id' => $planId,
-            'current_plan_day' => 0,
+            'current_plan_day' => 1, // 绑定新计划时重置为第1天
             'status' => ItunesTradeAccount::STATUS_WAITING,
         ]);
 
