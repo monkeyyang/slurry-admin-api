@@ -31,10 +31,39 @@ class Kernel extends ConsoleKernel
 //                 ->name('check_plan_day_progress')
 //                 ->withoutOverlapping();
 
-        // 每分钟处理iTunes账号状态转换和登录管理
-         $schedule->command('itunes:process-accounts')->everyMinute()
-                  ->name('process_itunes_accounts')
-                  ->withoutOverlapping();
+        // iTunes账号管理 - 重构后的模块化命令
+
+        // 每5分钟 - 状态维护（最频繁，处理异常状态）
+//        $schedule->command('itunes:maintain-status')
+//                ->everyFiveMinutes()
+//                ->name('maintain_account_status')
+//                ->withoutOverlapping()
+//                ->runInBackground()
+//                ->appendOutputTo(storage_path('logs/itunes_maintain_status.log'));
+//
+//        // 每30分钟 - 日期推进（外部调度控制间隔）
+//        $schedule->command('itunes:advance-days')
+//                ->everyThirtyMinutes()
+//                ->name('advance_account_days')
+//                ->withoutOverlapping()
+//                ->runInBackground()
+//                ->appendOutputTo(storage_path('logs/itunes_advance_days.log'));
+//
+//        // 每30分钟 - 零余额账号维护（较少频繁）
+//        $schedule->command('itunes:maintain-zero-accounts')
+//                ->everyThirtyMinutes()
+//                ->name('maintain_zero_amount_accounts')
+//                ->withoutOverlapping()
+//                ->runInBackground()
+//                ->appendOutputTo(storage_path('logs/itunes_zero_accounts.log'));
+//
+//        // 每15分钟 - 账号池维护（预计算可用账号池，提升兑换性能）
+//        $schedule->command('pools:maintain')
+//                ->everyFifteenMinutes()
+//                ->name('maintain_account_pools')
+//                ->withoutOverlapping()
+//                ->runInBackground()
+//                ->appendOutputTo(storage_path('logs/account_pools.log'));
 
         // 每10分钟清理超时的pending记录（兜底机制）
         $schedule->command('cleanup:pending-records --timeout=10')->everyTenMinutes()

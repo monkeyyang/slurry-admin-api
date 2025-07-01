@@ -267,20 +267,38 @@ class ProcessItunesAccounts extends Command
      */
     private function maintainZeroAmountAccounts(): void
     {
-        // 统计当前零余额且登录有效的账号数量
-        $currentZeroAmountCount = ItunesTradeAccount::where('amount', 0)
+        // 获取当前零余额且登录有效的账号
+        $currentZeroAmountAccounts = ItunesTradeAccount::where('amount', 0)
+            ->where('status', ItunesTradeAccount::STATUS_PROCESSING)
             ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_ACTIVE)
-            ->count();
+            ->orderBy('created_at', 'desc')
+            ->get();
 
-        $this->getLogger()->info("当前零余额且登录有效的账号数量: {$currentZeroAmountCount}");
+        $currentZeroAmountCount = $currentZeroAmountAccounts->count();
+
+        $this->getLogger()->info("📊 维护零余额账号 - 当前状态统计", [
+            'current_count' => $currentZeroAmountCount,
+            'target_count' => self::TARGET_ZERO_AMOUNT_ACCOUNTS,
+            'account_list' => $currentZeroAmountAccounts->pluck('account')->toArray()
+        ]);
+
+        // 显示当前零余额账号明细
+        if ($currentZeroAmountCount > 0) {
+            $this->getLogger()->info("✅ 当前零余额登录账号明细 ({$currentZeroAmountCount}个)");
+            foreach ($currentZeroAmountAccounts as $index => $account) {
+                $this->getLogger()->info("   " . ($index + 1) . ". {$account->account} (ID: {$account->id}, 国家: {$account->country_code})");
+            }
+        } else {
+            $this->getLogger()->warning("⚠️  当前没有零余额且登录有效的账号");
+        }
 
         if ($currentZeroAmountCount >= self::TARGET_ZERO_AMOUNT_ACCOUNTS) {
-            $this->getLogger()->info("目标零余额账号数量已达到 (" . self::TARGET_ZERO_AMOUNT_ACCOUNTS . ")，无需补充");
+            $this->getLogger()->info("🎯 目标零余额账号数量已达到 (" . self::TARGET_ZERO_AMOUNT_ACCOUNTS . ")，无需补充");
             return;
         }
 
         $needCount = self::TARGET_ZERO_AMOUNT_ACCOUNTS - $currentZeroAmountCount;
-        $this->getLogger()->info("需要补充 {$needCount} 个零余额登录账号");
+        $this->getLogger()->info("💰 需要补充 {$needCount} 个零余额登录账号");
 
         // 查找状态为processing且登录状态为invalid的零余额账号进行登录
         $candidateAccounts = ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_PROCESSING)
@@ -291,13 +309,32 @@ class ProcessItunesAccounts extends Command
             ->get();
 
         if ($candidateAccounts->isEmpty()) {
-            $this->getLogger()->warning("未找到可用于登录的候选账号");
+            $this->getLogger()->warning("❌ 未找到可用于登录的候选账号", [
+                'search_criteria' => [
+                    'status' => 'PROCESSING',
+                    'login_status' => 'INVALID',
+                    'amount' => 0
+                ],
+                'suggestion' => '可能需要导入更多零余额账号或检查现有账号状态'
+            ]);
             return;
         }
 
-        $this->getLogger()->info("找到 {$candidateAccounts->count()} 个候选登录账号");
+        $this->getLogger()->info("🔍 找到候选登录账号", [
+            'candidate_count' => $candidateAccounts->count(),
+            'target_login_count' => $needCount,
+            'account_list' => $candidateAccounts->pluck('account')->toArray()
+        ]);
+
+        // 显示候选账号明细
+        $this->getLogger()->info("📋 候选登录账号明细 ({$candidateAccounts->count()}个)：");
+        foreach ($candidateAccounts as $index => $account) {
+            $createdDays = now()->diffInDays($account->created_at);
+            $this->getLogger()->info("   " . ($index + 1) . ". {$account->account} (ID: {$account->id}, 国家: {$account->country_code}, 导入: {$createdDays}天前)");
+        }
 
         // 批量登录账号
+        $this->getLogger()->info("🚀 开始为候选账号创建登录任务...");
         $this->batchLoginAccounts($candidateAccounts, $needCount);
     }
 
@@ -306,13 +343,19 @@ class ProcessItunesAccounts extends Command
      */
     private function processAccountStatusTransitions(): void
     {
-        // 获取需要处理的账号（仅LOCKING和WAITING状态）
+        // 获取需要处理的账号（LOCKING和WAITING状态）
         $accounts = ItunesTradeAccount::whereIn('status', [
             ItunesTradeAccount::STATUS_LOCKING,
             ItunesTradeAccount::STATUS_WAITING
         ])
         ->with('plan')
         ->get();
+
+        // 获取需要检查的PROCESSING状态账号（可能已完成当日计划需要转为WAITING）
+        $processingAccounts = ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_PROCESSING)
+            ->whereNotNull('plan_id')
+            ->with('plan')
+            ->get();
 
         // 查找有plan_id但计划已删除的账号（仅WAITING和PROCESSING状态）
         $orphanedAccounts = ItunesTradeAccount::whereNotNull('plan_id')
@@ -331,11 +374,20 @@ class ProcessItunesAccounts extends Command
         // 合并所有需要处理的账号
         $allAccounts = $accounts->merge($orphanedAccounts)->unique('id');
 
-        $this->getLogger()->info("找到 {$accounts->count()} 个LOCKING/WAITING账号，{$orphanedAccounts->count()} 个孤立账号，{$completedAccounts->count()} 个需要登出的已完成账号");
+        $this->getLogger()->info("找到 {$accounts->count()} 个LOCKING/WAITING账号，{$processingAccounts->count()} 个PROCESSING账号，{$orphanedAccounts->count()} 个孤立账号，{$completedAccounts->count()} 个需要登出的已完成账号");
 
         // 处理已完成账号的登出
         if ($completedAccounts->isNotEmpty()) {
             $this->batchLogoutAccounts($completedAccounts, '已完成状态登出');
+        }
+
+        // 处理PROCESSING状态的账号
+        foreach ($processingAccounts as $account) {
+            try {
+                $this->processProcessingAccount($account);
+            } catch (\Exception $e) {
+                $this->getLogger()->error("处理PROCESSING账号 {$account->account} 失败: " . $e->getMessage());
+            }
         }
 
         // 处理状态转换
@@ -354,8 +406,15 @@ class ProcessItunesAccounts extends Command
     private function batchLoginAccounts($accounts, int $targetCount): void
     {
         if ($accounts->isEmpty()) {
+            $this->getLogger()->info("📋 批量登录：无账号需要处理");
             return;
         }
+
+        $this->getLogger()->info("🚀 开始批量登录账号", [
+            'total_accounts' => $accounts->count(),
+            'target_success_count' => $targetCount,
+            'account_list' => $accounts->pluck('account')->toArray()
+        ]);
 
         // 准备登录数据
         $loginData = [];
@@ -366,30 +425,72 @@ class ProcessItunesAccounts extends Command
                 'password' => $account->getDecryptedPassword(),
                 'VerifyUrl' => $account->api_url ?? ''
             ];
+
+            $this->getLogger()->debug("📝 准备账号登录数据", [
+                'account_id' => $account->id,
+                'account' => $account->account,
+                'has_password' => !empty($account->getDecryptedPassword()),
+                'has_api_url' => !empty($account->api_url),
+                'current_status' => $account->status,
+                'current_login_status' => $account->login_status,
+                'amount' => $account->amount
+            ]);
         }
 
         try {
+            $this->getLogger()->info("📡 发起批量登录API请求", [
+                'accounts_count' => count($loginData),
+                'target_count' => $targetCount
+            ]);
+
             // 创建登录任务
             $response = $this->giftCardApiClient->createLoginTask($loginData);
 
+            // 详细记录API响应
+            $this->getLogger()->info("📊 批量登录API响应", [
+                'response_code' => $response['code'] ?? 'unknown',
+                'response_msg' => $response['msg'] ?? 'no message',
+                'response_data' => $response['data'] ?? null,
+                'accounts_count' => count($loginData),
+                'full_response' => $response
+            ]);
+
             if ($response['code'] !== 0) {
-                $this->getLogger()->error("创建登录任务失败: " . ($response['msg'] ?? '未知错误'));
+                $this->getLogger()->error("❌ 创建批量登录任务失败", [
+                    'error_code' => $response['code'] ?? 'unknown',
+                    'error_msg' => $response['msg'] ?? '未知错误',
+                    'accounts_affected' => $accounts->pluck('account')->toArray()
+                ]);
                 return;
             }
 
             $taskId = $response['data']['task_id'] ?? null;
             if (!$taskId) {
-                $this->getLogger()->error("创建登录任务失败: 未收到任务ID");
+                $this->getLogger()->error("❌ 创建批量登录任务失败: 未收到任务ID", [
+                    'response' => $response,
+                    'accounts_affected' => $accounts->pluck('account')->toArray()
+                ]);
                 return;
             }
 
-            $this->getLogger()->info("登录任务创建成功，任务ID: {$taskId}，等待完成...");
+            $this->getLogger()->info("✅ 批量登录任务创建成功", [
+                'task_id' => $taskId,
+                'accounts_count' => $accounts->count(),
+                'target_success_count' => $targetCount,
+                'next_step' => '等待任务完成并处理结果'
+            ]);
 
             // 等待登录任务完成并更新账号状态
             $this->waitForLoginTaskCompletion($taskId, $accounts, $targetCount);
 
         } catch (\Exception $e) {
-            $this->getLogger()->error("批量登录账号失败: " . $e->getMessage());
+            $this->getLogger()->error("❌ 批量登录账号异常: " . $e->getMessage(), [
+                'accounts_count' => $accounts->count(),
+                'target_count' => $targetCount,
+                'accounts_affected' => $accounts->pluck('account')->toArray(),
+                'exception_type' => get_class($e),
+                'trace' => $e->getTraceAsString()
+            ]);
         }
     }
 
@@ -401,49 +502,133 @@ class ProcessItunesAccounts extends Command
         $maxAttempts = 60; // 最多等待5分钟（60 * 5秒）
         $sleepSeconds = 5;
         $successCount = 0;
+        $failedCount = 0;
+        $pendingCount = 0;
+
+        $this->getLogger()->info("🕐 开始等待批量登录任务完成", [
+            'task_id' => $taskId,
+            'target_accounts' => $accounts->count(),
+            'target_success_count' => $targetCount,
+            'max_wait_time' => $maxAttempts * $sleepSeconds . 's',
+            'check_interval' => $sleepSeconds . 's'
+        ]);
 
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
             try {
                 $statusResponse = $this->giftCardApiClient->getLoginTaskStatus($taskId);
 
+                $this->getLogger()->info("📊 批量登录任务状态查询（第{$attempt}次）", [
+                    'task_id' => $taskId,
+                    'attempt' => $attempt,
+                    'max_attempts' => $maxAttempts,
+                    'response_code' => $statusResponse['code'] ?? 'unknown',
+                    'response_msg' => $statusResponse['msg'] ?? 'no message',
+                    'elapsed_time' => ($attempt - 1) * $sleepSeconds . 's'
+                ]);
+
                 if ($statusResponse['code'] !== 0) {
-                    $this->getLogger()->error("查询登录任务状态失败: " . ($statusResponse['msg'] ?? '未知错误'));
+                    $this->getLogger()->error("❌ 查询批量登录任务状态失败", [
+                        'task_id' => $taskId,
+                        'error_msg' => $statusResponse['msg'] ?? '未知错误',
+                        'attempt' => $attempt
+                    ]);
                     break;
                 }
 
                 $taskStatus = $statusResponse['data']['status'] ?? '';
                 $items = $statusResponse['data']['items'] ?? [];
 
-                $this->getLogger()->info("登录任务状态检查（第{$attempt}次）: {$taskStatus}");
+                $this->getLogger()->info("📈 批量登录任务进度", [
+                    'task_id' => $taskId,
+                    'task_status' => $taskStatus,
+                    'total_items' => count($items),
+                    'current_success_count' => $successCount,
+                    'current_failed_count' => $failedCount,
+                    'target_count' => $targetCount,
+                    'attempt' => $attempt
+                ]);
+
+                // 重置计数器，重新统计
+                $tempSuccessCount = 0;
+                $tempFailedCount = 0;
+                $tempPendingCount = 0;
 
                 // 处理每个账号的登录结果
                 foreach ($items as $item) {
-                    if ($item['status'] === 'completed') {
+                    $itemStatus = $item['status'] ?? '';
+                    $itemMsg = $item['msg'] ?? '';
+                    
+                    if ($itemStatus === 'completed') {
                         $this->processLoginResult($item, $accounts);
 
-                        // 如果登录成功，增加成功计数
-                        if (strpos($item['msg'], 'login successful') !== false || strpos($item['msg'], '登录成功') !== false) {
-                            $successCount++;
+                        // 统计成功和失败
+                        if (strpos($itemMsg, 'login successful') !== false || strpos($itemMsg, '登录成功') !== false) {
+                            $tempSuccessCount++;
+                        } else {
+                            $tempFailedCount++;
                         }
+                    } else {
+                        $tempPendingCount++;
                     }
                 }
 
+                $successCount = $tempSuccessCount;
+                $failedCount = $tempFailedCount;
+                $pendingCount = $tempPendingCount;
+
+                $this->getLogger()->info("📊 批量登录统计更新", [
+                    'task_id' => $taskId,
+                    'success_count' => $successCount,
+                    'failed_count' => $failedCount,
+                    'pending_count' => $pendingCount,
+                    'total_processed' => $successCount + $failedCount,
+                    'target_reached' => $successCount >= $targetCount
+                ]);
+
                 // 如果任务完成或达到目标数量则退出循环
                 if ($taskStatus === 'completed' || $successCount >= $targetCount) {
-                    $this->getLogger()->info("登录任务完成，成功登录 {$successCount} 个账号");
+                    $this->getLogger()->info("✅ 批量登录任务完成", [
+                        'task_id' => $taskId,
+                        'final_status' => $taskStatus,
+                        'success_count' => $successCount,
+                        'failed_count' => $failedCount,
+                        'total_attempts' => $attempt,
+                        'total_wait_time' => ($attempt - 1) * $sleepSeconds . 's',
+                        'target_achieved' => $successCount >= $targetCount
+                    ]);
                     break;
                 }
 
-                sleep($sleepSeconds);
+                if ($attempt < $maxAttempts) {
+                    $this->getLogger()->debug("⏳ 等待下次检查", [
+                        'task_id' => $taskId,
+                        'next_check_in' => $sleepSeconds . 's',
+                        'remaining_attempts' => $maxAttempts - $attempt
+                    ]);
+                    sleep($sleepSeconds);
+                }
 
             } catch (\Exception $e) {
-                $this->getLogger()->error("登录任务状态查询异常: " . $e->getMessage());
+                $this->getLogger()->error("❌ 批量登录任务状态查询异常: " . $e->getMessage(), [
+                    'task_id' => $taskId,
+                    'attempt' => $attempt,
+                    'exception_type' => get_class($e),
+                    'trace' => $e->getTraceAsString()
+                ]);
                 break;
             }
         }
 
         if ($attempt > $maxAttempts) {
-            $this->getLogger()->warning("登录任务等待超时，成功登录 {$successCount} 个账号");
+            $this->getLogger()->warning("⏰ 批量登录任务等待超时", [
+                'task_id' => $taskId,
+                'final_success_count' => $successCount,
+                'final_failed_count' => $failedCount,
+                'final_pending_count' => $pendingCount,
+                'target_count' => $targetCount,
+                'total_wait_time' => $maxAttempts * $sleepSeconds . 's',
+                'note' => '部分任务可能仍在进行中'
+            ]);
         }
     }
 
@@ -464,6 +649,16 @@ class ProcessItunesAccounts extends Command
             return;
         }
 
+        $this->getLogger()->info("📋 处理批量登录结果", [
+            'account' => $username,
+            'account_id' => $account->id,
+            'task_status' => $status,
+            'task_msg' => $msg,
+            'has_result_data' => !empty($result),
+            'current_login_status' => $account->login_status,
+            'current_amount' => $account->amount
+        ]);
+
         if ($status === 'completed') {
             if (strpos($msg, 'login successful') !== false || strpos($msg, '登录成功') !== false) {
                 // 登录成功，更新登录状态
@@ -471,22 +666,54 @@ class ProcessItunesAccounts extends Command
                     'login_status' => ItunesTradeAccount::STATUS_LOGIN_ACTIVE
                 ]);
 
-                $this->getLogger()->info("账号 {$username} 登录成功");
+                $this->getLogger()->info("✅ 批量登录成功", [
+                    'account' => $username,
+                    'success_msg' => $msg,
+                    'old_login_status' => 'invalid',
+                    'new_login_status' => 'active'
+                ]);
 
                 // 从结果中解析余额信息
                 if ($result) {
                     try {
                         $resultData = json_decode($result, true);
+                        
+                        $this->getLogger()->info("💰 批量登录获取余额数据", [
+                            'account' => $username,
+                            'result_data' => $resultData,
+                            'raw_result' => $result
+                        ]);
+
                         if (isset($resultData['balance'])) {
                             $balanceString = $resultData['balance'];
                             // 移除货币符号并转换为浮点数
                             // 处理格式如 "$700.00", "¥1000.50", "€500.25" 等
                             $balance = (float)preg_replace('/[^\d.-]/', '', $balanceString);
+                            $oldBalance = $account->amount; // 在更新前保存旧余额
                             $account->update(['amount' => $balance]);
-                            $this->getLogger()->info("更新账号 {$username} 余额: {$balance} (原始: {$balanceString})");
+                            
+                            $this->getLogger()->info("💵 批量登录更新余额", [
+                                'account' => $username,
+                                'old_balance' => $oldBalance,
+                                'new_balance' => $balance,
+                                'balance_string' => $balanceString,
+                                'parsing_method' => 'regex currency removal'
+                            ]);
+                        }
+
+                        if (isset($resultData['countryCode'])) {
+                            $this->getLogger()->info("🌍 批量登录获取国家信息", [
+                                'account' => $username,
+                                'country_code' => $resultData['countryCode'],
+                                'country_name' => $resultData['country'] ?? 'unknown'
+                            ]);
                         }
                     } catch (\Exception $e) {
-                        $this->getLogger()->warning("解析账号 {$username} 登录结果失败: " . $e->getMessage());
+                        $this->getLogger()->warning("❌ 批量登录解析结果失败: " . $e->getMessage(), [
+                            'account' => $username,
+                            'raw_result' => $result,
+                            'exception_type' => get_class($e)
+                        ]);
                     }
                 }
             } else {
@@ -495,12 +722,24 @@ class ProcessItunesAccounts extends Command
                     'login_status' => ItunesTradeAccount::STATUS_LOGIN_INVALID
                 ]);
 
-                $this->getLogger()->warning("账号 {$username} 登录失败: {$msg}");
+                $this->getLogger()->warning("❌ 批量登录失败", [
+                    'account' => $username,
+                    'failure_msg' => $msg,
+                    'result' => $result,
+                    'login_status_updated' => 'invalid'
+                ]);
             }
+        } else {
+            $this->getLogger()->info("⏳ 批量登录任务未完成", [
+                'account' => $username,
+                'current_status' => $status,
+                'current_msg' => $msg,
+                'note' => '任务仍在进行中'
+            ]);
         }
     }
 
-    /**
+    /**d
      * 批量登出账号
      */
     private function batchLogoutAccounts($accounts, string $reason = ''): void
@@ -545,6 +784,97 @@ class ProcessItunesAccounts extends Command
     private function getLogger(): LoggerInterface
     {
         return Log::channel('kernel_process_accounts');
+    }
+
+    /**
+     * 处理PROCESSING状态的账号
+     */
+    private function processProcessingAccount(ItunesTradeAccount $account): void
+    {
+        $this->getLogger()->info("正在处理PROCESSING状态账号: {$account->account}");
+
+        // 1. 检查是否有待处理任务，如有则跳过
+        if ($this->hasPendingTasks($account)) {
+            $this->getLogger()->info("账号 {$account->account} 有待处理任务，跳过");
+            return;
+        }
+
+        // 2. 检查是否已达到总目标金额
+        if ($this->isAccountCompleted($account)) {
+            $this->getLogger()->info("账号 {$account->account} 已达到总目标金额，标记为完成");
+            $this->markAccountCompleted($account);
+            return;
+        }
+
+        // 3. 检查是否完成当日计划
+        if ($account->plan) {
+            $currentDay = $account->current_plan_day ?? 1;
+            $isDailyPlanCompleted = $this->isDailyPlanCompleted($account, $currentDay);
+
+            if ($isDailyPlanCompleted) {
+                // 已完成当日计划，状态改为waiting，请求登出
+                $this->getLogger()->info("账号 {$account->account} 完成当日计划，状态改为WAITING并请求登出", [
+                    'account_id' => $account->id,
+                    'account_email' => $account->account,
+                    'current_day' => $currentDay,
+                    'reason' => '完成当日计划额度'
+                ]);
+
+                $account->timestamps = false;
+                $account->update(['status' => ItunesTradeAccount::STATUS_WAITING]);
+                $account->timestamps = true;
+
+                // 请求登出
+                $this->requestAccountLogout($account, 'daily plan completed');
+            } else {
+                // 当日计划未完成，只检查严重的天数不一致情况（前一天未完成但被错误推进）
+                if ($currentDay > 1 && $account->login_status === ItunesTradeAccount::STATUS_LOGIN_INVALID) {
+                    // 检查当前天是否有任何兑换记录
+                    $currentDayExchangeCount = ItunesTradeAccountLog::where('account_id', $account->id)
+                        ->where('day', $currentDay)
+                        ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+                        ->count();
+                    
+                    // 只有在当前天没有兑换记录的情况下才检查前一天是否未完成
+                    if ($currentDayExchangeCount == 0) {
+                        $previousDay = $currentDay - 1;
+                        $isPreviousDayCompleted = $this->isDailyPlanCompleted($account, $previousDay);
+                        
+                        // 只处理严重情况：前一天未完成但被错误推进到当前天
+                        if (!$isPreviousDayCompleted) {
+                            $this->getLogger()->warning("账号 {$account->account} 严重的天数不一致：前一天未完成但被错误推进到当前天，回退到前一天", [
+                                'account_id' => $account->id,
+                                'account_email' => $account->account,
+                                'previous_day' => $previousDay,
+                                'current_day' => $currentDay,
+                                'current_day_exchange_count' => $currentDayExchangeCount,
+                                'login_status' => $account->login_status,
+                                'reason' => '前一天未完成但被错误推进，需要回退修复'
+                            ]);
+
+                            $account->timestamps = false;
+                            $account->update([
+                                'current_plan_day' => $previousDay,
+                                'status' => ItunesTradeAccount::STATUS_PROCESSING
+                            ]);
+                            $account->timestamps = true;
+
+                            // 请求登录继续完成前一天的计划
+                            $this->requestAccountLogin($account);
+                            return;
+                        }
+                        // 如果前一天已完成，说明正常进入当前天，不做任何状态改变
+                    }
+                }
+                
+                $this->getLogger()->debug("账号 {$account->account} 当日计划未完成，保持PROCESSING状态", [
+                    'current_day' => $currentDay,
+                    'login_status' => $account->login_status
+                ]);
+            }
+        } else {
+            $this->getLogger()->debug("账号 {$account->account} 未绑定计划，保持PROCESSING状态");
+        }
     }
 
     /**
@@ -625,114 +955,70 @@ class ProcessItunesAccounts extends Command
     {
         $this->getLogger()->info("正在处理锁定状态账号: {$account->account}");
 
-        // 1. 未绑定计划的账号，不处理，不发送消息
+        // 1. 未绑定计划的账号，更新账户状态为processing，不发送消息
         if (!$account->plan) {
-            $this->getLogger()->debug("账号 {$account->account} 未绑定计划，跳过处理", [
-                'account_id' => $account->account,
+            $this->getLogger()->debug("账号 {$account->account} 未绑定计划，更新状态为PROCESSING", [
+                'account_id' => $account->id,
+                'account_email' => $account->account,
                 'status' => $account->status,
                 'plan_id' => $account->plan_id,
-                'reason' => '未绑定计划，不处理不发送消息'
+                'reason' => '未绑定计划，更新为processing状态'
             ]);
-            return;
-        }
 
-        // Get last success log
-        $lastSuccessLog = ItunesTradeAccountLog::where('account_id', $account->id)
-            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
-            ->orderBy('exchange_time', 'desc')
-            ->first();
-
-        // 2. 如果有执行记录，检查最后一条成功记录的当日天数是否为最后一天
-        if ($lastSuccessLog) {
-            $lastSuccessDay = $lastSuccessLog->day;
-            $planTotalDays = $account->plan->plan_days;
-            
-            // 如果最后一条成功记录的天数不是最后一天，不处理，不发送消息
-            if ($lastSuccessDay < $planTotalDays) {
-                $this->getLogger()->debug("账号 {$account->account} 最后成功记录不是最后一天，跳过处理", [
-                    'account_id' => $account->account,
-                    'last_success_day' => $lastSuccessDay,
-                    'plan_total_days' => $planTotalDays,
-                    'current_plan_day' => $account->current_plan_day,
-                    'reason' => '最后成功记录不是最后一天，不处理不发送消息'
-                ]);
-                return;
-            }
-        }
-
-        if (!$lastSuccessLog) {
-            $this->getLogger()->info("账号 {$account->account} 没有成功兑换记录，更新状态为PROCESSING");
             $account->timestamps = false;
-            $account->update(['status' => 'processing']);
+            $account->update(['status' => ItunesTradeAccount::STATUS_PROCESSING]);
             $account->timestamps = true;
 
-            // 状态变更为处理中时请求登录
-            $this->requestAccountLogin($account);
             return;
         }
 
-        // 更新completed_days字段
-        $this->updateCompletedDays($account, $lastSuccessLog);
-
-        // 检查账号总金额是否达到计划金额
+        // 2. 检查账号总金额是否达到计划金额，达到计划总额要发送通知，且请求登出
         if ($this->isAccountCompleted($account)) {
+            $this->getLogger()->info("账号 {$account->account} 达到计划总额，发送通知并请求登出", [
+                'account_id' => $account->id,
+                'account_email' => $account->account,
+                'current_amount' => $account->amount,
+                'plan_total_amount' => $account->plan->total_amount,
+                'reason' => '达到计划总额度'
+            ]);
+
             $this->markAccountCompleted($account);
             return;
         }
 
-        // 检查是否为计划的最后一天
+        // 3. 判断是否完成当日计划（当日兑换总额 > 计划当日额度要求）
         $currentDay = $account->current_plan_day ?? 1;
-        $isLastDay = $currentDay >= $account->plan->plan_days;
+        $isDailyPlanCompleted = $this->isDailyPlanCompleted($account, $currentDay);
 
-        if ($isLastDay) {
-            // 最后一天需要检查是否达到总目标
-            $lastSuccessLog = ItunesTradeAccountLog::where('account_id', $account->id)
-                ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
-                ->orderBy('exchange_time', 'desc')
-                ->first();
+        if ($isDailyPlanCompleted) {
+            // 已完成当日计划，状态改为waiting，请求登出
+            $this->getLogger()->info("账号 {$account->account} 完成当日计划，状态改为WAITING并请求登出", [
+                'account_id' => $account->id,
+                'account_email' => $account->account,
+                'current_day' => $currentDay,
+                'reason' => '完成当日计划额度'
+            ]);
 
-            $currentTotalAmount = $lastSuccessLog ? $lastSuccessLog->after_amount : 0;
+            $account->timestamps = false;
+            $account->update(['status' => ItunesTradeAccount::STATUS_WAITING]);
+            $account->timestamps = true;
 
-            if ($currentTotalAmount >= $account->plan->total_amount) {
-                // 已达到目标，标记为完成
-                $this->getLogger()->info("账号 {$account->account} 最后一天已达到目标，标记为完成", [
-                    'current_day' => $currentDay,
-                    'plan_days' => $account->plan->plan_days,
-                    'current_total_amount' => $currentTotalAmount,
-                    'plan_total_amount' => $account->plan->total_amount,
-                    'reason' => 'LOCKING状态最后一天达到目标'
-                ]);
-                $this->markAccountCompleted($account);
-                return;
-            } else {
-                // 未达到目标，继续处理
-                $remainingAmount = $account->plan->total_amount - $currentTotalAmount;
-                $this->getLogger()->info("账号 {$account->account} 最后一天未达到目标，继续处理", [
-                    'current_day' => $currentDay,
-                    'plan_days' => $account->plan->plan_days,
-                    'current_total_amount' => $currentTotalAmount,
-                    'plan_total_amount' => $account->plan->total_amount,
-                    'remaining_amount' => $remainingAmount,
-                    'reason' => 'LOCKING状态最后一天继续执行'
-                ]);
-                // 继续执行后续的WAITING状态逻辑
-            }
+            // 请求登出
+            $this->requestAccountLogout($account, 'daily plan completed');
+
+        } else {
+            // 未完成当日计划，状态改为processing
+            $this->getLogger()->info("账号 {$account->account} 未完成当日计划，状态改为PROCESSING", [
+                'account_id' => $account->id,
+                'account_email' => $account->account,
+                'current_day' => $currentDay,
+                'reason' => '未完成当日计划额度'
+            ]);
+
+            $account->timestamps = false;
+            $account->update(['status' => ItunesTradeAccount::STATUS_PROCESSING]);
+            $account->timestamps = true;
         }
-
-        // 更改状态为等待（不更新时间戳）
-        $account->timestamps = false;
-        $account->update(['status' => ItunesTradeAccount::STATUS_WAITING]);
-        $account->timestamps = true;
-
-        // 锁定状态变更为等待状态时请求登出
-        $this->requestAccountLogout($account, 'locking to waiting');
-
-        $this->getLogger()->info('锁定账号状态变更为等待状态', [
-            'account_id' => $account->account,
-            'account' => $account->account,
-            'status_changed' => 'LOCKING -> WAITING',
-            'reason' => '处理完成，变更为等待状态'
-        ]);
     }
 
     /**
@@ -743,21 +1029,32 @@ class ProcessItunesAccounts extends Command
         $this->getLogger()->info("正在处理等待状态账号: {$account->account}");
 
         // 1. 未绑定计划的账号，不处理，不发送消息
-        if (!$account->plan) {
-            $this->getLogger()->debug("账号 {$account->account} 未绑定计划，跳过处理", [
-                'account_id' => $account->account,
-                'status' => $account->status,
-                'plan_id' => $account->plan_id,
-                'reason' => '未绑定计划，不处理不发送消息'
-            ]);
-            return;
-        }
+//        if (!$account->plan) {
+//            $this->getLogger()->debug("账号 {$account->account} 未绑定计划，跳过处理", [
+//                'account_id' => $account->account,
+//                'status' => $account->status,
+//                'plan_id' => $account->plan_id,
+//                'reason' => '未绑定计划，不处理不发送消息'
+//            ]);
+//            return;
+//        }
+//
+//        // 验证计划配置完整性
+//        if (!$this->validatePlanConfiguration($account->plan)) {
+//            $this->getLogger()->error("账号 {$account->account} 计划配置不完整，标记为完成", [
+//                'plan_id' => $account->plan->id,
+//                'reason' => '计划配置验证失败'
+//            ]);
+//            $this->markAccountCompleted($account);
+//            return;
+//        }
 
-        // 验证计划配置完整性
-        if (!$this->validatePlanConfiguration($account->plan)) {
-            $this->getLogger()->error("账号 {$account->account} 计划配置不完整，标记为完成", [
-                'plan_id' => $account->plan->id,
-                'reason' => '计划配置验证失败'
+
+
+        // 查看最后一条日志是否已达到计划总额
+        if($this->isAccountCompleted($account)) {
+            $this->getLogger()->warning("账号 {$account->account} 满足完成条件，标记为完成", [
+                'reason' => '完成计划额度'
             ]);
             $this->markAccountCompleted($account);
             return;
@@ -769,42 +1066,59 @@ class ProcessItunesAccounts extends Command
             ->orderBy('exchange_time', 'desc')
             ->first();
 
-        // 2. 如果有执行记录，检查最后一条成功记录的当日天数是否为最后一天
+        // 2. 检查当前天是否已完成计划
         if ($lastSuccessLog) {
-            $lastSuccessDay = $lastSuccessLog->day;
-            $planTotalDays = $account->plan->plan_days;
-            
-            // 如果最后一条成功记录的天数不是最后一天，不处理，不发送消息
-            if ($lastSuccessDay < $planTotalDays) {
-                $this->getLogger()->debug("账号 {$account->account} 最后成功记录不是最后一天，跳过处理", [
-                    'account_id' => $account->account,
-                    'last_success_day' => $lastSuccessDay,
-                    'plan_total_days' => $planTotalDays,
-                    'current_plan_day' => $account->current_plan_day,
-                    'reason' => '最后成功记录不是最后一天，不处理不发送消息'
+            $currentDay = $account->current_plan_day ?? 1;
+            $isDailyPlanCompleted = $this->isDailyPlanCompleted($account, $currentDay);
+
+            // 如果当前天的计划未完成，改为processing状态继续执行
+            if (!$isDailyPlanCompleted) {
+                $this->getLogger()->info("账号 {$account->account} 当前天计划未完成，改为PROCESSING状态", [
+                    'account_id' => $account->id,
+                    'account_email' => $account->account,
+                    'current_day' => $currentDay,
+                    'reason' => '当前天计划未完成，需要继续执行'
                 ]);
+
+                $account->timestamps = false;
+                $account->update(['status' => ItunesTradeAccount::STATUS_PROCESSING]);
+                $account->timestamps = true;
+
+                // 状态变更为处理中时请求登录
+                $this->requestAccountLogin($account);
                 return;
             }
+
+            // 如果当前天计划已完成，继续检查是否可以进入下一天
+            $this->getLogger()->info("账号 {$account->account} 当前天计划已完成，检查是否可以进入下一天", [
+                'current_day' => $currentDay,
+                'plan_days' => $account->plan->plan_days
+            ]);
         }
 
         if (!$lastSuccessLog) {
-            // 没有成功兑换记录的账号，设置为第1天处理状态
+            // 没有成功兑换记录的账号，只有在current_plan_day为空或0时才设置为第1天
+            $currentDay = $account->current_plan_day;
+            if (empty($currentDay) || $currentDay <= 0) {
+                $currentDay = 1;
+            }
+            
             $account->timestamps = false;
             $account->update([
                 'status' => ItunesTradeAccount::STATUS_PROCESSING,
-                'current_plan_day' => 1
+                'current_plan_day' => $currentDay
             ]);
             $account->timestamps = true;
 
             // 状态变更为处理中时请求登录
             $this->requestAccountLogin($account);
 
-            $this->getLogger()->info("账号 {$account->account} 没有成功兑换记录，设置为第1天处理状态", [
+            $this->getLogger()->info("账号 {$account->account} 没有成功兑换记录，设置为处理状态", [
                 'account_id' => $account->account,
                 'old_status' => 'WAITING',
                 'new_status' => 'PROCESSING',
-                'current_plan_day' => 1,
-                'reason' => '没有兑换记录，开始计划执行'
+                'current_plan_day' => $currentDay,
+                'reason' => '没有兑换记录，保持当前天数继续执行'
             ]);
             return;
         }
@@ -835,88 +1149,31 @@ class ProcessItunesAccounts extends Command
         // 1. 已经是最后一天，或者
         // 2. 已经达到总目标金额，或者
         // 3. 等待时间超过7天（极端情况）
-        $maxWaitingHours = 24 * 7; // 最大等待7天
-        $isLastDay = $currentDay >= $account->plan->plan_days;
-        $hasReachedTarget = $this->isAccountCompleted($account);
-        
-        if ($intervalHours >= $maxWaitingHours && ($isLastDay || $hasReachedTarget)) {
-            $this->getLogger()->warning("账号 {$account->account} 等待时间过长且满足完成条件，强制标记为完成", [
-                'interval_hours' => $intervalHours,
-                'max_waiting_hours' => $maxWaitingHours,
-                'current_day' => $currentDay,
-                'plan_days' => $account->plan->plan_days,
-                'is_last_day' => $isLastDay,
-                'has_reached_target' => $hasReachedTarget,
-                'reason' => '超过最大等待时间限制且满足完成条件'
-            ]);
-            $this->markAccountCompleted($account);
-            return;
-        } elseif ($intervalHours >= $maxWaitingHours) {
-            // 等待时间过长但不满足完成条件，重置为处理状态继续执行
-            $this->getLogger()->warning("账号 {$account->account} 等待时间过长但未满足完成条件，重置为处理状态", [
-                'interval_hours' => $intervalHours,
-                'max_waiting_hours' => $maxWaitingHours,
-                'current_day' => $currentDay,
-                'plan_days' => $account->plan->plan_days,
-                'reason' => '等待时间过长，重置继续执行'
-            ]);
-            
-            // 重置为处理状态，继续执行计划
-            $account->timestamps = false;
-            $account->update(['status' => ItunesTradeAccount::STATUS_PROCESSING]);
-            $account->timestamps = true;
-            
-            // 请求登录
-            $this->requestAccountLogin($account);
-            return;
-        }
+        $maxWaitingHours  = 24 * 7; // 最大等待7天
+        $currentDay       = $account->current_plan_day;
 
         // 检查是否为计划的最后一天
         $isLastDay = $currentDay >= $account->plan->plan_days;
 
         if ($intervalHours >= $requiredDayInterval) {
             if ($isLastDay) {
-                // 最后一天且天数间隔已超过，检查是否达到总目标
-                if ($this->isAccountCompleted($account)) {
-                    $this->getLogger()->info("账号 {$account->account} 最后一天已达到总目标，标记为完成", [
+                // 最后一天但未达到总目标，检查是否超过48小时
+                if ($intervalHours >= 48) {
+                    // 超过48小时，解绑计划让账号可以重新绑定其他计划
+                    $this->getLogger()->info("账号 {$account->account} 最后一天超过48小时未达到总目标，解绑计划", [
                         'current_day' => $currentDay,
                         'plan_days' => $account->plan->plan_days,
                         'interval_hours' => $intervalHours,
-                        'required_day_interval' => $requiredDayInterval,
-                        'reason' => '最后一天达到总目标'
+                        'current_total_amount' => $this->getCurrentTotalAmount($account),
+                        'plan_total_amount' => $account->plan->total_amount,
+                        'reason' => '最后一天超时解绑，可重新绑定其他计划'
                     ]);
-                    $this->markAccountCompleted($account);
-                } else {
-                    // 最后一天但未达到总目标，检查是否超过48小时
-                    if ($intervalHours >= 48) {
-                        // 超过48小时，解绑计划让账号可以重新绑定其他计划
-                        $this->getLogger()->info("账号 {$account->account} 最后一天超过48小时未达到总目标，解绑计划", [
-                            'current_day' => $currentDay,
-                            'plan_days' => $account->plan->plan_days,
-                            'interval_hours' => $intervalHours,
-                            'current_total_amount' => $this->getCurrentTotalAmount($account),
-                            'plan_total_amount' => $account->plan->total_amount,
-                            'reason' => '最后一天超时解绑，可重新绑定其他计划'
-                        ]);
-                        $this->unbindAccountPlan($account);
-                    } else {
-                        // 未超过48小时，继续处理
-                        $this->getLogger()->info("账号 {$account->account} 最后一天未达到总目标，继续处理", [
-                            'current_day' => $currentDay,
-                            'plan_days' => $account->plan->plan_days,
-                            'interval_hours' => $intervalHours,
-                            'reason' => '最后一天继续执行直到达到目标或超过48小时'
-                        ]);
-                        $this->checkDailyPlanCompletion($account);
-                    }
+                    $this->unbindAccountPlan($account);
                 }
             } else {
                 // 不是最后一天，进入下一天
                 $this->advanceToNextDay($account);
             }
-        } else {
-            // 天数间隔未超过，检查每日计划完成情况
-            $this->checkDailyPlanCompletion($account);
         }
     }
 
@@ -932,6 +1189,15 @@ class ProcessItunesAccounts extends Command
         }
 
         try {
+            $this->getLogger()->info("🚀 开始为账号 {$account->account} 创建登录任务", [
+                'account_id' => $account->id,
+                'account_email' => $account->account,
+                'current_login_status' => $account->login_status,
+                'amount' => $account->amount,
+                'status' => $account->status,
+                'current_plan_day' => $account->current_plan_day
+            ]);
+
             $loginData = [[
                 'id' => $account->id,
                 'username' => $account->account,
@@ -941,16 +1207,176 @@ class ProcessItunesAccounts extends Command
 
             $response = $this->giftCardApiClient->createLoginTask($loginData);
 
+            // 详细记录API响应
+            $this->getLogger()->info("📡 登录任务API响应详情", [
+                'account' => $account->account,
+                'response_code' => $response['code'] ?? 'unknown',
+                'response_msg' => $response['msg'] ?? 'no message',
+                'response_data' => $response['data'] ?? null,
+                'full_response' => $response
+            ]);
+
             if ($response['code'] === 0) {
-                $this->getLogger()->info("成功为账号 {$account->account} 创建登录任务", [
-                    'task_id' => $response['data']['task_id'] ?? null
+                $taskId = $response['data']['task_id'] ?? null;
+                $this->getLogger()->info("✅ 账号 {$account->account} 登录任务创建成功", [
+                    'task_id' => $taskId,
+                    'account_id' => $account->id,
+                    'next_step' => '任务已提交，等待后续处理结果'
                 ]);
+
+                // 尝试快速检查任务状态（不阻塞太久）
+                if ($taskId) {
+                    $this->quickCheckLoginTaskStatus($taskId, $account);
+                }
             } else {
-                $this->getLogger()->error("为账号 {$account->account} 创建登录任务失败: " . ($response['msg'] ?? '未知错误'));
+                $this->getLogger()->error("❌ 账号 {$account->account} 登录任务创建失败", [
+                    'error_code' => $response['code'] ?? 'unknown',
+                    'error_msg' => $response['msg'] ?? '未知错误',
+                    'account_id' => $account->id
+                ]);
             }
 
         } catch (\Exception $e) {
-            $this->getLogger()->error("账号 {$account->account} 请求登录失败: " . $e->getMessage());
+            $this->getLogger()->error("❌ 账号 {$account->account} 请求登录异常: " . $e->getMessage(), [
+                'account_id' => $account->id,
+                'exception_type' => get_class($e),
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
+
+    /**
+     * 快速检查登录任务状态
+     */
+    private function quickCheckLoginTaskStatus(string $taskId, ItunesTradeAccount $account): void
+    {
+        try {
+            $this->getLogger()->info("🔍 快速检查登录任务状态", [
+                'task_id' => $taskId,
+                'account' => $account->account
+            ]);
+
+            // 只做一次快速检查，不阻塞太久
+            $statusResponse = $this->giftCardApiClient->getLoginTaskStatus($taskId);
+
+            $this->getLogger()->info("📊 登录任务快速状态查询结果", [
+                'task_id' => $taskId,
+                'account' => $account->account,
+                'response_code' => $statusResponse['code'] ?? 'unknown',
+                'response_msg' => $statusResponse['msg'] ?? 'no message',
+                'task_status' => $statusResponse['data']['status'] ?? 'unknown',
+                'items_count' => count($statusResponse['data']['items'] ?? [])
+            ]);
+
+            if ($statusResponse['code'] === 0) {
+                $taskStatus = $statusResponse['data']['status'] ?? '';
+                $items = $statusResponse['data']['items'] ?? [];
+
+                if ($taskStatus === 'completed' && !empty($items)) {
+                    $this->getLogger()->info("🎯 登录任务已完成，处理结果", [
+                        'task_id' => $taskId,
+                        'account' => $account->account,
+                        'items_count' => count($items)
+                    ]);
+
+                    // 查找对应账号的结果
+                    foreach ($items as $item) {
+                        if ($item['data_id'] === $account->account) {
+                            $this->logDetailedLoginResult($item, $account);
+                            break;
+                        }
+                    }
+                } else {
+                    $this->getLogger()->info("⏳ 登录任务进行中", [
+                        'task_id' => $taskId,
+                        'account' => $account->account,
+                        'task_status' => $taskStatus,
+                        'note' => '任务将在后续轮次中继续检查'
+                    ]);
+                }
+            }
+        } catch (\Exception $e) {
+            $this->getLogger()->warning("⚠️ 快速检查登录任务状态异常: " . $e->getMessage(), [
+                'task_id' => $taskId,
+                'account' => $account->account,
+                'note' => '将在后续处理中继续尝试'
+            ]);
+        }
+    }
+
+    /**
+     * 记录详细的登录结果
+     */
+    private function logDetailedLoginResult(array $item, ItunesTradeAccount $account): void
+    {
+        $status = $item['status'] ?? '';
+        $msg = $item['msg'] ?? '';
+        $result = $item['result'] ?? '';
+
+        $this->getLogger()->info("📋 登录任务详细结果", [
+            'account' => $account->account,
+            'task_status' => $status,
+            'task_msg' => $msg,
+            'has_result_data' => !empty($result),
+            'full_item' => $item
+        ]);
+
+        if ($status === 'completed') {
+            if (strpos($msg, 'successful') !== false || strpos($msg, '成功') !== false) {
+                $this->getLogger()->info("✅ 账号登录成功回调", [
+                    'account' => $account->account,
+                    'success_msg' => $msg
+                ]);
+
+                // 解析结果数据
+                if ($result) {
+                    try {
+                        $resultData = json_decode($result, true);
+                        $this->getLogger()->info("💰 登录成功获取余额信息", [
+                            'account' => $account->account,
+                            'result_data' => $resultData,
+                            'raw_result' => $result
+                        ]);
+
+                        if (isset($resultData['balance'])) {
+                            $balanceString = $resultData['balance'];
+                            $balance = (float)preg_replace('/[^\d.-]/', '', $balanceString);
+                            
+                            $this->getLogger()->info("💵 账号余额解析", [
+                                'account' => $account->account,
+                                'balance_string' => $balanceString,
+                                'parsed_balance' => $balance,
+                                'current_amount' => $account->amount
+                            ]);
+                        }
+
+                        if (isset($resultData['countryCode'])) {
+                            $this->getLogger()->info("🌍 账号国家信息", [
+                                'account' => $account->account,
+                                'country_code' => $resultData['countryCode'],
+                                'country_name' => $resultData['country'] ?? 'unknown'
+                            ]);
+                        }
+                    } catch (\Exception $e) {
+                        $this->getLogger()->warning("❌ 解析登录结果数据失败: " . $e->getMessage(), [
+                            'account' => $account->account,
+                            'raw_result' => $result
+                        ]);
+                    }
+                }
+            } else {
+                $this->getLogger()->warning("❌ 账号登录失败回调", [
+                    'account' => $account->account,
+                    'failure_msg' => $msg,
+                    'result' => $result
+                ]);
+            }
+        } else {
+            $this->getLogger()->info("⏳ 登录任务状态更新", [
+                'account' => $account->account,
+                'current_status' => $status,
+                'current_msg' => $msg
+            ]);
         }
     }
 
@@ -1156,10 +1582,11 @@ class ProcessItunesAccounts extends Command
 
         // 发送完成通知
         $msg = "[强]兑换目标达成通知\n";
-        $msg .= "---------------\n";
-        $msg .= $account->account."[".$currentTotalAmount."]";
+        $msg .= "---------------------------------\n";
+        $msg .= $account->account."\n";
+        $msg .= "国家：{$account->country_code}   账户余款：{$currentTotalAmount}";
 
-       send_msg_to_wechat('44769140035@chatroom', $msg);
+       send_msg_to_wechat('45958721463@chatroom', $msg);
     }
 
     /**
@@ -1176,15 +1603,15 @@ class ProcessItunesAccounts extends Command
         }
 
         // 检查是否已达到或超过计划的最后一天
-        if ($currentDay >= $account->plan->plan_days) {
-            $this->getLogger()->warning("账号 {$account->account} 已达到或超过计划最后一天，标记为完成", [
-                'current_day' => $currentDay,
-                'plan_days' => $account->plan->plan_days,
-                'reason' => '已达到计划天数限制'
-            ]);
-            $this->markAccountCompleted($account);
-            return;
-        }
+//        if ($currentDay >= $account->plan->plan_days) {
+//            $this->getLogger()->warning("账号 {$account->account} 已达到或超过计划最后一天，标记为完成", [
+//                'current_day' => $currentDay,
+//                'plan_days' => $account->plan->plan_days,
+//                'reason' => '已达到计划天数限制'
+//            ]);
+//            $this->markAccountCompleted($account);
+//            return;
+//        }
 
         // 获取现有的completed_days数据
         $completedDays = json_decode($account->completed_days ?? '{}', true) ?: [];
@@ -1387,5 +1814,40 @@ class ProcessItunesAccounts extends Command
                 'reason' => '每日计划未完成，变更为处理状态'
             ]);
         }
+    }
+
+    /**
+     * 检查当日计划是否完成
+     */
+    private function isDailyPlanCompleted(ItunesTradeAccount $account, int $currentDay): bool
+    {
+        $plan = $account->plan;
+
+        if (!$plan) {
+            return false;
+        }
+
+        // 计算当前天的累计兑换金额
+        $dailyAmount = ItunesTradeAccountLog::where('account_id', $account->id)
+            ->where('day', $currentDay)
+            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+            ->sum('amount');
+
+        // 获取当前天的计划金额
+        $dailyAmounts = $plan->daily_amounts ?? [];
+        $dailyLimit = $dailyAmounts[$currentDay - 1] ?? 0;
+
+        $isCompleted = $dailyAmount >= $dailyLimit;
+
+        $this->getLogger()->debug("检查当日计划完成情况", [
+            'account_id' => $account->id,
+            'account_email' => $account->account,
+            'current_day' => $currentDay,
+            'daily_amount' => $dailyAmount,
+            'daily_limit' => $dailyLimit,
+            'is_completed' => $isCompleted
+        ]);
+
+        return $isCompleted;
     }
 }

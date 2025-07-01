@@ -94,7 +94,7 @@ class ItunesTradeAccountController extends Controller
         try {
             $validated = $request->validate([
                 'country_code' => 'required|string|max:10',
-                'accounts' => 'required|array|min:1',
+                'accounts' => 'required|array|min:1|max:50',
                 'accounts.*.account' => 'required|string|max:255',
                 'accounts.*.password' => 'required|string|max:255',
                 'accounts.*.apiUrl' => 'nullable|string|max:500',
@@ -172,6 +172,7 @@ class ItunesTradeAccountController extends Controller
                     'data' => null,
                 ], 404);
             }
+
 
             return response()->json([
                 'code' => 0,

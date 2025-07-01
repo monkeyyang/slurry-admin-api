@@ -838,23 +838,23 @@ class FixAccountDataInconsistency extends Command
             $this->line("  距离现在: " . $lastExchangeTime->diffForHumans());
         }
 
-                 // 检查是否应该完成（有计划的检查plan_days，无计划的检查是否超过3天）
+        // 检查是否应该完成（有计划的检查plan_days，无计划的检查是否超过3天）
          $maxDays = $account->plan ? $account->plan->plan_days : 3;
 
          if ($shouldBeDay > $maxDays) {
              // 应该完成
-             $this->warn("  问题: 账号应该已完成但状态未更新");
-             if (!$isDryRun) {
-                 if ($account->plan) {
-                     $this->markAccountCompleted($account);
-                 } else {
-                     // 无计划的账号，直接标记为完成
-                     $this->markUnboundAccountCompleted($account, $completedDays);
-                 }
-                 $this->info("  修复: 已标记为完成状态");
-             } else {
-                 $this->info("  建议: 标记为完成状态");
-             }
+//             $this->warn("  问题: 账号应该已完成但状态未更新");
+//             if (!$isDryRun) {
+//                 if ($account->plan) {
+////                     $this->markAccountCompleted($account);
+//                 } else {
+//                     // 无计划的账号，直接标记为完成
+////                     $this->markUnboundAccountCompleted($account, $completedDays);
+//                 }
+//                 $this->info("  修复: 已标记为完成状态");
+//             } else {
+//                 $this->info("  建议: 标记为完成状态");
+//             }
          } else {
              // 更新当前天数和状态
              $newStatus = ItunesTradeAccount::STATUS_PROCESSING; // 默认为processing

@@ -13,17 +13,18 @@ class MaintainAccountPools extends Command
      *
      * @var string
      */
-    protected $signature = 'accounts:maintain-pools 
-                            {--dry-run : 只显示统计信息，不执行实际更新}
-                            {--force : 强制重建所有账号池}
-                            {--amounts= : 指定要维护的面额列表，用逗号分隔}';
+    protected $signature = 'pools:maintain 
+                           {--force : 强制重建所有池子}
+                           {--stats : 显示池子统计信息}
+                           {--cleanup : 仅清理无效池子}
+                           {--dry-run : 仅显示将要执行的操作，不实际执行}';
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = '维护Redis中的账号池，根据账号状态和可兑换容量分配到不同面额池';
+    protected $description = '维护账号池 - 按国家、金额、计划、群聊分组，余额降序排列';
 
     private AccountPoolService $poolService;
 
@@ -36,114 +37,227 @@ class MaintainAccountPools extends Command
     /**
      * Execute the console command.
      */
-    public function handle()
+    public function handle(): void
     {
-        $startTime = microtime(true);
-        
-        $this->info('开始维护账号池...');
-        
-        $options = [
-            'dry_run' => $this->option('dry-run'),
-            'force' => $this->option('force'),
-            'amounts' => $this->option('amounts') ? explode(',', $this->option('amounts')) : null
-        ];
-        
+        $date = now();
+        Log::info("========== 账号池维护开始 [{$date}] ==========");
+
+        if ($this->option('dry-run')) {
+            $this->info("🔍 DRY RUN 模式：只显示操作，不实际执行");
+        }
+
         try {
-            // 显示维护前统计
-            $this->showPoolStatistics('维护前');
-            
-            // 执行维护
-            $result = $this->poolService->maintainPools($options);
-            
-            // 显示结果
-            $this->displayMaintenanceResult($result);
-            
-            // 显示维护后统计
-            if (!$options['dry_run']) {
-                $this->showPoolStatistics('维护后');
+            // 显示统计信息
+            if ($this->option('stats')) {
+                $this->showPoolStatistics();
+                return;
             }
-            
-            $executionTime = round((microtime(true) - $startTime) * 1000, 2);
-            $this->info("账号池维护完成，耗时: {$executionTime}ms");
-            
-            return 0;
-            
+
+            // 仅清理模式
+            if ($this->option('cleanup')) {
+                $this->cleanupOnly();
+                return;
+            }
+
+            // 完整维护
+            $this->performFullMaintenance();
+
         } catch (\Exception $e) {
-            $this->error('账号池维护失败: ' . $e->getMessage());
-            Log::error('账号池维护异常', [
+            Log::error('账号池维护过程中发生错误: ' . $e->getMessage());
+            Log::error('错误详情', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
-            return 1;
+            $this->error("❌ 维护过程出错: " . $e->getMessage());
         }
     }
-    
     /**
-     * 显示账号池统计信息
+     * 显示池子统计信息
      */
-    private function showPoolStatistics(string $title)
+    private function showPoolStatistics(): void
     {
-        $this->info("\n=== {$title}统计 ===");
+        $this->info("📊 获取账号池统计信息...");
         
-        $stats = $this->poolService->getPoolStatistics();
+        $stats = $this->poolService->getPoolStats();
         
-        // 显示总体统计
-        $this->table(['指标', '数值'], [
-            ['活跃账号总数', $stats['total_active_accounts']],
-            ['账号池总数', $stats['total_pools']],
-            ['兜底账号数', $stats['fallback_accounts']],
-            ['平均每池账号数', $stats['avg_accounts_per_pool']]
-        ]);
-        
-        // 显示面额分布
-        if (!empty($stats['amount_distribution'])) {
-            $this->info("\n面额分布:");
-            $amountData = [];
-            foreach ($stats['amount_distribution'] as $amount => $count) {
-                $amountData[] = ["面额 {$amount}", $count];
-            }
-            $this->table(['面额', '账号数'], $amountData);
+        if (empty($stats)) {
+            $this->warn("⚠️  没有找到任何账号池");
+            return;
         }
+
+        $this->info("📈 账号池统计报告");
+        $this->line("=" . str_repeat("=", 80));
+
+        $totalPools = count($stats);
+        $totalAccounts = array_sum(array_column($stats, 'count'));
         
-        // 显示热门池
-        if (!empty($stats['top_pools'])) {
-            $this->info("\n热门账号池:");
-            $poolData = [];
-            foreach ($stats['top_pools'] as $pool => $count) {
-                $poolData[] = [$pool, $count];
-            }
-            $this->table(['账号池', '账号数'], $poolData);
+        $this->info("📋 总体概况:");
+        $this->line("   • 总池数: {$totalPools}");
+        $this->line("   • 总账号数: {$totalAccounts}");
+        $this->line("   • 平均每池账号数: " . ($totalPools > 0 ? round($totalAccounts / $totalPools, 2) : 0));
+        $this->line("");
+
+        // 按池子大小排序
+        uasort($stats, function($a, $b) {
+            return $b['count'] <=> $a['count'];
+        });
+
+        $this->info("🏆 前10个最大的池子:");
+        $count = 0;
+        foreach ($stats as $poolKey => $stat) {
+            if (++$count > 10) break;
+            
+            $this->line(sprintf("   %2d. %-40s 账号数: %3d  最高余额: %.2f", 
+                $count, 
+                $this->formatPoolKey($poolKey), 
+                $stat['count'], 
+                $stat['top_balance']
+            ));
         }
+
+        $this->line("");
+        $this->info("💡 提示: 使用 --force 选项重建所有池子");
     }
-    
+
+    /**
+     * 格式化池子key显示
+     */
+    private function formatPoolKey(string $poolKey): string
+    {
+        // 提取池子信息: account_pool_ca_500_room1_plan1
+        $parts = explode('_', str_replace('account_pool_', '', $poolKey));
+        
+        if (count($parts) >= 2) {
+            $country = strtoupper($parts[0]);
+            $amount = $parts[1];
+            $room = isset($parts[2]) && str_starts_with($parts[2], 'room') ? $parts[2] : '';
+            $plan = isset($parts[3]) && str_starts_with($parts[3], 'plan') ? $parts[3] : '';
+            
+            $display = "{$country}-{$amount}";
+            if ($room) $display .= " {$room}";
+            if ($plan) $display .= " {$plan}";
+            
+            return $display;
+        }
+        
+        return $poolKey;
+    }
+
+    /**
+     * 仅清理无效池子
+     */
+    private function cleanupOnly(): void
+    {
+        $this->info("🧹 开始清理无效池子...");
+
+        if (!$this->option('dry-run')) {
+            $this->poolService->cleanupPools();
+        }
+
+        $this->info("✅ 清理完成");
+    }
+
+    /**
+     * 执行完整维护
+     */
+    private function performFullMaintenance(): void
+    {
+        $this->info("🔧 开始完整账号池维护...");
+
+        // 维护选项
+        $options = [
+            'force' => $this->option('force'),
+            'dry_run' => $this->option('dry-run')
+        ];
+
+        if ($this->option('force')) {
+            $this->warn("⚠️  强制重建模式：将清空所有现有池子");
+        }
+
+        // 执行维护
+        if (!$this->option('dry-run')) {
+            $result = $this->poolService->maintainPools($options);
+            $this->displayMaintenanceResults($result);
+        } else {
+            $this->info("🔍 DRY RUN: 模拟维护操作完成");
+        }
+
+        // 显示最终统计
+        $this->line("");
+        $this->info("📊 维护后统计信息:");
+        $stats = $this->poolService->getPoolStats();
+        
+        $totalPools = count($stats);
+        $totalAccounts = array_sum(array_column($stats, 'count'));
+        
+        $this->line("   • 活跃池数: {$totalPools}");
+        $this->line("   • 池中总账号数: {$totalAccounts}");
+
+        if ($totalPools > 0) {
+            $this->line("   • 平均每池账号数: " . round($totalAccounts / $totalPools, 2));
+            
+            // 显示最大的5个池子
+            uasort($stats, function($a, $b) {
+                return $b['count'] <=> $a['count'];
+            });
+            
+            $this->line("   • 最大池子:");
+            $count = 0;
+            foreach ($stats as $poolKey => $stat) {
+                if (++$count > 5) break;
+                $this->line("     - " . $this->formatPoolKey($poolKey) . ": {$stat['count']} 账号");
+            }
+        }
+
+        $this->info("✅ 账号池维护完成");
+    }
+
     /**
      * 显示维护结果
      */
-    private function displayMaintenanceResult(array $result)
+    private function displayMaintenanceResults(array $result): void
     {
-        $this->info("\n=== 维护结果 ===");
+        $this->line("");
+        $this->info("📋 维护结果:");
         
-        $this->table(['操作', '数量'], [
-            ['处理的账号', $result['processed_accounts']],
-            ['创建的池', $result['created_pools']],
-            ['更新的池', $result['updated_pools']],
-            ['清理的池', $result['cleaned_pools']],
-            ['添加到池的账号', $result['added_accounts']],
-            ['从池移除的账号', $result['removed_accounts']]
-        ]);
-        
-        if (!empty($result['errors'])) {
-            $this->warn("\n处理错误:");
-            foreach ($result['errors'] as $error) {
-                $this->line("- {$error}");
-            }
+        if ($result['processed_accounts'] > 0) {
+            $this->line("   • 处理账号数: {$result['processed_accounts']}");
         }
         
+        if ($result['created_pools'] > 0) {
+            $this->line("   • 创建池数: {$result['created_pools']}");
+        }
+        
+        if ($result['updated_pools'] > 0) {
+            $this->line("   • 更新池数: {$result['updated_pools']}");
+        }
+        
+        if ($result['cleaned_pools'] > 0) {
+            $this->line("   • 清理池数: {$result['cleaned_pools']}");
+        }
+        
+        if ($result['added_accounts'] > 0) {
+            $this->line("   • 添加账号次数: {$result['added_accounts']}");
+        }
+        
+        if ($result['removed_accounts'] > 0) {
+            $this->line("   • 移除账号次数: {$result['removed_accounts']}");
+        }
+
+        // 显示错误和警告
+        if (!empty($result['errors'])) {
+            $this->line("");
+            $this->error("❌ 错误:");
+            foreach ($result['errors'] as $error) {
+                $this->line("   • {$error}");
+            }
+        }
+
         if (!empty($result['warnings'])) {
-            $this->warn("\n警告信息:");
+            $this->line("");
+            $this->warn("⚠️  警告:");
             foreach ($result['warnings'] as $warning) {
-                $this->line("- {$warning}");
+                $this->line("   • {$warning}");
             }
         }
     }

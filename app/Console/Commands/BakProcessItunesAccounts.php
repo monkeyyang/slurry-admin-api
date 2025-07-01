@@ -112,8 +112,12 @@ class BakProcessItunesAccounts extends Command
             try {
                 // 发送强制登录请求
                 $this->giftCardApiClient->refreshUserLogin($loginAccount);
-                // 更新状态为Waiting，当前天为1
-                $account->update(['status' => ItunesTradeAccount::STATUS_WAITING, 'current_plan_day' => 1]);
+                // 更新状态为Waiting，保持当前天数
+                $currentDay = $account->current_plan_day;
+                if (empty($currentDay) || $currentDay <= 0) {
+                    $currentDay = 1;
+                }
+                $account->update(['status' => ItunesTradeAccount::STATUS_WAITING, 'current_plan_day' => $currentDay]);
                 $this->getLogger()->warning("账号 {$account->account} 没有成功的兑换记录，发送强制登录请求并登录成功，直接设置为等待状态Waiting");
             } catch (\Exception $e) {
                 $account->update(['status'=> ItunesTradeAccount::STATUS_WAITING, 'login_status'=> ItunesTradeAccount::STATUS_LOGIN_FAILED]);
@@ -320,7 +324,7 @@ class BakProcessItunesAccounts extends Command
      */
     private function checkDayCompletion(): void
     {
-        $this->getLogger()->info('检查天数完成情况...');
+        $this->getLogger()->info('检查天数完成情况1...');
 
         // 查找所有状态为LOCKING且有待处理任务完成的账号
         $accountsToCheck = ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_LOCKING)
