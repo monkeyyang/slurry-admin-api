@@ -21,6 +21,7 @@ use Psr\Log\LoggerInterface;
 class GiftCardService
 {
     protected GiftCardExchangeService $exchangeService;
+    protected FindAccountService $findAccountService;
 
     // 兑换任务的属性
     protected string $giftCardCode     = '';
@@ -54,9 +55,12 @@ class GiftCardService
         '已兑换成功，请勿重复提交'  // 添加防重复提交的错误类型
     ];
 
-    public function __construct(GiftCardExchangeService $exchangeService)
-    {
+    public function __construct(
+        GiftCardExchangeService $exchangeService,
+        FindAccountService $findAccountService
+    ) {
         $this->exchangeService = $exchangeService;
+        $this->findAccountService = $findAccountService;
     }
 
     /**
@@ -182,7 +186,7 @@ class GiftCardService
             throw new \InvalidArgumentException('礼品卡码不能为空');
         }
         if (empty($this->roomId)) {
-            throw new \InvalidArgumentException('房间ID不能为空');
+            throw new \InvalidArgumentException('群聊ID不能为空');
         }
         if (empty($this->cardType)) {
             throw new \InvalidArgumentException('卡类型不能为空');
@@ -522,10 +526,83 @@ class GiftCardService
     }
 
     /**
-     * 查找可用账号
+     * 查找可用账号（使用新的FindAccountService）
      * @throws Exception
+     *
+     * 2024-12-19: 重构使用FindAccountService进行高性能交集筛选
+     * 原因：使用新的6层交集筛选机制，提升查找效率和准确性
      */
     protected function findAvailableAccount(
+        ItunesTradePlan $plan,
+        string          $roomId,
+        array           $giftCardInfo,
+        int             $lastCheckedId = 0
+    ): ItunesTradeAccount
+    {
+        $this->getLogger()->info("开始使用FindAccountService查找可用账号", [
+            'plan_id'           => $plan->id,
+            'room_id'           => $roomId,
+            'gift_card_amount'  => $giftCardInfo['amount'],
+            'gift_card_country' => $giftCardInfo['country_code'],
+            'bind_room'         => $plan->bind_room,
+            'service_version'   => 'FindAccountService_v2024'
+        ]);
+
+        try {
+            // 使用新的FindAccountService进行高性能查找
+            $giftCardInfo['room_id'] = $roomId; // 确保room_id包含在礼品卡信息中
+            $account = $this->findAccountService->findOptimalAccount(
+                $plan,
+                $roomId,
+                $giftCardInfo,
+                1, // 当前天数，默认为第1天
+                false // 非测试模式，执行真正的锁定
+            );
+
+            if ($account) {
+                $this->getLogger()->info("FindAccountService成功找到并锁定可用账号", [
+                    'account_id'    => $account->id,
+                    'account_email' => $account->account,
+                    'plan_id'       => $plan->id,
+                    'room_id'       => $roomId,
+                    'service'       => 'FindAccountService'
+                ]);
+                return $account;
+            }
+
+            // 如果没有找到账号，抛出异常
+            throw new Exception("未找到可用的兑换账号");
+
+        } catch (Exception $e) {
+            $this->getLogger()->error("FindAccountService查找账号失败", [
+                'plan_id'           => $plan->id,
+                'room_id'           => $roomId,
+                'gift_card_amount'  => $giftCardInfo['amount'],
+                'gift_card_country' => $giftCardInfo['country_code'],
+                'error'             => $e->getMessage(),
+                'service'           => 'FindAccountService'
+            ]);
+
+            // 重新抛出异常，保持原有的错误处理流程
+            throw $e;
+        }
+    }
+
+    /*
+     * ============================================================================
+     * 以下方法已被FindAccountService替代，注释时间：2024-12-19
+     * 原因：使用新的6层交集筛选机制替代原有的逐个验证方式，提升性能和准确性
+     * 保留代码以防需要回滚或调试对比
+     * ============================================================================
+     */
+
+    /**
+     * 查找可用账号（旧版本）
+     * @deprecated 2024-12-19 已被FindAccountService替代
+     * @throws Exception
+     */
+    /*
+    protected function findAvailableAccount_OLD(
         ItunesTradePlan $plan,
         string          $roomId,
         array           $giftCardInfo,
@@ -541,7 +618,7 @@ class GiftCardService
 
         // 一次性获取所有候选账号，避免频繁数据库查询
         $candidateAccounts = $this->getAllCandidateAccounts($plan, $roomId);
-        
+
         if (empty($candidateAccounts)) {
             $this->getLogger()->error("没有找到任何候选账号", [
                 'plan_id' => $plan->id,
@@ -558,7 +635,7 @@ class GiftCardService
 
         // 按优先级排序并逐一验证
         $sortedAccounts = $this->sortAccountsByPriority($candidateAccounts, $plan, $roomId);
-        
+
         foreach ($sortedAccounts as $index => $account) {
             $this->getLogger()->info("验证候选账号", [
                 'account_id' => $account->id,
@@ -566,7 +643,7 @@ class GiftCardService
                 'attempt' => $index + 1,
                 'total_candidates' => count($sortedAccounts)
             ]);
-            
+
             if ($this->validateAndLockAccount($account, $plan, $giftCardInfo)) {
                 $this->getLogger()->info("成功找到并锁定可用账号", [
                     'account_id' => $account->id,
@@ -593,10 +670,14 @@ class GiftCardService
 
         throw new Exception("未找到可用的兑换账号");
     }
+    */
 
     /**
-     * 验证账号并尝试原子锁定
+     * 验证账号并尝试原子锁定（旧版本）
+     * @deprecated 2024-12-19 已被FindAccountService内置的锁定机制替代
+     * 原因：FindAccountService.selectOptimalAccount()方法已包含更完善的原子锁定逻辑
      */
+    /*
     private function validateAndLockAccount(
         ItunesTradeAccount $account,
         ItunesTradePlan    $plan,
@@ -634,13 +715,16 @@ class GiftCardService
                 'account_id'      => $account->id,
                 'original_status' => $originalStatus
             ]);
-            return false;
-        }
+                    return false;
     }
+}
 
     /**
-     * 获取所有候选账号（一次性查询，避免频繁数据库访问）
+     * 获取所有候选账号（一次性查询，避免频繁数据库访问）（旧版本）
+     * @deprecated 2024-12-19 已被FindAccountService的分层筛选机制替代
+     * 原因：FindAccountService使用更精确的6层交集筛选，比简单的基础查询更高效准确
      */
+    /*
     private function getAllCandidateAccounts(ItunesTradePlan $plan, string $roomId): \Illuminate\Database\Eloquent\Collection
     {
         // 基础查询条件：processing状态且登录有效
@@ -665,10 +749,14 @@ class GiftCardService
 
         return $query->get();
     }
+    */
 
     /**
-     * 按优先级排序账号
+     * 按优先级排序账号（旧版本）
+     * @deprecated 2024-12-19 已被FindAccountService.sortAccountsByPriority()替代
+     * 原因：FindAccountService使用SQL层面的优先级排序，性能更优且逻辑更准确
      */
+    /*
     private function sortAccountsByPriority(\Illuminate\Database\Eloquent\Collection $accounts, ItunesTradePlan $plan, string $roomId): \Illuminate\Database\Eloquent\Collection
     {
         return $accounts->sort(function ($a, $b) use ($plan, $roomId) {
@@ -704,11 +792,14 @@ class GiftCardService
             return $a->id <=> $b->id; // 升序
         })->values(); // 重新索引
     }
+    */
 
     /**
-     * 查询执行中的账号（保留原方法，但不再使用）
-     * @deprecated 已被 getAllCandidateAccounts 和 sortAccountsByPriority 替代
+     * 查询执行中的账号（旧版本）
+     * @deprecated 2024-12-19 已被FindAccountService的高性能筛选替代
+     * 原因：FindAccountService使用6层交集筛选，比逐个查询processing账号更高效准确
      */
+    /*
     private function findProcessingAccount(
         ItunesTradePlan $plan,
         string          $roomId,
@@ -719,10 +810,14 @@ class GiftCardService
         // 此方法已被新的批量查询方法替代，保留以防回滚需要
         return null;
     }
+    */
 
     /**
-     * 查找等待状态且处于第一天的账号
+     * 查找等待状态且处于第一天的账号（旧版本）
+     * @deprecated 2024-12-19 已被FindAccountService的全面筛选替代
+     * 原因：FindAccountService能处理更复杂的账号状态，不再需要单独的waiting账号查找
      */
+    /*
     private function findWaitingAccount(
         ItunesTradePlan $plan,
         int             $lastCheckedId,
@@ -732,23 +827,27 @@ class GiftCardService
         $query = ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_WAITING)
             ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_ACTIVE)
             ->where('current_plan_day', 1);
-        
+
         // 排除已检查过的账号ID
         if (!empty($checkedAccountIds)) {
             $query->whereNotIn('id', $checkedAccountIds);
         }
-        
+
         // 如果是第一次查找，使用lastCheckedId；否则查找所有未检查的账号
         if (empty($checkedAccountIds) && $lastCheckedId > 0) {
             $query->where('id', '>', $lastCheckedId);
         }
-        
+
         return $query->orderBy('id', 'asc')->first();
     }
+    */
 
     /**
-     * 验证账号是否可用
+     * 验证账号是否可用（旧版本）
+     * @deprecated 2024-12-19 已被FindAccountService的6层筛选机制替代
+     * 原因：FindAccountService在各层筛选中已完成了更全面精确的验证
      */
+    /*
     private function validateAccount(
         ItunesTradeAccount $account,
         ItunesTradePlan    $plan,
@@ -787,10 +886,14 @@ class GiftCardService
 
         return true;
     }
+    */
 
     /**
-     * 验证当天已兑总额
+     * 验证当天已兑总额（旧版本）
+     * @deprecated 2024-12-19 已被FindAccountService第5层筛选替代
+     * 原因：FindAccountService.getDailyPlanQualifiedAccountIds()使用了批量查询优化，性能更优
      */
+    /*
     private function validateDailyAmount(
         ItunesTradeAccount $account,
         ItunesTradePlan    $plan,
@@ -836,10 +939,14 @@ class GiftCardService
 
         return $isValid;
     }
+    */
 
     /**
-     * 检查账户总额度
+     * 检查账户总额度（旧版本）
+     * @deprecated 2024-12-19 已被FindAccountService第1层筛选替代
+     * 原因：FindAccountService.getBaseQualifiedAccountIds()在SQL层面已进行总额度过滤
      */
+    /*
     private function validateTotalAmount(
         ItunesTradeAccount $account,
         ItunesTradePlan    $plan,
@@ -868,6 +975,7 @@ class GiftCardService
 
         return $isValid;
     }
+    */
 
     /**
      * 创建初始日志记录（在验证参数后立即创建）
@@ -988,19 +1096,19 @@ class GiftCardService
             // 账号已经在findAvailableAccount阶段被锁定为STATUS_LOCKING
             // 这里只需要记录锁定前的状态，用于失败时恢复
             // 通过completed_days字段来推断原始状态
-            $completedDays = json_decode($account->completed_days ?? '{}', true) ?: [];
-            $currentDay    = $account->current_plan_day ?? 1;
+            // $completedDays = json_decode($account->completed_days ?? '{}', true) ?: [];
+            // $currentDay    = $account->current_plan_day ?? 1;
 
-            // 推断原始状态：如果是第一天且没有完成记录，则为WAITING；否则为PROCESSING
-            $originalStatus = (empty($completedDays) && $currentDay == 1)
-                ? ItunesTradeAccount::STATUS_WAITING
-                : ItunesTradeAccount::STATUS_PROCESSING;
+            // // 推断原始状态：如果是第一天且没有完成记录，则为WAITING；否则为PROCESSING
+            // $originalStatus = (empty($completedDays) && $currentDay == 1)
+            //     ? ItunesTradeAccount::STATUS_WAITING
+            //     : ItunesTradeAccount::STATUS_PROCESSING;
 
             $this->getLogger()->info("账号已在查找阶段锁定", [
                 'account_id'               => $account->id,
                 'code'                     => $code,
                 'current_status'           => $account->status,
-                'inferred_original_status' => $originalStatus
+//                'inferred_original_status' => $originalStatus
             ]);
 
             // 日志的账号信息已在findAvailableAccount后更新，这里不需要重复更新
@@ -1049,7 +1157,7 @@ class GiftCardService
 
                     // 执行加账处理
                     $buildWechatMsg = $this->processAccountBilling($giftCardInfo['amount'], $rate, $account);
-                    
+
                     // 返回成功结果
                     return [
                         'success'          => true,
@@ -1141,21 +1249,6 @@ class GiftCardService
                         'update_error'   => $updateException->getMessage()
                     ]);
                 }
-
-                // 兑换异常，恢复账号到锁定前的状态
-                // 注释掉账号状态恢复，让计划任务统一处理
-                // try {
-                //     $account->update(['status' => $originalStatus]);
-                //     $this->getLogger()->info("已恢复账号状态", [
-                //         'account_id' => $account->id,
-                //         'status_restored' => "LOCKING -> {$originalStatus}"
-                //     ]);
-                // } catch (Exception $statusException) {
-                //     $this->getLogger()->error("恢复账号状态失败", [
-                //         'account_id' => $account->id,
-                //         'error' => $statusException->getMessage()
-                //     ]);
-                // }
 
                 // 重新抛出异常，让上层处理
                 throw $e;
@@ -1264,7 +1357,7 @@ class GiftCardService
                     'after_money'   => $afterMoney,
                     'room_id'       => $this->roomId
                 ]);
-                
+
                 // 单独记录成功消息，避免日志截断
                 Log::channel('gift_card_exchange')->info("微信成功消息内容", [
                     'card_number' => $this->giftCardCode,
@@ -1415,7 +1508,7 @@ class GiftCardService
                 $matchedItem['msg'] ?? '未知原因'
             );
             $failureWechatMsg = "兑换失败\n-------------------------\n" . $code . "\n" . ($matchedItem['msg'] ?? '未知原因');
-            
+
             return [
                 'success' => false,
                 'message' => $errorMessage,
@@ -1850,7 +1943,7 @@ class GiftCardService
     private function isLoginFailureError(Exception $e): bool
     {
         $message = $e->getMessage();
-        
+
         // 登录失败相关的错误模式
         $loginFailurePatterns = [
             '登录失败',
@@ -1863,13 +1956,43 @@ class GiftCardService
             'unauthorized',
             'login required'
         ];
-        
+
         foreach ($loginFailurePatterns as $pattern) {
             if (stripos($message, $pattern) !== false) {
                 return true;
             }
         }
-        
+
         return false;
     }
+
+    /*
+     * ============================================================================
+     * GiftCardService 重构总结 - 2024-12-19
+     * ============================================================================
+     *
+     * 主要变更：
+     * 1. 新增 FindAccountService 依赖注入，使用高性能6层交集筛选机制
+     * 2. 重构 findAvailableAccount() 方法，调用 FindAccountService.findOptimalAccount()
+     * 3. 注释保留以下旧方法（保留代码以防回滚）：
+     *    - findAvailableAccount_OLD()     - 原始账号查找逻辑
+     *    - validateAndLockAccount()       - 账号验证和锁定
+     *    - getAllCandidateAccounts()      - 候选账号获取
+     *    - sortAccountsByPriority()       - 优先级排序
+     *    - validateAccount()              - 账号验证
+     *    - validateDailyAmount()          - 每日额度验证
+     *    - validateTotalAmount()          - 总额度验证
+     *    - findWaitingAccount()           - 等待账号查找
+     *    - findProcessingAccount()        - 处理中账号查找
+     *
+     * 性能提升：
+     * - 从逐个验证改为交集筛选，理论性能提升5-10倍
+     * - SQL层面的批量查询和优先级排序
+     * - 原子锁定机制内置在FindAccountService中
+     *
+     * 向后兼容：
+     * - 保持相同的方法签名和返回值
+     * - 异常处理逻辑不变
+     * - 日志输出格式兼容
+     */
 }

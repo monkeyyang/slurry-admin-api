@@ -158,6 +158,7 @@ class ItunesTradeAccountService
                         'password' => $password,
                         'api_url' => $apiUrl,
                         'country_code' => $country,
+                        'login_status' => 'invalid',
                         'status' => ItunesTradeAccount::STATUS_PROCESSING,
                         'uid' => Auth::id()
                     ]);

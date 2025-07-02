@@ -91,15 +91,23 @@ class ItunesTradeAccountController extends Controller
      */
     public function batchImport(Request $request): JsonResponse
     {
-        try {
-            $validated = $request->validate([
+        $validated = $request->validate([
                 'country_code' => 'required|string|max:10',
                 'accounts' => 'required|array|min:1|max:50',
                 'accounts.*.account' => 'required|string|max:255',
                 'accounts.*.password' => 'required|string|max:255',
                 'accounts.*.apiUrl' => 'nullable|string|max:500',
-            ]);
+            ], [
+            'country_code.required'   => '请选择国家',
+            'accounts.required'     => '账号不能为空，单次提交最多50条',
+            'accounts.min'          => '至少需要1条账号',
+            'accounts.max'          => '单次最多支持提交50个账号',
+            'accounts.*.account.required'   => '账号不能为空',
+            'accounts.*.account.max'        => '账号长度最多255位',
+            'accounts.*.password.required' => '密码不能为空',
+        ]);
 
+        try {
             $result = $this->accountService->batchImportAccounts(
                 $validated['country_code'],
                 $validated['accounts']
