@@ -38,6 +38,7 @@ class TextMessageHandler implements MessageHandler
     private const CMD_BILL_TOTAL = '/账单总额';
     private const CMD_BILL_AMOUNT = '/账单金额';
     private const CMD_GIFT_CHARGE = '/礼品卡兑换';
+    private const CMD_GET_VERIFY_CODE = '/查码';
 
     /**
      * @var CommandInvoker|null

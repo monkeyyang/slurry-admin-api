@@ -8,6 +8,9 @@ use App\Http\Controllers\Api\GiftCardController as ApiGiftCardController;
 use App\Http\Controllers\Api\AppleAccountController;
 use App\Http\Controllers\Api\GiftCardLogMonitorController;
 use App\Http\Controllers\Api\GiftExchangeController;
+use App\Http\Controllers\Api\ItunesAccountVerifyController;
+use App\Http\Controllers\Api\ItunesAccountVerifyLogController;
+use App\Http\Controllers\Api\OperationLogController;
 use App\Http\Controllers\Api\ItunesTradeExecutionLogController;
 use App\Http\Controllers\Api\ItunesTradeRateController;
 use App\Http\Controllers\Api\ItunesTradePlanController;
@@ -340,7 +343,37 @@ Route::group(['middleware' => ['auth:api']], function() {
     });
 
 
+    Route::prefix('verify')->group(function () {
+        // 账号
+        Route::get('accounts', [ItunesAccountVerifyController::class, 'index']);
+        Route::get('accounts/{id}', [ItunesAccountVerifyController::class, 'show']);
+        Route::post('accounts', [ItunesAccountVerifyController::class, 'store']);
+        Route::put('accounts/{id}', [ItunesAccountVerifyController::class, 'update']);
+        Route::delete('accounts/{id}', [ItunesAccountVerifyController::class, 'destroy']);
+        Route::delete('accounts/batch', [ItunesAccountVerifyController::class, 'batchDestroy']);
+        Route::post('accounts/batch-import', [ItunesAccountVerifyController::class, 'batchImport']);
+        Route::post('accounts/{id}/copy', [ItunesAccountVerifyController::class, 'copyAccount']);
+        Route::post('accounts/{id}/verify-code', [ItunesAccountVerifyController::class, 'getVerifyCode']);
 
+        // 查码记录
+        Route::get('logs', [ItunesAccountVerifyLogController::class, 'index']);
+        Route::get('logs/statistics', [ItunesAccountVerifyLogController::class, 'statistics']);
+        Route::get('logs/{id}', [ItunesAccountVerifyLogController::class, 'show']);
+        Route::delete('logs/{id}', [ItunesAccountVerifyLogController::class, 'destroy']);
+        Route::delete('logs/batch', [ItunesAccountVerifyLogController::class, 'batchDestroy']);
+
+
+        // 操作记录
+        Route::get('operation-logs', [OperationLogController::class, 'index']);
+        Route::get('operation-logs/statistics', [OperationLogController::class, 'statistics']);
+        Route::get('operation-logs/{id}', [OperationLogController::class, 'show']);
+        Route::post('operation-logs', [OperationLogController::class, 'store']);
+        Route::delete('operation-logs/{id}', [OperationLogController::class, 'destroy']);
+        Route::delete('operation-logs/batch', [OperationLogController::class, 'batchDestroy']);
+        
+        // 查码接口
+        Route::post('operation-logs/get-verify-code', [OperationLogController::class, 'getVerifyCode']);
+    });
 
     // 礼品卡兑换路由组
     Route::prefix('trade/gift-exchange')->group(function () {

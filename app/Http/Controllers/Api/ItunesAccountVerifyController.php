@@ -5,6 +5,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\ItunesAccountVerify;
 use App\Models\User;
+use App\Models\OperationLog;
 use Illuminate\Support\Facades\DB;
 
 class ItunesAccountVerifyController extends Controller
@@ -51,6 +52,18 @@ class ItunesAccountVerifyController extends Controller
     {
         $data = $request->only(['uid', 'account', 'password', 'verify_url']);
         $account = ItunesAccountVerify::create($data);
+        
+        // 记录操作日志
+        OperationLog::create([
+            'uid' => $data['uid'] ?? auth()->id(),
+            'operation_type' => 'create',
+            'target_account' => $account->account,
+            'result' => 'success',
+            'details' => '创建验证码账号',
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->header('User-Agent'),
+        ]);
+        
         return response()->json(['code' => 0, 'message' => 'success', 'data' => $account]);
     }
 
@@ -59,13 +72,39 @@ class ItunesAccountVerifyController extends Controller
     {
         $account = ItunesAccountVerify::findOrFail($id);
         $account->update($request->only(['uid', 'account', 'password', 'verify_url']));
+        
+        // 记录操作日志
+        OperationLog::create([
+            'uid' => $request->input('uid') ?? auth()->id(),
+            'operation_type' => 'edit',
+            'target_account' => $account->account,
+            'result' => 'success',
+            'details' => '更新验证码账号',
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->header('User-Agent'),
+        ]);
+        
         return response()->json(['code' => 0, 'message' => 'success', 'data' => $account]);
     }
 
     // 删除账号
     public function destroy($id)
     {
-        ItunesAccountVerify::destroy($id);
+        $account = ItunesAccountVerify::findOrFail($id);
+        $accountName = $account->account;
+        $account->delete();
+        
+        // 记录操作日志
+        OperationLog::create([
+            'uid' => auth()->id(),
+            'operation_type' => 'delete',
+            'target_account' => $accountName,
+            'result' => 'success',
+            'details' => '删除验证码账号',
+            'ip_address' => request()->ip(),
+            'user_agent' => request()->header('User-Agent'),
+        ]);
+        
         return response()->json(['code' => 0, 'message' => 'success', 'data' => null]);
     }
 
@@ -127,7 +166,18 @@ class ItunesAccountVerifyController extends Controller
     public function copyAccount($id)
     {
         $account = ItunesAccountVerify::findOrFail($id);
-        // 这里可以记录日志
+        
+        // 记录操作日志
+        OperationLog::create([
+            'uid' => auth()->id(),
+            'operation_type' => 'copy',
+            'target_account' => $account->account,
+            'result' => 'success',
+            'details' => '复制账号密码',
+            'ip_address' => request()->ip(),
+            'user_agent' => request()->header('User-Agent'),
+        ]);
+        
         return response()->json([
             'code' => 0,
             'message' => 'success',
@@ -142,8 +192,22 @@ class ItunesAccountVerifyController extends Controller
     public function getVerifyCode($id, Request $request)
     {
         $account = ItunesAccountVerify::findOrFail($id);
+        $commands = $request->input('commands');
+        
         // 这里应实现验证码获取逻辑
         $verify_code = '123456'; // 示例
+        
+        // 记录操作日志
+        OperationLog::create([
+            'uid' => auth()->id(),
+            'operation_type' => 'getVerifyCode',
+            'target_account' => $account->account,
+            'result' => 'success',
+            'details' => '获取验证码，指令：' . ($commands ?? '无'),
+            'ip_address' => request()->ip(),
+            'user_agent' => request()->header('User-Agent'),
+        ]);
+        
         return response()->json([
             'code' => 0,
             'message' => 'success',
