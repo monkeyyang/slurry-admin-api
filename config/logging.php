@@ -190,6 +190,15 @@ return [
             'level' => env('WEBSOCKET_LOG_LEVEL', 'debug'),
             'days' => 7,
             'replace_placeholders' => true,
+        ],
+
+        // 查码任务日志
+        'verify_code_job' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/verify_code_job.log'),
+            'level' => 'debug',
+            'days' => 14,
+            'replace_placeholders' => true,
         ]
     ],
 

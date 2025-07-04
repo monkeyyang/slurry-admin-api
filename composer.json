@@ -17,7 +17,8 @@
         "ramsey/uuid": "^4.0",
         "ext-dom": "*",
         "ext-curl": "*",
-        "ext-bcmath": "*"
+        "ext-bcmath": "*",
+        "ext-pcntl": "*"
     },
     "require-dev": {
         "fakerphp/faker": "^1.9.1",
