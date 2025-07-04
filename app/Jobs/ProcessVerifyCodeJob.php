@@ -390,7 +390,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
     {
         try {
             $roomId = '20229649389@chatroom';
-            
+            $account = strtolower($account);
             // 根据code内容判断是成功还是失败
             if ($code === '查码超时') {
                 // 失败消息格式
@@ -399,17 +399,17 @@ class ProcessVerifyCodeJob implements ShouldQueue
                 // 成功消息格式
                 $msg = "✅ 查码成功\n---------------------\n{$account}\n{$code}";
             }
-            
+
             // 调用微信发送函数
             send_msg_to_wechat($roomId, $msg);
-            
+
             Log::channel('verify_code_job')->info('微信消息发送成功', [
                 'account' => $account,
                 'code' => $code,
                 'message' => $msg,
                 'room_id' => $roomId
             ]);
-            
+
         } catch (\Exception $e) {
             Log::channel('verify_code_job')->error('微信消息发送失败', [
                 'error' => $e->getMessage(),
