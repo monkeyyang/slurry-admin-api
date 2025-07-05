@@ -342,7 +342,7 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::get('/groups', 'App\Http\Controllers\Api\MrRoomGroupController@getGroupsList');
     });
 
-
+    // 查码路由
     Route::prefix('verify')->group(function () {
         // 账号
         Route::get('accounts', [ItunesAccountVerifyController::class, 'index']);
@@ -370,7 +370,7 @@ Route::group(['middleware' => ['auth:api']], function() {
         Route::post('operation-logs', [OperationLogController::class, 'store']);
         Route::delete('operation-logs/{id}', [OperationLogController::class, 'destroy']);
         Route::delete('operation-logs/batch', [OperationLogController::class, 'batchDestroy']);
-        
+
         // 查码接口
         Route::post('operation-logs/get-verify-code', [OperationLogController::class, 'getVerifyCode']);
     });
