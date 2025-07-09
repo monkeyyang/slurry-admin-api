@@ -246,6 +246,36 @@ class GiftCardService
                 $log
             );
 
+            // ========== 间隔时间新需求的处理 ===========
+            $interval = $account->plan->exchange_interval ?? null;
+            if ($interval !== null) {
+                // 取最近一次兑换时间
+                $lastSuccessLog = ItunesTradeAccountLog::where('account_id', $account->id)
+//                    ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+                    ->orderBy('updated_at', 'desc')
+                    ->first();
+                $intervalSeconds = $lastSuccessLog
+                    ? \Carbon\Carbon::parse($lastSuccessLog->updated_at)->diffInSeconds(now())
+                    : null;
+                $requiredIntervalSeconds = floatval($interval) * 60;
+                if ($intervalSeconds === null || $intervalSeconds >= $requiredIntervalSeconds) {
+                    // 判断是否完成当日计划
+                    $currentDay = $account->current_plan_day ?? 1;
+                    $isDailyPlanCompleted = $this->isDailyPlanCompleted($account, $currentDay);
+                    if (!$isDailyPlanCompleted) {
+                        // 未完成当日计划，状态改为processing
+                        $this->getLogger()->info("账号 {$account->account} 未完成当日计划，状态改为PROCESSING", [
+                            'account_id' => $account->id,
+                            'account_email' => $account->account,
+                            'current_day' => $currentDay,
+                            'reason' => '未完成当日计划额度'
+                        ]);
+                        $account->update(['status' => ItunesTradeAccount::STATUS_PROCESSING]);
+                    }
+                }
+            }
+            // ========== 间隔时间新需求的处理 END ===========
+
             return $result;
 
         } catch (Exception $e) {
@@ -253,6 +283,24 @@ class GiftCardService
             $this->handleRedemptionException($e, $log);
             throw $e;
         }
+    }
+
+    /**
+     * 判断账号当日计划是否完成
+     */
+    protected function isDailyPlanCompleted(ItunesTradeAccount $account, int $currentDay): bool
+    {
+        $plan = $account->plan;
+        if (!$plan) {
+            return false;
+        }
+        $dailyAmount = ItunesTradeAccountLog::where('account_id', $account->id)
+            ->where('day', $currentDay)
+            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+            ->sum('amount');
+        $dailyAmounts = $plan->daily_amounts ?? [];
+        $dailyLimit = $dailyAmounts[$currentDay - 1] ?? 0;
+        return $dailyAmount >= $dailyLimit;
     }
 
     /**
