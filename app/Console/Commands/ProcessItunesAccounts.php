@@ -125,7 +125,7 @@ class ProcessItunesAccounts extends Command
         // 查找符合条件的账号：status=processing, login_status=invalid, amount>0
         $accounts = ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_PROCESSING)
             ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_INVALID)
-            ->where('amount', '>', 0)
+            ->where('amount', '>=', 0)
             ->orderBy('created_at', 'asc') // 先导入的优先处理
             ->get();
 
@@ -557,7 +557,7 @@ class ProcessItunesAccounts extends Command
                 foreach ($items as $item) {
                     $itemStatus = $item['status'] ?? '';
                     $itemMsg = $item['msg'] ?? '';
-                    
+
                     if ($itemStatus === 'completed') {
                         $this->processLoginResult($item, $accounts);
 
@@ -677,7 +677,7 @@ class ProcessItunesAccounts extends Command
                 if ($result) {
                     try {
                         $resultData = json_decode($result, true);
-                        
+
                         $this->getLogger()->info("💰 批量登录获取余额数据", [
                             'account' => $username,
                             'result_data' => $resultData,
@@ -691,7 +691,7 @@ class ProcessItunesAccounts extends Command
                             $balance = (float)preg_replace('/[^\d.-]/', '', $balanceString);
                             $oldBalance = $account->amount; // 在更新前保存旧余额
                             $account->update(['amount' => $balance]);
-                            
+
                             $this->getLogger()->info("💵 批量登录更新余额", [
                                 'account' => $username,
                                 'old_balance' => $oldBalance,
@@ -825,7 +825,7 @@ class ProcessItunesAccounts extends Command
                 $account->timestamps = true;
 
                 // 请求登出
-                $this->requestAccountLogout($account, 'daily plan completed');
+//                $this->requestAccountLogout($account, 'daily plan completed');
             } else {
                 // 当日计划未完成，只检查严重的天数不一致情况（前一天未完成但被错误推进）
                 if ($currentDay > 1 && $account->login_status === ItunesTradeAccount::STATUS_LOGIN_INVALID) {
@@ -834,12 +834,12 @@ class ProcessItunesAccounts extends Command
                         ->where('day', $currentDay)
                         ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
                         ->count();
-                    
+
                     // 只有在当前天没有兑换记录的情况下才检查前一天是否未完成
                     if ($currentDayExchangeCount == 0) {
                         $previousDay = $currentDay - 1;
                         $isPreviousDayCompleted = $this->isDailyPlanCompleted($account, $previousDay);
-                        
+
                         // 只处理严重情况：前一天未完成但被错误推进到当前天
                         if (!$isPreviousDayCompleted) {
                             $this->getLogger()->warning("账号 {$account->account} 严重的天数不一致：前一天未完成但被错误推进到当前天，回退到前一天", [
@@ -866,7 +866,7 @@ class ProcessItunesAccounts extends Command
                         // 如果前一天已完成，说明正常进入当前天，不做任何状态改变
                     }
                 }
-                
+
                 $this->getLogger()->debug("账号 {$account->account} 当日计划未完成，保持PROCESSING状态", [
                     'current_day' => $currentDay,
                     'login_status' => $account->login_status
@@ -1003,8 +1003,8 @@ class ProcessItunesAccounts extends Command
             $account->update(['status' => ItunesTradeAccount::STATUS_WAITING]);
             $account->timestamps = true;
 
-            // 请求登出
-            $this->requestAccountLogout($account, 'daily plan completed');
+            // 请求登出（暂不登出）
+//            $this->requestAccountLogout($account, 'daily plan completed');
 
         } else {
             // 未完成当日计划，状态改为processing
@@ -1027,28 +1027,6 @@ class ProcessItunesAccounts extends Command
     private function processWaitingAccount(ItunesTradeAccount $account): void
     {
         $this->getLogger()->info("正在处理等待状态账号: {$account->account}");
-
-        // 1. 未绑定计划的账号，不处理，不发送消息
-//        if (!$account->plan) {
-//            $this->getLogger()->debug("账号 {$account->account} 未绑定计划，跳过处理", [
-//                'account_id' => $account->account,
-//                'status' => $account->status,
-//                'plan_id' => $account->plan_id,
-//                'reason' => '未绑定计划，不处理不发送消息'
-//            ]);
-//            return;
-//        }
-//
-//        // 验证计划配置完整性
-//        if (!$this->validatePlanConfiguration($account->plan)) {
-//            $this->getLogger()->error("账号 {$account->account} 计划配置不完整，标记为完成", [
-//                'plan_id' => $account->plan->id,
-//                'reason' => '计划配置验证失败'
-//            ]);
-//            $this->markAccountCompleted($account);
-//            return;
-//        }
-
 
 
         // 查看最后一条日志是否已达到计划总额
@@ -1102,7 +1080,7 @@ class ProcessItunesAccounts extends Command
             if (empty($currentDay) || $currentDay <= 0) {
                 $currentDay = 1;
             }
-            
+
             $account->timestamps = false;
             $account->update([
                 'status' => ItunesTradeAccount::STATUS_PROCESSING,
@@ -1341,7 +1319,7 @@ class ProcessItunesAccounts extends Command
                         if (isset($resultData['balance'])) {
                             $balanceString = $resultData['balance'];
                             $balance = (float)preg_replace('/[^\d.-]/', '', $balanceString);
-                            
+
                             $this->getLogger()->info("💵 账号余额解析", [
                                 'account' => $account->account,
                                 'balance_string' => $balanceString,
@@ -1697,7 +1675,7 @@ class ProcessItunesAccounts extends Command
         $account->timestamps = true;
 
         // 请求登出账号
-        $this->requestAccountLogout($account, 'plan unbound');
+//        $this->requestAccountLogout($account, 'plan unbound');
 
         $this->getLogger()->info('账号计划解绑完成', [
             'account_id' => $account->account,

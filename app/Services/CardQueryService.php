@@ -3,8 +3,8 @@
 namespace App\Services;
 
 use App\Services\Gift\TaskStatusCheckerService;
+use App\Services\GiftCardApiClient;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Models\CardQueryRule;
 use App\Models\CardQueryRecord;
@@ -12,6 +12,13 @@ use Carbon\Carbon;
 
 class CardQueryService
 {
+    private GiftCardApiClient $apiClient;
+
+    public function __construct()
+    {
+        $this->apiClient = new GiftCardApiClient();
+    }
+
     /**
      * 查询指定卡密列表
      *
@@ -31,20 +38,15 @@ class CardQueryService
 
              Log::channel('card_query')->info("准备查询 " . count($cardsToQuery) . " 张卡密");
 
-            // 准备请求参数
-            $requestParams = [
-                'list' => $cardsToQuery
-            ];
-
-            // 调用外部API查询卡密
-            $response = Http::post('http://172.16.229.189:8080/api/batch_query/new', $requestParams);
-            Log::channel('card_query')->info("请求地址 172.16.229.189");
+            // 调用 GiftCardApiClient 查询卡密
+            $responseData = $this->apiClient->createCardQueryTask($cardsToQuery);
+            Log::channel('card_query')->info("使用 GiftCardApiClient 调用批量查询接口");
+            
             // 处理API响应
-            if ($response->successful()) {
-                $responseData = $response->json();
+            if ($responseData['code'] === 1) { // 成功响应
 
                 // 保存请求参数以便命令行显示
-                $responseData['request_params'] = $requestParams;
+                $responseData['request_params'] = ['list' => $cardsToQuery];
                 if (!empty($responseData['data']['task_id'])) {
                     $taskId = $responseData['data']['task_id'];
                      Log::channel('card_query')->info("获取到任务ID: {$taskId}，开始检查任务状态");
@@ -167,11 +169,11 @@ class CardQueryService
                     'data' => $responseData
                 ];
             } else {
-                 Log::channel('card_query')->error('卡密查询API调用失败: ' . $response->body());
+                 Log::channel('card_query')->error('卡密查询API调用失败: ' . ($responseData['msg'] ?? '未知错误'));
                 return [
                     'code' => 500,
                     'message' => '卡密查询API调用失败',
-                    'error' => $response->body()
+                    'error' => $responseData['msg'] ?? '未知错误'
                 ];
             }
 

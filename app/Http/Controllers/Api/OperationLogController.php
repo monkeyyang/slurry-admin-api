@@ -3,15 +3,17 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessVerifyCodeJob;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Models\OperationLog;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 
 class OperationLogController extends Controller
 {
-    public function getVerifyCode(Request $request)
+    public function getVerifyCode(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'room_id'    => 'required|string|max:255',
@@ -20,50 +22,62 @@ class OperationLogController extends Controller
             'accounts'   => 'required|array|min:1|max:100', // 限制最多100个账号
             'accounts.*' => 'required|string|min:10|max:200', // 账号长度限制
         ], [
-            'room_id.required'   => '群聊ID不能为空',
-            'wxid.required'      => '微信ID不能为空',
-            'accounts.required'     => '账号不能为空',
-            'accounts.min'          => '至少需要一个账号',
-            'accounts.max'          => '最多支持100账号',
-            'accounts.*.required'   => '账号不能为空',
-            'accounts.*.min'        => '账号长度至少10位',
-            'accounts.*.max'        => '账号长度最多200位',
+            'room_id.required'    => '群聊ID不能为空',
+            'wxid.required'       => '微信ID不能为空',
+            'accounts.required'   => '账号不能为空',
+            'accounts.min'        => '至少需要一个账号',
+            'accounts.max'        => '最多支持100账号',
+            'accounts.*.required' => '账号不能为空',
+            'accounts.*.min'      => '账号长度至少10位',
+            'accounts.*.max'      => '账号长度最多200位',
         ]);
 
         try {
             // 记录查码请求到操作日志
             foreach ($validated['accounts'] as $account) {
                 OperationLog::create([
-                    'uid' => auth()->id(),
-                    'room_id' => $validated['room_id'],
-                    'wxid' => $validated['wxid'],
+                    'uid'            => auth()->id() ?? 0, // 如果用户未认证，使用0作为默认值
+                    'room_id'        => $validated['room_id'],
+                    'wxid'           => $validated['wxid'],
                     'operation_type' => 'getVerifyCode',
                     'target_account' => $account,
-                    'result' => 'success',
-                    'details' => '发起查码请求，消息ID：' . ($validated['msgid'] ?? '无'),
-                    'ip_address' => $request->ip(),
-                    'user_agent' => $request->header('User-Agent'),
+                    'result'         => 'success',
+                    'details'        => '发起查码请求，消息ID：' . ($validated['msgid'] ?? '无'),
+                    'ip_address'     => $request->ip(),
+                    'user_agent'     => $request->header('User-Agent'),
                 ]);
             }
 
             // 异步分发查码任务到队列
-            \App\Jobs\ProcessVerifyCodeJob::dispatch(
+            ProcessVerifyCodeJob::dispatch(
                 $validated['room_id'],
                 $validated['msgid'],
                 $validated['wxid'],
                 $validated['accounts'],
-                auth()->id()
+                auth()->id() ?? 0  // 如果用户未认证，使用0作为默认值
             );
 
+            // 记录成功分发任务的日志
+            Log::channel('verify_code_job')->info('查码请求成功分发到队列', [
+                'user_id'        => auth()->id() ?? 0, // 如果用户未认证，使用0作为默认值
+                'room_id'        => $validated['room_id'],
+                'msg_id'         => $validated['msgid'],
+                'wxid'           => $validated['wxid'],
+                'accounts_count' => count($validated['accounts']),
+                'accounts'       => $validated['accounts'],
+                'ip_address'     => $request->ip(),
+                'user_agent'     => $request->header('User-Agent'),
+            ]);
+
             return response()->json([
-                'code' => 0,
+                'code'    => 0,
                 'message' => '查码请求已提交，正在后台处理',
-                'data' => [
-                    'room_id' => $validated['room_id'],
-                    'msg_id' => $validated['msgid'],
+                'data'    => [
+                    'room_id'        => $validated['room_id'],
+                    'msg_id'         => $validated['msgid'],
                     'accounts_count' => count($validated['accounts']),
-                    'accounts' => $validated['accounts'],
-                    'status' => 'processing'
+                    'accounts'       => $validated['accounts'],
+                    'status'         => 'processing'
                 ]
             ]);
 
@@ -71,22 +85,22 @@ class OperationLogController extends Controller
             // 记录错误日志
             foreach ($validated['accounts'] as $account) {
                 OperationLog::create([
-                    'uid' => auth()->id(),
-                    'room_id' => $validated['room_id'],
-                    'wxid' => $validated['wxid'],
+                    'uid'            => auth()->id() ?? 0, // 如果用户未认证，使用0作为默认值
+                    'room_id'        => $validated['room_id'],
+                    'wxid'           => $validated['wxid'],
                     'operation_type' => 'getVerifyCode',
                     'target_account' => $account,
-                    'result' => 'failed',
-                    'details' => '查码请求失败：' . $e->getMessage(),
-                    'ip_address' => $request->ip(),
-                    'user_agent' => $request->header('User-Agent'),
+                    'result'         => 'failed',
+                    'details'        => '查码请求失败：' . $e->getMessage(),
+                    'ip_address'     => $request->ip(),
+                    'user_agent'     => $request->header('User-Agent'),
                 ]);
             }
 
             return response()->json([
-                'code' => 500,
+                'code'    => 500,
                 'message' => '查码请求处理失败',
-                'data' => [
+                'data'    => [
                     'error' => $e->getMessage()
                 ]
             ], 500);

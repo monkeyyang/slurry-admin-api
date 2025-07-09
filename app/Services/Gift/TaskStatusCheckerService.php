@@ -2,8 +2,7 @@
 
 namespace App\Services\Gift;
 
-use Illuminate\Support\Facades\Http;
-use Illuminate\Http\Client\Response;
+use App\Services\GiftCardApiClient;
 use RuntimeException;
 
 class TaskStatusCheckerService
@@ -11,12 +10,14 @@ class TaskStatusCheckerService
     private string $taskId;
     private int $maxAttempts;
     private int $attemptInterval;
+    private GiftCardApiClient $apiClient;
 
     public function __construct(string $taskId, int $maxAttempts = 60, int $interval = 1)
     {
         $this->taskId = $taskId;
         $this->maxAttempts = $maxAttempts;
         $this->attemptInterval = $interval;
+        $this->apiClient = new GiftCardApiClient();
     }
 
     public function createTask(array $codes)
@@ -39,10 +40,9 @@ class TaskStatusCheckerService
             $attempts++;
 
             try {
-                $response = $this->makeStatusRequest();
+                $responseData = $this->makeStatusRequest();
 
-                if ($response->successful()) {
-                    $responseData = $response->json();
+                if ($responseData['code'] === 1) { // 成功响应
                     if ($this->isTaskCompleted($responseData)) {
                         return $responseData; // 返回完整的响应数据
                     }
@@ -60,13 +60,9 @@ class TaskStatusCheckerService
     /**
      * 发起状态检查请求
      */
-    private function makeStatusRequest(): Response
+    private function makeStatusRequest(): array
     {
-        return Http::timeout(5)
-            ->retry(3, 500) // 添加重试机制
-            ->get('http://172.16.229.189:8080/api/batch_query/status', [
-                'task_id' => $this->taskId
-            ]);
+        return $this->apiClient->getCardQueryTaskStatus($this->taskId);
     }
 
     /**
