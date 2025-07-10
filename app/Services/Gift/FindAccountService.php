@@ -50,7 +50,7 @@ class FindAccountService
     {
         $startTime       = microtime(true);
         $giftCardAmount  = $giftCardInfo['amount'];
-        $giftCardCountry = $giftCardInfo['country'] ?? $plan->country;
+        $giftCardCountry = $giftCardInfo['country_code'] ?? $plan->country;
 
         $this->getLogger()->info("开始交集筛选账号", [
             'plan_id'           => $plan->id,

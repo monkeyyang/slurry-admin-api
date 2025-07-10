@@ -31,6 +31,7 @@ $testParams = [
     'current_day' => 1
 ];
 
+
 echo "📋 测试参数：\n";
 echo "  - 国家：{$testParams['country']}\n";
 echo "  - 金额：{$testParams['amount']}\n";
@@ -77,7 +78,7 @@ try {
     // 2. 准备礼品卡信息
     $giftCardInfo = [
         'amount' => $testParams['amount'],
-        'country' => $testParams['country'],
+        'country_code' => $testParams['country'],
         'room_id' => $testParams['room_id']
     ];
 
@@ -237,7 +238,7 @@ try {
         }
     }
     echo "\n";
-
+    exit;
     // 6. 第6层锁定机制测试（只测试1次锁定）
     echo "🔒 第6层锁定机制测试：\n";
     echo "  ⚠️  此测试将真正锁定1个账号用于验证锁定机制\n";

@@ -10,9 +10,12 @@ use Illuminate\Queue\SerializesModels;
 use App\Services\Gift\GiftCardService;
 use App\Services\Gift\BatchGiftCardService;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Psr\Log\LoggerInterface;
 use Throwable;
+use App\Models\ItunesTradeAccount;
 use App\Models\ItunesTradeAccountLog;
+use App\Models\ItunesTradePlan;
 
 class RedeemGiftCardJob implements ShouldQueue
 {
@@ -232,6 +235,11 @@ class RedeemGiftCardJob implements ShouldQueue
                 'attempt'           => $this->attempts()
             ]);
 
+            // 兑换成功后处理账号状态
+            if ($result['success']) {
+                $this->handleSuccessfulExchange($result);
+            }
+
             // 发送微信消息 - 使用try-catch避免影响主流程
             if (!in_array($this->roomId, ['brother-card@api', 'no-send-msg@api'])) {
                 try {
@@ -270,6 +278,9 @@ class RedeemGiftCardJob implements ShouldQueue
 
             // 记录失败信息
             $this->recordFailure($e, $batchService);
+
+            // 兑换失败后处理账号状态
+            $this->handleFailedExchange($e);
 
             // 检查是否为业务逻辑错误
             if ($this->isBusinessError($e)) {
@@ -669,6 +680,242 @@ class RedeemGiftCardJob implements ShouldQueue
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
+        }
+    }
+
+    /**
+     * 处理成功兑换后的账号状态
+     */
+    private function handleSuccessfulExchange(array $result): void
+    {
+        try {
+            // 从结果中获取账号ID
+            $accountId = $result['account_id'] ?? null;
+            if (!$accountId) {
+                $this->getLogger()->warning("兑换成功但未找到账号ID", [
+                    'card_code' => $this->giftCardCode,
+                    'result' => $result
+                ]);
+                return;
+            }
+
+            // 获取账号信息
+            $account = ItunesTradeAccount::find($accountId);
+            if (!$account) {
+                $this->getLogger()->warning("未找到账号信息", [
+                    'card_code' => $this->giftCardCode,
+                    'account_id' => $accountId
+                ]);
+                return;
+            }
+
+            // 获取计划信息
+            $planId = $result['plan_id'] ?? null;
+            if (!$planId) {
+                $this->getLogger()->warning("兑换成功但未找到计划ID", [
+                    'card_code' => $this->giftCardCode,
+                    'account_id' => $accountId
+                ]);
+                return;
+            }
+
+            $plan = ItunesTradePlan::find($planId);
+            if (!$plan) {
+                $this->getLogger()->warning("未找到计划信息", [
+                    'card_code' => $this->giftCardCode,
+                    'plan_id' => $planId
+                ]);
+                return;
+            }
+
+            // 刷新账号数据，确保获取最新的金额
+            $account->refresh();
+            $currentDay = $account->current_plan_day ?? 1;
+
+            // 检查总额度是否达成
+            $totalAmountReached = ($account->amount >= $plan->total_amount);
+
+            // 检查当日计划是否达成
+            $dailyAmountReached = $this->checkDailyAmountReached($account, $plan, $currentDay);
+
+            $this->getLogger()->info("检查兑换成功后的账号状态", [
+                'card_code' => $this->giftCardCode,
+                'account_id' => $account->id,
+                'account_email' => $account->account,
+                'current_amount' => $account->amount,
+                'total_amount_limit' => $plan->total_amount,
+                'current_day' => $currentDay,
+                'total_amount_reached' => $totalAmountReached,
+                'daily_amount_reached' => $dailyAmountReached
+            ]);
+
+            // 根据达成情况决定账号状态
+            if ($totalAmountReached) {
+                // 总额度达成，完成整个计划
+                $account->update([
+                    'status' => ItunesTradeAccount::STATUS_COMPLETED,
+                    // 'current_plan_day' => null,
+                    // 'plan_id' => null,
+                ]);
+
+                $this->getLogger()->info("总额度达成，账号计划完成", [
+                    'card_code' => $this->giftCardCode,
+                    'account_id' => $account->id,
+                    'final_amount' => $account->amount
+                ]);
+            } elseif ($dailyAmountReached) {
+                // 当日计划达成，但总额度未达成
+                if ($currentDay >= $plan->plan_days) {
+                    // 已是最后一天，完成计划
+                    $account->update([
+                        'status' => ItunesTradeAccount::STATUS_COMPLETED,
+                        // 'current_plan_day' => null,
+                        // 'plan_id' => null,
+                    ]);
+
+                    $this->getLogger()->info("最后一天计划达成，账号计划完成", [
+                        'card_code' => $this->giftCardCode,
+                        'account_id' => $account->id,
+                        'final_amount' => $account->amount
+                    ]);
+                } else {
+                    // 进入下一天等待状态
+                    $nextDay = $currentDay + 1;
+                    $account->update([
+                        'status' => ItunesTradeAccount::STATUS_WAITING,
+                        'current_plan_day' => $nextDay,
+                    ]);
+
+                    $this->getLogger()->info("当日计划达成，账号进入下一天等待", [
+                        'card_code' => $this->giftCardCode,
+                        'account_id' => $account->id,
+                        'next_day' => $nextDay
+                    ]);
+                }
+            } else {
+                // 总额度和当日计划都未达成，改为processing状态继续处理
+                $account->update([
+                    'status' => ItunesTradeAccount::STATUS_PROCESSING,
+                ]);
+
+                $this->getLogger()->info("总额度和当日计划都未达成，账号改为processing状态", [
+                    'card_code' => $this->giftCardCode,
+                    'account_id' => $account->id,
+                    'current_amount' => $account->amount,
+                    'total_amount_limit' => $plan->total_amount
+                ]);
+            }
+
+        } catch (Throwable $e) {
+            $this->getLogger()->error("处理成功兑换后的账号状态失败", [
+                'card_code' => $this->giftCardCode,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
+
+    /**
+     * 处理失败兑换后的账号状态
+     */
+    private function handleFailedExchange(Throwable $e): void
+    {
+        try {
+            // 尝试从日志记录中获取账号信息
+            $log = ItunesTradeAccountLog::where('code', $this->giftCardCode)
+                ->where('status', ItunesTradeAccountLog::STATUS_PENDING)
+                ->orderBy('created_at', 'desc')
+                ->first();
+
+            if (!$log || !$log->account_id) {
+                $this->getLogger()->info("兑换失败但未找到相关账号信息", [
+                    'card_code' => $this->giftCardCode,
+                    'error' => $e->getMessage()
+                ]);
+                return;
+            }
+
+            // 获取账号信息
+            $account = ItunesTradeAccount::find($log->account_id);
+            if (!$account) {
+                $this->getLogger()->warning("未找到账号信息", [
+                    'card_code' => $this->giftCardCode,
+                    'account_id' => $log->account_id
+                ]);
+                return;
+            }
+
+            // 检查账号当前状态
+            if ($account->status !== ItunesTradeAccount::STATUS_LOCKING) {
+                $this->getLogger()->info("账号状态不是locking，无需处理", [
+                    'card_code' => $this->giftCardCode,
+                    'account_id' => $account->id,
+                    'current_status' => $account->status
+                ]);
+                return;
+            }
+
+            // 将账号状态改为processing，使其可以被重新分配
+            $account->update([
+                'status' => ItunesTradeAccount::STATUS_PROCESSING,
+            ]);
+
+            $this->getLogger()->info("兑换失败，账号状态已改为processing", [
+                'card_code' => $this->giftCardCode,
+                'account_id' => $account->id,
+                'account_email' => $account->account,
+                'error' => $e->getMessage()
+            ]);
+
+        } catch (Throwable $statusError) {
+            $this->getLogger()->error("处理失败兑换后的账号状态失败", [
+                'card_code' => $this->giftCardCode,
+                'error' => $e->getMessage(),
+                'status_error' => $statusError->getMessage(),
+                'trace' => $statusError->getTraceAsString()
+            ]);
+        }
+    }
+
+    /**
+     * 检查当日计划是否达成
+     */
+    private function checkDailyAmountReached(ItunesTradeAccount $account, ItunesTradePlan $plan, int $currentDay): bool
+    {
+        try {
+            // 获取当天已成功兑换的总额
+            $dailySpent = ItunesTradeAccountLog::where('account_id', $account->id)
+                ->where('day', $currentDay)
+                ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+                ->sum('amount');
+
+            // 获取当天的计划额度
+            $dailyAmounts = $plan->daily_amounts ?? [];
+            $dailyLimit = $dailyAmounts[$currentDay - 1] ?? 0;
+            $dailyTarget = $dailyLimit + $plan->float_amount;
+
+            // 检查是否达到当天的目标额度
+            $reached = ($dailySpent >= $dailyTarget);
+
+            $this->getLogger()->info("检查当日计划达成情况", [
+                'account_id' => $account->id,
+                'day' => $currentDay,
+                'daily_spent' => $dailySpent,
+                'daily_limit' => $dailyLimit,
+                'float_amount' => $plan->float_amount,
+                'daily_target' => $dailyTarget,
+                'reached' => $reached
+            ]);
+
+            return $reached;
+
+        } catch (Throwable $e) {
+            $this->getLogger()->error("检查当日计划达成情况失败", [
+                'account_id' => $account->id,
+                'day' => $currentDay,
+                'error' => $e->getMessage()
+            ]);
+            return false;
         }
     }
 }

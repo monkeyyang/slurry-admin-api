@@ -13,12 +13,12 @@ use Psr\Log\LoggerInterface;
 
 /**
  * iTunes账号日期推进命令
- * 
+ *
  * 职责：
  * 1. 处理WAITING状态账号的日期推进
  * 2. 推进天数和解绑过期计划
  * 3. 通过队列处理登录/登出
- * 
+ *
  * 注意：30分钟间隔由外部调度控制（每30分钟执行），无需内部检查
  */
 class AdvanceAccountDays extends Command
@@ -45,7 +45,7 @@ class AdvanceAccountDays extends Command
     public function handle(): void
     {
         $this->dryRun = $this->option('dry-run');
-        $date = now();
+        $date         = now();
 
         $this->getLogger()->info("========== iTunes账号日期推进开始 [{$date}] ==========");
 
@@ -139,10 +139,10 @@ class AdvanceAccountDays extends Command
             $this->info("🚀 新账号开始: {$account->account} -> PROCESSING (第{$currentDay}天)");
 
             if (!$this->dryRun) {
-                $currentDay = max(1, $currentDay);
+                $currentDay          = max(1, $currentDay);
                 $account->timestamps = false;
                 $account->update([
-                    'status' => ItunesTradeAccount::STATUS_PROCESSING,
+                    'status'           => ItunesTradeAccount::STATUS_PROCESSING,
                     'current_plan_day' => $currentDay
                 ]);
                 $account->timestamps = true;
@@ -171,9 +171,9 @@ class AdvanceAccountDays extends Command
         }
 
         // 5. 当日计划已完成，检查天数间隔（用于推进天数）
-        $lastExchangeTime = Carbon::parse($lastSuccessLog->exchange_time);
-        $now = now();
-        $intervalHours = $lastExchangeTime->diffInHours($now);
+        $lastExchangeTime    = Carbon::parse($lastSuccessLog->exchange_time);
+        $now                 = now();
+        $intervalHours       = $lastExchangeTime->diffInHours($now);
         $requiredDayInterval = max(1, $account->plan->day_interval ?? 24);
 
         if ($intervalHours < $requiredDayInterval) {
@@ -240,7 +240,7 @@ class AdvanceAccountDays extends Command
             ->sum('amount');
 
         $dailyAmounts = $account->plan->daily_amounts ?? [];
-        $dailyLimit = $dailyAmounts[$currentDay - 1] ?? 0;
+        $dailyLimit   = $dailyAmounts[$currentDay - 1] ?? 0;
 
         return $dailyAmount >= $dailyLimit;
     }
@@ -254,7 +254,7 @@ class AdvanceAccountDays extends Command
         $completedDays = [];
         if ($account->plan) {
             for ($day = 1; $day <= $account->plan->plan_days; $day++) {
-                $dailyAmount = ItunesTradeAccountLog::where('account_id', $account->id)
+                $dailyAmount                 = ItunesTradeAccountLog::where('account_id', $account->id)
                     ->where('day', $day)
                     ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
                     ->sum('amount');
@@ -271,10 +271,10 @@ class AdvanceAccountDays extends Command
 
         $account->timestamps = false;
         $account->update([
-            'status' => ItunesTradeAccount::STATUS_COMPLETED,
+            'status'           => ItunesTradeAccount::STATUS_COMPLETED,
             'current_plan_day' => null,
-            'plan_id' => null,
-            'completed_days' => json_encode($completedDays),
+            'plan_id'          => null,
+            'completed_days'   => json_encode($completedDays),
         ]);
         $account->timestamps = true;
 
@@ -284,7 +284,7 @@ class AdvanceAccountDays extends Command
         // 发送完成通知
         $msg = "[强]兑换目标达成通知\n";
         $msg .= "---------------------------------\n";
-        $msg .= $account->account."\n";
+        $msg .= $account->account . "\n";
         $msg .= "国家：{$account->country_code}   账户余款：{$currentTotalAmount}";
 
         try {
@@ -294,8 +294,8 @@ class AdvanceAccountDays extends Command
         }
 
         $this->getLogger()->info('账号计划完成', [
-            'account' => $account->account,
-            'total_amount' => $currentTotalAmount,
+            'account'        => $account->account,
+            'total_amount'   => $currentTotalAmount,
             'completed_days' => $completedDays
         ]);
     }
@@ -306,12 +306,12 @@ class AdvanceAccountDays extends Command
     private function advanceToNextDay(ItunesTradeAccount $account): void
     {
         $currentDay = $account->current_plan_day ?? 1;
-        $nextDay = $currentDay + 1;
+        $nextDay    = $currentDay + 1;
 
         // 更新completed_days
         $completedDays = json_decode($account->completed_days ?? '{}', true) ?: [];
         for ($day = 1; $day <= $account->plan->plan_days; $day++) {
-            $dailyAmount = ItunesTradeAccountLog::where('account_id', $account->id)
+            $dailyAmount                 = ItunesTradeAccountLog::where('account_id', $account->id)
                 ->where('day', $day)
                 ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
                 ->sum('amount');
@@ -321,8 +321,8 @@ class AdvanceAccountDays extends Command
         $account->timestamps = false;
         $account->update([
             'current_plan_day' => $nextDay,
-            'status' => ItunesTradeAccount::STATUS_PROCESSING,
-            'completed_days' => json_encode($completedDays),
+            'status'           => ItunesTradeAccount::STATUS_PROCESSING,
+            'completed_days'   => json_encode($completedDays),
         ]);
         $account->timestamps = true;
 
@@ -330,8 +330,8 @@ class AdvanceAccountDays extends Command
         ProcessAppleAccountLoginJob::dispatch($account->id, 'advance_to_next_day');
 
         $this->getLogger()->info('账号进入下一天', [
-            'account' => $account->account,
-            'current_day' => $nextDay,
+            'account'        => $account->account,
+            'current_day'    => $nextDay,
             'completed_days' => $completedDays
         ]);
     }
@@ -345,7 +345,7 @@ class AdvanceAccountDays extends Command
 
         if ($account->plan) {
             for ($day = 1; $day <= $account->plan->plan_days; $day++) {
-                $dailyAmount = ItunesTradeAccountLog::where('account_id', $account->id)
+                $dailyAmount                 = ItunesTradeAccountLog::where('account_id', $account->id)
                     ->where('day', $day)
                     ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
                     ->sum('amount');
@@ -355,10 +355,10 @@ class AdvanceAccountDays extends Command
 
         $account->timestamps = false;
         $account->update([
-            'plan_id' => null,
+            'plan_id'          => null,
             'current_plan_day' => null,
-            'status' => ItunesTradeAccount::STATUS_WAITING,
-            'completed_days' => json_encode($completedDays),
+            'status'           => ItunesTradeAccount::STATUS_WAITING,
+            'completed_days'   => json_encode($completedDays),
         ]);
         $account->timestamps = true;
 
@@ -366,8 +366,8 @@ class AdvanceAccountDays extends Command
         ProcessAppleAccountLogoutJob::dispatch($account->id, 'plan_timeout_unbound');
 
         $this->getLogger()->info('账号计划解绑', [
-            'account' => $account->account,
-            'reason' => '最后一天超时未完成',
+            'account'        => $account->account,
+            'reason'         => '最后一天超时未完成',
             'completed_days' => $completedDays
         ]);
     }
@@ -376,4 +376,4 @@ class AdvanceAccountDays extends Command
     {
         return Log::channel('kernel_process_accounts');
     }
-} 
+}
