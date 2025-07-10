@@ -388,7 +388,14 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
                 ]);
 
                 // 发送微信消息
-                send_msg_to_wechat($roomId, $successMessage);
+                $sendResult = send_msg_to_wechat($roomId, $successMessage);
+                if (!$sendResult) {
+                    Log::channel('gift_card_exchange')->warning("微信消息发送失败", [
+                        'request_id' => $this->requestId,
+                        'room_id' => $roomId,
+                        'card_number' => $cardNumber
+                    ]);
+                }
 
                 Log::channel('gift_card_exchange')->info("群组 {$roomId} 加账处理完成", [
                     'card_number' => $cardNumber,
@@ -802,6 +809,13 @@ class ProcessGiftCardExchangeJob implements ShouldQueue
         );
         Log::channel('gift_card_exchange')->error("发送到微信: " . $failMessage);
 
-        send_msg_to_wechat($this->input['room_id'], $failMessage);
+        $sendResult = send_msg_to_wechat($this->input['room_id'], $failMessage);
+        if (!$sendResult) {
+            Log::channel('gift_card_exchange')->warning("失败消息发送未成功", [
+                'request_id' => $this->requestId,
+                'room_id' => $this->input['room_id'],
+                'card_number' => $this->extractCardNumber()
+            ]);
+        }
     }
 }

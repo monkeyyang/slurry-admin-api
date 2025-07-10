@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use App\Models\GiftCardExchangeRecord;
+use App\Models\ItunesTradeAccountLog;
 
 class GiftCardExchangeController extends Controller
 {
@@ -138,6 +139,33 @@ class GiftCardExchangeController extends Controller
                 ]);
             }
 
+            // 检查消息是否已经处理过（防重复）
+            if (!empty($msgId)) {
+                // 检查是否已有相同msgid的兑换记录
+                $existingRecord = ItunesTradeAccountLog::where('msgid', $msgId)
+                    ->whereIn('status', [ItunesTradeAccountLog::STATUS_SUCCESS, ItunesTradeAccountLog::STATUS_PENDING])
+                    ->first();
+                
+                if ($existingRecord) {
+                    Log::channel('gift_card_exchange')->warning('消息已处理过，忽略重复请求', [
+                        'msgid' => $msgId,
+                        'room_id' => $roomId,
+                        'existing_record_id' => $existingRecord->id,
+                        'existing_status' => $existingRecord->status,
+                        'message' => $message
+                    ]);
+                    return response()->json([
+                        'code' => 200,
+                        'message' => '消息已处理过，忽略重复请求',
+                        'data' => [
+                            'existing_record_id' => $existingRecord->id,
+                            'existing_status' => $existingRecord->status,
+                            'processed_time' => $existingRecord->created_at
+                        ],
+                    ]);
+                }
+            }
+
             // 验证消息格式
             $parseResult = $this->giftCardExchangeService->parseMessage($message);
             if (!$parseResult) {
@@ -148,15 +176,42 @@ class GiftCardExchangeController extends Controller
                 ]);
             }
 
+            // 检查礼品卡号是否已经被兑换过
+            $cardNumber = $parseResult['card_number'];
+            $existingCardRecord = ItunesTradeAccountLog::where('code', $cardNumber)
+                ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+                ->first();
+            
+            if ($existingCardRecord) {
+                Log::channel('gift_card_exchange')->warning('礼品卡已被兑换过，忽略重复请求', [
+                    'card_number' => $cardNumber,
+                    'room_id' => $roomId,
+                    'existing_record_id' => $existingCardRecord->id,
+                    'existing_exchange_time' => $existingCardRecord->exchange_time,
+                    'msgid' => $msgId
+                ]);
+                return response()->json([
+                    'code' => 400,
+                    'message' => '礼品卡已被兑换过，请勿重复提交',
+                    'data' => [
+                        'card_number' => $cardNumber,
+                        'existing_record_id' => $existingCardRecord->id,
+                        'existing_exchange_time' => $existingCardRecord->exchange_time
+                    ],
+                ]);
+            }
+
             // 生成请求ID用于追踪
             $requestId = uniqid('exchange_', true);
 
             Log::channel('gift_card_exchange')->info('收到兑换请求，加入队列处理', [
                 'request_id' => $requestId,
                 'message' => $message,
-                'card_number' => $parseResult['card_number'],
+                'card_number' => $cardNumber,
                 'card_type' => $parseResult['card_type']
             ]);
+
+            // 注意：礼品卡兑换的记录将在实际处理过程中记录到 ItunesTradeAccountLog 表
 
             // 将任务加入队列
             ProcessGiftCardExchangeJob::dispatch([
@@ -171,7 +226,7 @@ class GiftCardExchangeController extends Controller
                 'message' => '兑换请求已接收，正在队列中处理',
                 'data' => [
                     'request_id' => $requestId,
-                    'card_number' => $parseResult['card_number'],
+                    'card_number' => $cardNumber,
                     'card_type' => $parseResult['card_type'],
                     'status' => 'queued'
                 ],
