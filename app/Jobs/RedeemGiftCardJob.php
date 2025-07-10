@@ -639,7 +639,7 @@ class RedeemGiftCardJob implements ShouldQueue
 
             // 检查记录是否与当前任务相关（通过batch_id或时间判断）
             $isRelatedRecord = false;
-            
+
             if (!empty($this->batchId) && $pendingRecord->batch_id === $this->batchId) {
                 $isRelatedRecord = true;
             } elseif (empty($this->batchId) && empty($pendingRecord->batch_id)) {
@@ -895,7 +895,7 @@ class RedeemGiftCardJob implements ShouldQueue
             $dailyTarget = $dailyLimit + $plan->float_amount;
 
             // 检查是否达到当天的目标额度
-            $reached = ($dailySpent >= $dailyTarget);
+            $reached = ($dailySpent >= $dailyLimit);
 
             $this->getLogger()->info("检查当日计划达成情况", [
                 'account_id' => $account->id,
