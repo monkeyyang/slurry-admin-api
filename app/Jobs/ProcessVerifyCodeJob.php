@@ -13,25 +13,25 @@ class ProcessVerifyCodeJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $timeout = 120; // 2分钟超时
-    public $tries = 1; // 只尝试一次
+    public int $timeout = 120; // 2分钟超时
+    public int $tries   = 1;   // 只尝试一次
 
-    protected $roomId;
-    protected $msgId;
-    protected $wxid;
-    protected $accounts;
-    protected $uid;
+    protected string $roomId;
+    protected string $msgId;
+    protected string $wxid;
+    protected        $accounts;
+    protected ?int   $uid;
 
     /**
      * Create a new job instance.
      */
     public function __construct($roomId, $msgId, $wxid, $accounts, $uid = null)
     {
-        $this->roomId = $roomId;
-        $this->msgId = $msgId;
-        $this->wxid = $wxid;
+        $this->roomId   = $roomId;
+        $this->msgId    = $msgId;
+        $this->wxid     = $wxid;
         $this->accounts = $accounts;
-        $this->uid = $uid;
+        $this->uid      = $uid;
     }
 
     /**
@@ -40,9 +40,9 @@ class ProcessVerifyCodeJob implements ShouldQueue
     public function handle()
     {
         Log::channel('verify_code_job')->info('开始处理查码任务', [
-            'room_id' => $this->roomId,
-            'msg_id' => $this->msgId,
-            'wxid' => $this->wxid,
+            'room_id'        => $this->roomId,
+            'msg_id'         => $this->msgId,
+            'wxid'           => $this->wxid,
             'accounts_count' => count($this->accounts)
         ]);
 
@@ -54,23 +54,23 @@ class ProcessVerifyCodeJob implements ShouldQueue
         }
 
         // 并发处理多个账号
-        $results = [];
+        $results   = [];
         $processes = [];
 
         foreach ($this->accounts as $account) {
             // 为每个账号创建子进程
-            $process = $this->createChildProcess($account);
+            $process             = $this->createChildProcess($account);
             $processes[$account] = $process;
         }
 
         // 等待所有子进程完成
         foreach ($processes as $account => $pid) {
-            $result = $this->waitForChildProcess($pid, $account);
+            $result    = $this->waitForChildProcess($pid, $account);
             $results[] = $result;
         }
 
         Log::channel('verify_code_job')->info('查码任务完成', [
-            'room_id' => $this->roomId,
+            'room_id'       => $this->roomId,
             'results_count' => count($results)
         ]);
     }
@@ -97,7 +97,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
             } catch (\Exception $e) {
                 Log::channel('verify_code_job')->error('子进程异常', [
                     'account' => $account,
-                    'error' => $e->getMessage()
+                    'error'   => $e->getMessage()
                 ]);
                 exit(1);
             }
@@ -105,7 +105,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
             // 父进程，返回进程ID
             Log::channel('verify_code_job')->info('创建子进程成功', [
                 'account' => $account,
-                'pid' => $pid
+                'pid'     => $pid
             ]);
             return $pid;
         }
@@ -134,22 +134,22 @@ class ProcessVerifyCodeJob implements ShouldQueue
                 unlink($tempFile); // 删除临时文件
                 Log::channel('verify_code_job')->info('子进程完成', [
                     'account' => $account,
-                    'pid' => $pid,
-                    'result' => $result
+                    'pid'     => $pid,
+                    'result'  => $result
                 ]);
                 return $result;
             } else {
                 Log::channel('verify_code_job')->warning('子进程完成但未找到结果文件', [
                     'account' => $account,
-                    'pid' => $pid
+                    'pid'     => $pid
                 ]);
                 return ['account' => $account, 'status' => 'completed', 'message' => '子进程处理完成'];
             }
         } else {
             Log::channel('verify_code_job')->error('子进程异常退出', [
                 'account' => $account,
-                'pid' => $pid,
-                'status' => $status
+                'pid'     => $pid,
+                'status'  => $status
             ]);
             return ['account' => $account, 'status' => 'failed', 'message' => '子进程异常退出'];
         }
@@ -164,7 +164,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
             $result = $this->processSingleAccount($account);
             Log::channel('verify_code_job')->info('串行处理完成', [
                 'account' => $account,
-                'result' => $result
+                'result'  => $result
             ]);
         }
     }
@@ -197,8 +197,8 @@ class ProcessVerifyCodeJob implements ShouldQueue
         } catch (\Exception $e) {
             Log::channel('verify_code_job')->error('查码异常', [
                 'account' => $account,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error'   => $e->getMessage(),
+                'trace'   => $e->getTraceAsString()
             ]);
 
             $this->logOperation($account, 'failed', '查码异常: ' . $e->getMessage());
@@ -213,14 +213,14 @@ class ProcessVerifyCodeJob implements ShouldQueue
     protected function fetchVerifyCode($verifyUrl, $account)
     {
         $startTime = time();
-        $timeout = config('proxy.verify_timeout', 60);
-        $interval = config('proxy.verify_interval', 5);
+        $timeout   = config('proxy.verify_timeout', 60);
+        $interval  = config('proxy.verify_interval', 5);
 
         Log::channel('verify_code_job')->info('开始查码', [
-            'account' => $account,
+            'account'    => $account,
             'verify_url' => $verifyUrl,
-            'timeout' => $timeout,
-            'interval' => $interval,
+            'timeout'    => $timeout,
+            'interval'   => $interval,
             'start_time' => $startTime
         ]);
 
@@ -228,7 +228,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
             try {
                 $response = $this->makeRequest($verifyUrl);
 
-                                if ($response['success']) {
+                if ($response['success']) {
                     $data = $response['data'];
 
                     // 检查响应格式：code为1表示成功，0表示失败
@@ -245,12 +245,12 @@ class ProcessVerifyCodeJob implements ShouldQueue
                             $this->sendWechatMessage($account, $pureCode);
 
                             return [
-                                'account' => $account,
-                                'status' => 'success',
-                                'verify_code' => $pureCode,
+                                'account'       => $account,
+                                'status'        => 'success',
+                                'verify_code'   => $pureCode,
                                 'original_code' => $verifyCode,
-                                'code_time' => $data['data']['code_time'] ?? '',
-                                'expired_date' => $data['data']['expired_date'] ?? ''
+                                'code_time'     => $data['data']['code_time'] ?? '',
+                                'expired_date'  => $data['data']['expired_date'] ?? ''
                             ];
                         } else {
                             Log::channel('verify_code_job')->info('验证码为空，继续等待', ['account' => $account]);
@@ -259,27 +259,27 @@ class ProcessVerifyCodeJob implements ShouldQueue
                         // code为0表示失败，记录错误信息
                         $errorMsg = $data['msg'] ?? '查码失败';
                         Log::channel('verify_code_job')->warning('查码失败', [
-                            'account' => $account,
-                            'error' => $errorMsg,
+                            'account'  => $account,
+                            'error'    => $errorMsg,
                             'response' => $data
                         ]);
                     } else {
                         Log::channel('verify_code_job')->warning('查码响应格式错误', [
-                            'account' => $account,
+                            'account'  => $account,
                             'response' => $data
                         ]);
                     }
                 } else {
                     Log::channel('verify_code_job')->warning('查码请求失败', [
                         'account' => $account,
-                        'error' => $response['error']
+                        'error'   => $response['error']
                     ]);
                 }
 
             } catch (\Exception $e) {
                 Log::channel('verify_code_job')->error('查码请求异常', [
                     'account' => $account,
-                    'error' => $e->getMessage()
+                    'error'   => $e->getMessage()
                 ]);
             }
 
@@ -288,10 +288,10 @@ class ProcessVerifyCodeJob implements ShouldQueue
             }
         }
 
-                Log::channel('verify_code_job')->warning('查码超时', [
-            'account' => $account,
+        Log::channel('verify_code_job')->warning('查码超时', [
+            'account'      => $account,
             'elapsed_time' => time() - $startTime,
-            'timeout' => $timeout
+            'timeout'      => $timeout
         ]);
 
         $this->logOperation($account, 'failed', '查码超时');
@@ -301,7 +301,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
 
         return [
             'account' => $account,
-            'status' => 'timeout',
+            'status'  => 'timeout',
             'message' => '查码超时'
         ];
     }
@@ -316,10 +316,10 @@ class ProcessVerifyCodeJob implements ShouldQueue
 
             $response = \Illuminate\Support\Facades\Http::timeout(config('proxy.request_timeout', 10))
                 ->withHeaders([
-                    'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Accept' => 'application/json, text/plain, */*',
+                    'User-Agent'      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept'          => 'application/json, text/plain, */*',
                     'Accept-Language' => 'zh-CN,zh;q=0.9,en;q=0.8',
-                    'Cache-Control' => 'no-cache',
+                    'Cache-Control'   => 'no-cache',
                 ]);
 
             if ($proxy) {
@@ -333,19 +333,19 @@ class ProcessVerifyCodeJob implements ShouldQueue
             if ($httpResponse->successful()) {
                 return [
                     'success' => true,
-                    'data' => $httpResponse->json()
+                    'data'    => $httpResponse->json()
                 ];
             } else {
                 return [
                     'success' => false,
-                    'error' => 'HTTP ' . $httpResponse->status()
+                    'error'   => 'HTTP ' . $httpResponse->status()
                 ];
             }
 
         } catch (\Exception $e) {
             return [
                 'success' => false,
-                'error' => $e->getMessage()
+                'error'   => $e->getMessage()
             ];
         }
     }
@@ -368,9 +368,9 @@ class ProcessVerifyCodeJob implements ShouldQueue
             if (preg_match($pattern, $verifyCode, $matches)) {
                 $pureCode = $matches[1];
                 Log::channel('verify_code_job')->info('验证码提取成功', [
-                    'original' => $verifyCode,
+                    'original'  => $verifyCode,
                     'extracted' => $pureCode,
-                    'pattern' => $pattern
+                    'pattern'   => $pattern
                 ]);
                 return $pureCode;
             }
@@ -389,7 +389,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
     protected function sendWechatMessage($account, $code)
     {
         try {
-            $roomId = '20229649389@chatroom';
+            $roomId  = '20229649389@chatroom';
             $account = strtolower($account);
             // 根据code内容判断是成功还是失败
             if ($code === '查码超时') {
@@ -405,16 +405,16 @@ class ProcessVerifyCodeJob implements ShouldQueue
 
             Log::channel('verify_code_job')->info('微信消息发送成功', [
                 'account' => $account,
-                'code' => $code,
+                'code'    => $code,
                 'message' => $msg,
                 'room_id' => $roomId
             ]);
 
         } catch (\Exception $e) {
             Log::channel('verify_code_job')->error('微信消息发送失败', [
-                'error' => $e->getMessage(),
+                'error'   => $e->getMessage(),
                 'account' => $account,
-                'code' => $code,
+                'code'    => $code,
                 'room_id' => $roomId
             ]);
         }
@@ -427,21 +427,21 @@ class ProcessVerifyCodeJob implements ShouldQueue
     {
         try {
             \App\Models\OperationLog::create([
-                'uid' => $this->uid,
-                'room_id' => $this->roomId,
-                'wxid' => $this->wxid,
+                'uid'            => $this->uid ?? 0, // 如果uid为null，使用0作为默认值
+                'room_id'        => $this->roomId,
+                'wxid'           => $this->wxid,
                 'operation_type' => 'getVerifyCode',
                 'target_account' => $account,
-                'result' => $result,
-                'details' => $details,
-                'ip_address' => request()->ip() ?? '127.0.0.1',
-                'user_agent' => request()->header('User-Agent') ?? 'Job Process',
+                'result'         => $result,
+                'details'        => $details,
+                'ip_address'     => request()->ip() ?? '127.0.0.1',
+                'user_agent'     => request()->header('User-Agent') ?? 'Job Process',
             ]);
         } catch (\Exception $e) {
             Log::channel('verify_code_job')->error('记录操作日志失败', [
-                'error' => $e->getMessage(),
+                'error'   => $e->getMessage(),
                 'account' => $account,
-                'result' => $result,
+                'result'  => $result,
                 'details' => $details
             ]);
         }

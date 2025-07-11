@@ -27,6 +27,7 @@ class ItunesTradeRateController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+
         try {
             $params = $request->validate([
                 'page' => 'nullable|integer|min:1',
@@ -55,10 +56,6 @@ class ItunesTradeRateController extends Controller
                 $serviceParams['country_name'] = $params['countryName'];
             }
 
-            if (!empty($params['uid'])) {
-                $serviceParams['uid'] = $params['uid'];
-            }
-
             if (!empty($params['userName'])) {
                 $serviceParams['user_name'] = $params['userName'];
             }
@@ -74,6 +71,17 @@ class ItunesTradeRateController extends Controller
             // 关键词搜索（搜索名称）
             if (!empty($params['keyword'])) {
                 $serviceParams['keyword'] = $params['keyword'];
+            }
+
+            if($request->source && $request->source=='brother-api') {
+                $serviceParams['group_id'] = 66;
+            }
+
+            // 判断用户角色
+            $isAdmin =  Auth::user()->is_admin;
+//            $isManager = in_array('warehouseManager', Auth::user()->roles);
+            if(empty($isAdmin)) {
+                $serviceParams['uid'] = Auth::id();
             }
 
             $result = $this->itunesTradeRateService->getTradeRatesWithRelations($serviceParams);

@@ -272,20 +272,20 @@ class GiftCardExchangeService
 
             // 处理国家代码，确保它是有效的国家代码格式
             $countryCode = $taskResult['countryCode'] ?? 'UNKNOWN';
-
+            $countryCode = strtoupper($countryCode);
             // 验证国家代码格式（应该是2-3位字母，不区分大小写）
-            if (!preg_match('/^[A-Za-z]{2,3}$/i', $countryCode)) {
-                // 如果不是标准格式，尝试从country字段提取
-                if (!empty($taskResult['country'])) {
-                    $countryCode = $this->mapCountryNameToCode($taskResult['country']);
-                } else {
-                    Log::channel('gift_card_exchange')->warning('无效的国家代码格式: ' . $countryCode);
-                    $countryCode = 'UNKNOWN';
-                }
-            } else {
-                // 确保国家代码是大写格式
-                $countryCode = strtoupper($countryCode);
-            }
+//            if (!preg_match('/^[A-Za-z]{2,3}$/i', $countryCode)) {
+//                // 如果不是标准格式，尝试从country字段提取
+//                if (!empty($taskResult['country'])) {
+//                    $countryCode = $this->mapCountryNameToCode($taskResult['country']);
+//                } else {
+//                    Log::channel('gift_card_exchange')->warning('无效的国家代码格式: ' . $countryCode);
+//                    $countryCode = 'UNKNOWN';
+//                }
+//            } else {
+//                // 确保国家代码是大写格式
+//                $countryCode = strtoupper($countryCode);
+//            }
 
             // 根据查卡结果构造返回数据
             return [

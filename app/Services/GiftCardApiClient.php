@@ -8,10 +8,26 @@ use Illuminate\Support\Facades\Log;
 class GiftCardApiClient
 {
     protected $baseUrl;
+    protected $authToken;
 
     public function __construct()
     {
-        $this->baseUrl = config('gift_card.api_base_url', 'http://172.16.229.189:8080/api');
+        $this->baseUrl = config('gift_card.api_base_url', 'http://172.16.229.189:8080/api/auth');
+        $this->authToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJkZXZpY2VfaWQiOiI5YmI5N2E3MC01OTM4LTExZjAtOTRiNy02YmMyOTMzOTdkMTQiLCJleHAiOjE3ODMyMTQ4NDcsImlhdCI6MTc1MTY3ODg0NywidXNlcl9pZCI6Mn0.kyjzHW-JuZWOWcTxkhfqBlPTn_XPu8PYdcxJlL464sU';
+    }
+
+    /**
+     * 获取带有认证头的HTTP客户端
+     *
+     * @return \Illuminate\Http\Client\PendingRequest
+     */
+    private function getHttpClient()
+    {
+        return Http::withHeaders([
+            'Authorization' => 'Bearer ' . $this->authToken,
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
+        ]);
     }
 
     /**
@@ -23,7 +39,7 @@ class GiftCardApiClient
     public function createLoginTask(array $accounts): array
     {
         try {
-            $response = Http::post("{$this->baseUrl}/login_poll/new", [
+            $response = $this->getHttpClient()->post("{$this->baseUrl}/login_poll/new", [
                 'list' => $accounts
             ]);
 
@@ -51,7 +67,7 @@ class GiftCardApiClient
     public function getLoginTaskStatus(string $taskId): array
     {
         try {
-            $response = Http::get("{$this->baseUrl}/login_poll/status", [
+            $response = $this->getHttpClient()->get("{$this->baseUrl}/login_poll/status", [
                 'task_id' => $taskId
             ]);
 
@@ -91,7 +107,7 @@ class GiftCardApiClient
                 }
             }
 
-            $response = Http::post("{$this->baseUrl}/del_users", [
+            $response = $this->getHttpClient()->post("{$this->baseUrl}/del_users", [
                 'list' => $formattedAccounts
             ]);
 
@@ -119,7 +135,7 @@ class GiftCardApiClient
     public function refreshUserLogin(array $account): array
     {
         try {
-            $response = Http::post("{$this->baseUrl}/refresh_login", $account);
+            $response = $this->getHttpClient()->post("{$this->baseUrl}/refresh_login", $account);
 
             if (!$response->successful()) {
                 throw new \Exception('刷新用户登录失败: ' . $response->body());
@@ -145,7 +161,7 @@ class GiftCardApiClient
     public function createCardQueryTask(array $cards): array
     {
         try {
-            $response = Http::post("{$this->baseUrl}/batch_query/new", [
+            $response = $this->getHttpClient()->post("{$this->baseUrl}/batch_query/new", [
                 'list' => $cards
             ]);
 
@@ -173,7 +189,7 @@ class GiftCardApiClient
     public function getCardQueryTaskStatus(string $taskId): array
     {
         try {
-            $response = Http::get("{$this->baseUrl}/batch_query/status", [
+            $response = $this->getHttpClient()->get("{$this->baseUrl}/batch_query/status", [
                 'task_id' => $taskId
             ]);
 
@@ -202,7 +218,7 @@ class GiftCardApiClient
     public function createRedemptionTask(array $redemptions, int $interval = 6): array
     {
         try {
-            $response = Http::post("{$this->baseUrl}/redeem/new", [
+            $response = $this->getHttpClient()->post("{$this->baseUrl}/redeem/new", [
                 'list' => $redemptions,
                 'interval' => $interval
             ]);
@@ -231,7 +247,7 @@ class GiftCardApiClient
     public function getRedemptionTaskStatus(string $taskId): array
     {
         try {
-            $response = Http::get("{$this->baseUrl}/redeem/status", [
+            $response = $this->getHttpClient()->get("{$this->baseUrl}/redeem/status", [
                 'task_id' => $taskId
             ]);
 
@@ -270,7 +286,7 @@ class GiftCardApiClient
                 $endTime = now()->format('Y-m-d H:i:s');
             }
 
-            $response = Http::post("{$this->baseUrl}/query_log", [
+            $response = $this->getHttpClient()->post("{$this->baseUrl}/query_log", [
                 'keyword' => $keyword,
                 'start_time' => $startTime,
                 'end_time' => $endTime,
@@ -313,7 +329,7 @@ class GiftCardApiClient
                 $endTime = now()->format('Y-m-d H:i:s');
             }
 
-            $response = Http::post("{$this->baseUrl}/redeem_log", [
+            $response = $this->getHttpClient()->post("{$this->baseUrl}/redeem_log", [
                 'keyword' => $keyword,
                 'start_time' => $startTime,
                 'end_time' => $endTime,

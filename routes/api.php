@@ -274,6 +274,11 @@ Route::group(['middleware' => ['auth:api']], function() {
         });
     });
 
+    Route::prefix('third/itunes')->middleware('itunes.params')->group(function () {
+        // 兄弟汇率获取
+        Route::get('/rates', [ItunesTradeRateController::class, 'index']);
+    });
+
     // iTunes交易路由
     Route::prefix('trade/itunes')->group(function () {
         // 交易汇率管理
