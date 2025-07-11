@@ -147,11 +147,15 @@ class CheckAvailableAccountsByAmount extends Command
             $this->line("  面额 $" . str_pad($amount, 3, ' ', STR_PAD_LEFT) . ": " . str_pad($availableCount, 3, ' ', STR_PAD_LEFT) . " 个账号");
         }
 
+        // 收集详细统计信息
+        $detailedStats = $this->collectDetailedStatistics($country, $accounts);
+
         // 记录到日志
         $this->getLogger()->info("账号可用性统计", [
             'country' => $country,
             'total_accounts' => $accounts->count(),
-            'statistics' => $statistics
+            'statistics' => $statistics,
+            'detailed_stats' => $detailedStats
         ]);
 
         // 输出详细分析
@@ -161,6 +165,7 @@ class CheckAvailableAccountsByAmount extends Command
         return [
             'total_accounts' => $accounts->count(),
             'statistics' => $statistics,
+            'detailed_stats' => $detailedStats,
             'no_accounts' => false
         ];
     }
@@ -236,27 +241,74 @@ class CheckAvailableAccountsByAmount extends Command
     }
 
     /**
+     * 收集详细统计信息
+     */
+    private function collectDetailedStatistics(string $country, $accounts): array
+    {
+        // 获取所有相关账号（包含waiting状态的账号）
+        $allAccounts = ItunesTradeAccount::whereIn('status', [
+                ItunesTradeAccount::STATUS_PROCESSING,
+                ItunesTradeAccount::STATUS_WAITING
+            ])
+            ->where('country_code', $country)
+            ->whereNull('deleted_at')
+            ->get();
+
+        // 分析零余额账号（包含waiting状态）
+        $zeroBalanceCount = $allAccounts->where('amount', 0)->count();
+
+        // 分析有计划账号（包含waiting状态的账号）
+        $withPlanCount = $allAccounts->whereNotNull('plan_id')->count();
+        $withoutPlanCount = $allAccounts->whereNull('plan_id')->count();
+
+        // 分析账号余额分布（包含waiting状态）
+        $balanceRanges = [
+            '0' => $allAccounts->where('amount', 0)->count(),
+            '1-500' => $allAccounts->whereBetween('amount', [0.01, 500])->count(),
+            '501-1000' => $allAccounts->whereBetween('amount', [501, 1000])->count(),
+            '1001-1500' => $allAccounts->whereBetween('amount', [1001, 1500])->count(),
+            '1500+' => $allAccounts->where('amount', '>', 1500)->count(),
+        ];
+
+        return [
+            'zero_balance_count' => $zeroBalanceCount,
+            'with_plan_count' => $withPlanCount,
+            'without_plan_count' => $withoutPlanCount,
+            'balance_ranges' => $balanceRanges
+        ];
+    }
+
+    /**
      * 输出详细分析
      */
     private function outputDetailedAnalysis(string $country, $accounts, array $statistics): void
     {
-        // 分析零余额账号
-        $zeroBalanceCount = $accounts->where('amount', 0)->count();
+        // 获取所有相关账号（包含waiting状态的账号）
+        $allAccounts = ItunesTradeAccount::whereIn('status', [
+                ItunesTradeAccount::STATUS_PROCESSING,
+                ItunesTradeAccount::STATUS_WAITING
+            ])
+            ->where('country_code', $country)
+            ->whereNull('deleted_at')
+            ->get();
+
+        // 分析零余额账号（包含waiting状态）
+        $zeroBalanceCount = $allAccounts->where('amount', 0)->count();
         $this->line("  零余额账号: {$zeroBalanceCount} 个（可兑换所有面额）");
 
-        // 分析有计划账号
-        $withPlanCount = $accounts->whereNotNull('plan_id')->count();
-        $withoutPlanCount = $accounts->whereNull('plan_id')->count();
+        // 分析有计划账号（包含waiting状态的账号）
+        $withPlanCount = $allAccounts->whereNotNull('plan_id')->count();
+        $withoutPlanCount = $allAccounts->whereNull('plan_id')->count();
         $this->line("  有计划账号: {$withPlanCount} 个");
         $this->line("  无计划账号: {$withoutPlanCount} 个");
 
-        // 分析账号余额分布
+        // 分析账号余额分布（包含waiting状态）
         $balanceRanges = [
-            '0' => $accounts->where('amount', 0)->count(),
-            '1-500' => $accounts->whereBetween('amount', [0.01, 500])->count(),
-            '501-1000' => $accounts->whereBetween('amount', [501, 1000])->count(),
-            '1001-1500' => $accounts->whereBetween('amount', [1001, 1500])->count(),
-            '1500+' => $accounts->where('amount', '>', 1500)->count(),
+            '0' => $allAccounts->where('amount', 0)->count(),
+            '1-500' => $allAccounts->whereBetween('amount', [0.01, 500])->count(),
+            '501-1000' => $allAccounts->whereBetween('amount', [501, 1000])->count(),
+            '1001-1500' => $allAccounts->whereBetween('amount', [1001, 1500])->count(),
+            '1500+' => $allAccounts->where('amount', '>', 1500)->count(),
         ];
 
         $this->line("  余额分布:");
@@ -323,6 +375,18 @@ class CheckAvailableAccountsByAmount extends Command
                 $bottleneckAmounts = $this->findBottleneckAmounts($results['statistics']);
                 if (!empty($bottleneckAmounts)) {
                     $message .= "⚠️ 瓶颈面额: $" . implode(', $', $bottleneckAmounts) . "\n";
+                }
+                
+                // 显示详细统计信息
+                if (isset($results['detailed_stats'])) {
+                    $stats = $results['detailed_stats'];
+                    $message .= "零余额账号: {$stats['zero_balance_count']} 个（可兑换所有面额）\n";
+                    $message .= "有计划账号: {$stats['with_plan_count']} 个\n";
+                    $message .= "无计划账号: {$stats['without_plan_count']} 个\n";
+                    $message .= "余额分布:\n";
+                    foreach ($stats['balance_ranges'] as $range => $count) {
+                        $message .= "  {$range}: {$count} 个\n";
+                    }
                 }
                 
                 $message .= "\n";
