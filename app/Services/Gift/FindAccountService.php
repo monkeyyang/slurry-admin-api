@@ -739,16 +739,17 @@ class FindAccountService
     {
         return DB::transaction(function () use ($accountId, $plan, $roomId, $currentDay) {
             // 原子更新：只有状态仍为processing时才能锁定
+            // 注意：不重写current_plan_day，保持账号原有的天数设置
             $lockResult = DB::table('itunes_trade_accounts')
                 ->where('id', $accountId)
                 ->where('status', ItunesTradeAccount::STATUS_PROCESSING)
                 ->whereNull('deleted_at')
                 ->update([
-                    'status'           => ItunesTradeAccount::STATUS_LOCKING,
-                    'plan_id'          => $plan->id,
-                    'room_id'          => $roomId,
-                    'current_plan_day' => $currentDay,
-                    'updated_at'       => now()
+                    'status'     => ItunesTradeAccount::STATUS_LOCKING,
+                    'plan_id'    => $plan->id,
+                    'room_id'    => $roomId,
+                    // 移除 'current_plan_day' => $currentDay, 保持原有天数
+                    'updated_at' => now()
                 ]);
 
             if ($lockResult > 0) {
@@ -756,12 +757,12 @@ class FindAccountService
                 $account = ItunesTradeAccount::find($accountId);
 
                 $this->getLogger()->info("账号原子锁定成功", [
-                    'account_id'    => $accountId,
-                    'account_email' => $account->account ?? 'unknown',
-                    'plan_id'       => $plan->id,
-                    'room_id'       => $roomId,
-                    'current_day'   => $currentDay,
-                    'lock_method'   => 'intersection_filtering'
+                    'account_id'         => $accountId,
+                    'account_email'      => $account->account ?? 'unknown',
+                    'plan_id'            => $plan->id,
+                    'room_id'            => $roomId,
+                    'preserved_plan_day' => $account->current_plan_day ?? 1,
+                    'lock_method'        => 'intersection_filtering'
                 ]);
 
                 return $account;

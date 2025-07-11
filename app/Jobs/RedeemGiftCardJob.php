@@ -245,7 +245,19 @@ class RedeemGiftCardJob implements ShouldQueue
                 try {
                     // 检查是否存在wechat_msg键
                     if (isset($result['wechat_msg']) && !empty($result['wechat_msg'])) {
-                        send_msg_to_wechat($this->roomId, $result['wechat_msg']);
+                        $sendResult = send_msg_to_wechat($this->roomId, $result['wechat_msg']);
+                        if (!$sendResult) {
+                            $this->getLogger()->warning("微信消息发送失败", [
+                                'card_code' => $this->giftCardCode,
+                                'room_id' => $this->roomId,
+                                'message_length' => strlen($result['wechat_msg'])
+                            ]);
+                        } else {
+                            $this->getLogger()->info("微信消息发送成功", [
+                                'card_code' => $this->giftCardCode,
+                                'room_id' => $this->roomId
+                            ]);
+                        }
                     } else {
                         $this->getLogger()->warning("兑换结果中缺少微信消息内容", [
                             'card_code' => $this->giftCardCode,
@@ -253,7 +265,7 @@ class RedeemGiftCardJob implements ShouldQueue
                         ]);
                     }
                 } catch (Throwable $e) {
-                    $this->getLogger()->warning("微信消息发送失败，但不影响兑换结果", [
+                    $this->getLogger()->warning("微信消息发送异常，但不影响兑换结果", [
                         'card_code' => $this->giftCardCode,
                         'error' => $e->getMessage()
                     ]);
@@ -296,9 +308,16 @@ class RedeemGiftCardJob implements ShouldQueue
                 // 发送失败消息 - 使用try-catch避免二次失败
                 if (!in_array($this->roomId, ['brother-card@api', 'no-send-msg@api'])) {
                     try {
-                        send_msg_to_wechat($this->roomId, "兑换失败\n-------------------------\n" . $this->giftCardCode . "\n" . $e->getMessage());
+                        $failMessage = "兑换失败\n-------------------------\n" . $this->giftCardCode . "\n" . $e->getMessage();
+                        $sendResult = send_msg_to_wechat($this->roomId, $failMessage);
+                        if (!$sendResult) {
+                            $this->getLogger()->warning("失败消息发送未成功", [
+                                'card_code' => $this->giftCardCode,
+                                'room_id' => $this->roomId
+                            ]);
+                        }
                     } catch (Throwable $msgError) {
-                        $this->getLogger()->warning("失败消息发送失败", [
+                        $this->getLogger()->warning("失败消息发送异常", [
                             'card_code' => $this->giftCardCode,
                             'error' => $msgError->getMessage()
                         ]);

@@ -41,13 +41,21 @@ class Kernel extends ConsoleKernel
 //                ->runInBackground()
 //                ->appendOutputTo(storage_path('logs/itunes_maintain_status.log'));
 //
-//        // 每30分钟 - 日期推进（外部调度控制间隔）
-//        $schedule->command('itunes:advance-days')
-//                ->everyThirtyMinutes()
-//                ->name('advance_account_days')
-//                ->withoutOverlapping()
-//                ->runInBackground()
-//                ->appendOutputTo(storage_path('logs/itunes_advance_days.log'));
+        // 每30分钟 - 日期推进（外部调度控制间隔）
+        $schedule->command('itunes:advance-days')
+                ->everyFiveMinutes()
+                ->name('advance_account_days')
+                ->withoutOverlapping()
+                ->runInBackground()
+                ->appendOutputTo(storage_path('logs/itunes_advance_days.log'));
+
+        // 每30分钟 - 检查各个面额可兑换的账号数量
+        $schedule->command('itunes:check-available-accounts')
+                ->everyThirtyMinutes()
+                ->name('check_available_accounts_by_amount')
+                ->withoutOverlapping()
+                ->runInBackground()
+                ->appendOutputTo(storage_path('logs/itunes_available_accounts.log'));
 //
 //        // 每30分钟 - 零余额账号维护（较少频繁）
 //        $schedule->command('itunes:maintain-zero-accounts')

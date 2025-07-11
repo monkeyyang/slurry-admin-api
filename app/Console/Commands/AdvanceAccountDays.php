@@ -97,7 +97,7 @@ class AdvanceAccountDays extends Command
     private function processWaitingAccount(ItunesTradeAccount $account): void
     {
         $this->getLogger()->info("处理WAITING账号: {$account->account}");
-
+        $this->info("处理WAITING账号: {$account->account}");
         // 1. 检查是否已达到总目标
         if ($this->isAccountCompleted($account)) {
             $this->info("🎉 账号已完成: {$account->account} -> COMPLETED");
@@ -108,8 +108,61 @@ class AdvanceAccountDays extends Command
             return;
         }
 
-        // 2. 总额未完成，直接将状态改为 PROCESSING
-        $this->info("⚡ 账号继续处理: {$account->account} -> PROCESSING");
+        // 2. 无计划账号 - 如果余额大于0则转为PROCESSING，否则保持等待
+        if (!$account->plan) {
+            if ($account->amount > 0) {
+                $this->info("💸 无计划有余额账号: {$account->account} -> PROCESSING (可用于兑换)");
+
+                if (!$this->dryRun) {
+                    $account->timestamps = false;
+                    $account->update(['status' => ItunesTradeAccount::STATUS_PROCESSING]);
+                    $account->timestamps = true;
+
+                    // 通过队列请求登录
+                    // ProcessAppleAccountLoginJob::dispatch($account->id, 'no_plan_with_balance');
+                }
+            } else {
+                $this->getLogger()->debug("无计划零余额账号保持等待: {$account->account}");
+            }
+            return;
+        }
+
+        // 3. 检查是否有兑换记录
+        $lastSuccessLog = ItunesTradeAccountLog::where('account_id', $account->id)
+            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+            ->orderBy('exchange_time', 'desc')
+            ->first();
+
+        if (!$lastSuccessLog) {
+            $this->info("🚀 新账号开始: {$account->account} -> PROCESSING");
+
+            if (!$this->dryRun) {
+                $account->timestamps = false;
+                $account->update(['status' => ItunesTradeAccount::STATUS_PROCESSING]);
+                $account->timestamps = true;
+
+                // 通过队列请求登录
+                // ProcessAppleAccountLoginJob::dispatch($account->id, 'new_account_start');
+            }
+            return;
+        }
+
+        // 4. 检查天数间隔（不再检查当日计划完成）
+        $lastExchangeTime    = Carbon::parse($lastSuccessLog->exchange_time);
+        $now                 = now();
+        $intervalHours       = $lastExchangeTime->diffInHours($now);
+        $requiredDayInterval = max(1, $account->plan->day_interval ?? 24);
+
+        if ($intervalHours < $requiredDayInterval) {
+
+            $remaining = $requiredDayInterval - $intervalHours;
+            $this->info("账号 {$account->account} 天数间隔不足，还需 {$remaining} 小时");
+            $this->getLogger()->debug("账号 {$account->account} 天数间隔不足，还需 {$remaining} 小时");
+            return;
+        }
+
+        // 5. 天数间隔已满足，总额未完成，转为 PROCESSING
+        $this->info("⚡ 账号继续处理: {$account->account} -> PROCESSING (天数间隔已满足)");
 
         if (!$this->dryRun) {
             $account->timestamps = false;
@@ -117,7 +170,7 @@ class AdvanceAccountDays extends Command
             $account->timestamps = true;
 
             // 通过队列请求登录
-            // ProcessAppleAccountLoginJob::dispatch($account->id, 'waiting_to_processing');
+            // ProcessAppleAccountLoginJob::dispatch($account->id, 'interval_satisfied');
         }
     }
 

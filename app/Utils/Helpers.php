@@ -99,35 +99,96 @@ function check_bot_heartbeat(): array
  */
 function send_msg_to_wechat(string $roomId, string $msg, string $type = 'MT_SEND_TEXTMSG'): bool
 {
-    // 拼接content
-    $content = [
-        'data' => [
-            'to_wxid' => $roomId,
-            'content' => $msg
-        ],
-        'client_id' => 1,
-        'type'      => $type
-    ];
-    $curl = curl_init();
-    curl_setopt_array($curl, [
-        CURLOPT_URL            => 'http://106.52.250.202:6666/',
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_ENCODING       => '',
-        CURLOPT_MAXREDIRS      => 10,
-        CURLOPT_TIMEOUT        => 0,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
-        CURLOPT_CUSTOMREQUEST  => 'POST',
-        CURLOPT_POSTFIELDS     => json_encode($content),
-        CURLOPT_HTTPHEADER     => [
-            'User-Agent: Apifox/1.0.0 (https://www.apifox.cn)',
-            'Content-Type: application/json',
-        ],
-    ]);
-    curl_exec($curl);
-    curl_close($curl);
+    try {
+        // 拼接content
+        $content = [
+            'data' => [
+                'to_wxid' => $roomId,
+                'content' => $msg
+            ],
+            'client_id' => 1,
+            'type'      => $type
+        ];
 
-    return true;
+        // 记录发送请求日志
+        Log::channel('wechat')->info('发送微信消息', [
+            'room_id' => $roomId,
+            'message_type' => $type,
+            'message_length' => strlen($msg),
+            'message_preview' => mb_substr($msg, 0, 100) . (strlen($msg) > 100 ? '...' : '')
+        ]);
+
+        $curl = curl_init();
+        curl_setopt_array($curl, [
+            CURLOPT_URL            => 'http://106.52.250.202:6666/',
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING       => '',
+            CURLOPT_MAXREDIRS      => 10,
+            CURLOPT_TIMEOUT        => 30, // 设置超时时间
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST  => 'POST',
+            CURLOPT_POSTFIELDS     => json_encode($content),
+            CURLOPT_HTTPHEADER     => [
+                'User-Agent: Apifox/1.0.0 (https://www.apifox.cn)',
+                'Content-Type: application/json',
+            ],
+        ]);
+
+        $response = curl_exec($curl);
+        $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($curl);
+        curl_close($curl);
+
+        // 检查CURL错误
+        if ($curlError) {
+            Log::channel('wechat')->error('微信消息发送失败 - CURL错误', [
+                'room_id' => $roomId,
+                'curl_error' => $curlError,
+                'message_preview' => mb_substr($msg, 0, 100)
+            ]);
+            return false;
+        }
+
+        // 检查HTTP状态码
+        if ($httpCode !== 200) {
+            Log::channel('wechat')->error('微信消息发送失败 - HTTP错误', [
+                'room_id' => $roomId,
+                'http_code' => $httpCode,
+                'response' => $response,
+                'message_preview' => mb_substr($msg, 0, 100)
+            ]);
+            return false;
+        }
+
+        // 尝试解析响应
+        $responseData = json_decode($response, true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            Log::channel('wechat')->info('微信消息发送成功', [
+                'room_id' => $roomId,
+                'response_data' => $responseData,
+                'message_length' => strlen($msg)
+            ]);
+        } else {
+            Log::channel('wechat')->info('微信消息发送完成', [
+                'room_id' => $roomId,
+                'http_code' => $httpCode,
+                'response' => $response,
+                'message_length' => strlen($msg)
+            ]);
+        }
+
+        return true;
+
+    } catch (\Exception $e) {
+        Log::channel('wechat')->error('微信消息发送异常', [
+            'room_id' => $roomId,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
+            'message_preview' => mb_substr($msg, 0, 100)
+        ]);
+        return false;
+    }
 }
 
 /**
