@@ -308,14 +308,14 @@ class ItunesTradeRateService
     public function deleteTradeRate(int $id): array
     {
         $tradeRate = ItunesTradeRate::find($id);
-        
+
         if (!$tradeRate) {
             throw new \Exception('汇率不存在');
         }
 
         // 检查是否有有效的计划正在使用这个汇率
         $activePlans = \App\Models\ItunesTradePlan::where('rate_id', $id)->get();
-        
+
         if ($activePlans->isNotEmpty()) {
             $planNames = $activePlans->pluck('name')->toArray();
             throw new \Exception('无法删除汇率，以下计划正在使用该汇率：' . implode('、', $planNames));
@@ -342,14 +342,14 @@ class ItunesTradeRateService
         $tradeRates = ItunesTradeRate::whereIn('id', $ids)->get();
         $foundIds = $tradeRates->pluck('id')->toArray();
         $missingIds = array_diff($ids, $foundIds);
-        
+
         if (!empty($missingIds)) {
             throw new \Exception('以下汇率不存在：' . implode('、', $missingIds));
         }
 
         // 检查是否有有效的计划正在使用这些汇率
         $activePlans = \App\Models\ItunesTradePlan::whereIn('rate_id', $ids)->get();
-        
+
         if ($activePlans->isNotEmpty()) {
             $usedRates = [];
             foreach ($activePlans as $plan) {

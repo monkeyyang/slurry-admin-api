@@ -30,6 +30,10 @@ class ItunesTradePlanService
             $query->byRate($params['rate_id']);
         }
 
+        if (!empty($params['type'])) {
+            $query->byType($params['type']);
+        }
+
         if (!empty($params['uid'])) {
             $query->byUser($params['uid']);
         }
@@ -123,7 +127,7 @@ class ItunesTradePlanService
     public function deletePlan(int $id): bool
     {
         $plan = ItunesTradePlan::find($id);
-        
+
         if (!$plan) {
             return false;
         }
@@ -152,13 +156,13 @@ class ItunesTradePlanService
     public function updatePlanStatus(int $id, string $status): ?ItunesTradePlan
     {
         $plan = ItunesTradePlan::find($id);
-        
+
         if (!$plan) {
             return null;
         }
 
         $plan->update(['status' => $status]);
-        
+
         return $plan;
     }
 
@@ -172,18 +176,18 @@ class ItunesTradePlanService
     public function addDaysToPlan(int $id, int $additionalDays): ?ItunesTradePlan
     {
         $plan = ItunesTradePlan::find($id);
-        
+
         if (!$plan) {
             return null;
         }
 
         // 更新计划天数
         $newPlanDays = $plan->plan_days + $additionalDays;
-        
+
         // 扩展每日金额数组
         $dailyAmounts = $plan->daily_amounts;
         $avgAmount = $plan->total_amount / $newPlanDays;
-        
+
         // 为新增的天数添加平均金额
         for ($i = 0; $i < $additionalDays; $i++) {
             $dailyAmounts[] = $avgAmount;
@@ -226,4 +230,4 @@ class ItunesTradePlanService
             'by_status' => $byStatus,
         ];
     }
-} 
+}

@@ -186,12 +186,14 @@ class FindAccountService
               AND a.amount >= 0
               AND (a.amount + ?) <= ?
               AND a.deleted_at IS NULL
+              AND a.account_type = ?
         ";
 
         $params = [
             $country,
             $giftCardAmount,
-            $plan->total_amount
+            $plan->total_amount,
+            $plan->plan_type
         ];
 
         $result = DB::select($sql, $params);

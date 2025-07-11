@@ -18,6 +18,9 @@ class ItunesTradePlan extends Model
     const STATUS_ENABLED = 'enabled';
     const STATUS_DISABLED = 'disabled';
 
+    const PLAN_TYPE_DEVICE = 'device';
+    const PLAN_TYPE_GAME = 'game';
+
     protected $fillable = [
         'uid',
         'name',
@@ -33,6 +36,7 @@ class ItunesTradePlan extends Model
         'bind_room',
         'status',
         'description',
+        'plan_type'
     ];
 
     protected $casts = [
@@ -66,6 +70,12 @@ class ItunesTradePlan extends Model
     public function user()
     {
         return $this->belongsTo('App\Models\User', 'uid');
+    }
+
+    // 作用域: 按类型筛选
+    public function scopeByType($query, $type)
+    {
+        return $query->where('plan_type', $type);
     }
 
     /**
@@ -147,6 +157,7 @@ class ItunesTradePlan extends Model
             'name' => $this->name,
             'country_code' => $this->country_code,
             'country_name' => $countryInfo ? $countryInfo->name_zh : null,
+            'type'         => $this->plan_type,
             'rate_id' => $this->rate_id,
             'rate_name' => $rateInfo ? $rateInfo->name : null,
             'plan_days' => $this->plan_days,

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ItunesTradeAccount;
+use App\Models\ItunesTradePlan;
 use Exception;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -31,6 +32,10 @@ class ItunesTradeAccountService
 
         if (!empty($params['status'])) {
             $query->byStatus($params['status']);
+        }
+
+        if (!empty($params['type'])) {
+            $query->byType($params['type']);
         }
 
         if (!empty($params['loginStatus'])) {
@@ -84,7 +89,7 @@ class ItunesTradeAccountService
     /**
      * 批量导入账号
      */
-    public function batchImportAccounts(string $country, array $accountsData): array
+    public function batchImportAccounts(string $country, array $accountsData, string $type): array
     {
         $successCount = 0;
         $restoredAccounts = [];
@@ -105,10 +110,12 @@ class ItunesTradeAccountService
 //                            'VerifyUrl' => $apiUrl
 //                        ];
 //                var_dump($loginItems);exit;
+
                 // 检查是否已存在（包括已删除的）
                 $existing = ItunesTradeAccount::withTrashed()
                                             ->where('account', $account)
                                             ->where('country_code', $country)
+                                            ->where('account_type', $type)
                                             ->first();
 
                 if ($existing) {
@@ -160,7 +167,8 @@ class ItunesTradeAccountService
                         'country_code' => $country,
                         'login_status' => 'invalid',
                         'status' => ItunesTradeAccount::STATUS_PROCESSING,
-                        'uid' => Auth::id()
+                        'uid' => Auth::id(),
+                        'account_type' => $type
                     ]);
 
                     $createdAccounts[] = $newAccount;

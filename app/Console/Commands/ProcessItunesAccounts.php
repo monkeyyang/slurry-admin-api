@@ -557,7 +557,7 @@ class ProcessItunesAccounts extends Command
                 foreach ($items as $item) {
                     $itemStatus = $item['status'] ?? '';
                     $itemMsg = $item['msg'] ?? '';
-                    
+
                     if ($itemStatus === 'completed') {
                         $this->processLoginResult($item, $accounts);
 
@@ -677,7 +677,7 @@ class ProcessItunesAccounts extends Command
                 if ($result) {
                     try {
                         $resultData = json_decode($result, true);
-                        
+
                         $this->getLogger()->info("💰 批量登录获取余额数据", [
                             'account' => $username,
                             'result_data' => $resultData,
@@ -691,7 +691,7 @@ class ProcessItunesAccounts extends Command
                             $balance = (float)preg_replace('/[^\d.-]/', '', $balanceString);
                             $oldBalance = $account->amount; // 在更新前保存旧余额
                             $account->update(['amount' => $balance]);
-                            
+
                             $this->getLogger()->info("💵 批量登录更新余额", [
                                 'account' => $username,
                                 'old_balance' => $oldBalance,
@@ -834,12 +834,12 @@ class ProcessItunesAccounts extends Command
                         ->where('day', $currentDay)
                         ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
                         ->count();
-                    
+
                     // 只有在当前天没有兑换记录的情况下才检查前一天是否未完成
                     if ($currentDayExchangeCount == 0) {
                         $previousDay = $currentDay - 1;
                         $isPreviousDayCompleted = $this->isDailyPlanCompleted($account, $previousDay);
-                        
+
                         // 只处理严重情况：前一天未完成但被错误推进到当前天
                         if (!$isPreviousDayCompleted) {
                             $this->getLogger()->warning("账号 {$account->account} 严重的天数不一致：前一天未完成但被错误推进到当前天，回退到前一天", [
@@ -866,7 +866,7 @@ class ProcessItunesAccounts extends Command
                         // 如果前一天已完成，说明正常进入当前天，不做任何状态改变
                     }
                 }
-                
+
                 $this->getLogger()->debug("账号 {$account->account} 当日计划未完成，保持PROCESSING状态", [
                     'current_day' => $currentDay,
                     'login_status' => $account->login_status
@@ -1102,7 +1102,7 @@ class ProcessItunesAccounts extends Command
             if (empty($currentDay) || $currentDay <= 0) {
                 $currentDay = 1;
             }
-            
+
             $account->timestamps = false;
             $account->update([
                 'status' => ItunesTradeAccount::STATUS_PROCESSING,
@@ -1341,7 +1341,7 @@ class ProcessItunesAccounts extends Command
                         if (isset($resultData['balance'])) {
                             $balanceString = $resultData['balance'];
                             $balance = (float)preg_replace('/[^\d.-]/', '', $balanceString);
-                            
+
                             $this->getLogger()->info("💵 账号余额解析", [
                                 'account' => $account->account,
                                 'balance_string' => $balanceString,

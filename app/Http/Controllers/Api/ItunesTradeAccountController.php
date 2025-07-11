@@ -34,6 +34,7 @@ class ItunesTradeAccountController extends Controller
                 'endTime' => 'nullable|date|after_or_equal:startTime',
                 'pageNum' => 'nullable|integer|min:1',
                 'pageSize' => 'nullable|integer|min:1|max:10000',
+                'type' => 'nullable|string|max:50',
             ]);
 
             $result = $this->accountService->getAccountsWithPagination($params);
@@ -97,6 +98,7 @@ class ItunesTradeAccountController extends Controller
                 'accounts.*.account' => 'required|string|max:255',
                 'accounts.*.password' => 'required|string|max:255',
                 'accounts.*.apiUrl' => 'nullable|string|max:500',
+                'type' => 'required|string|max:50',
             ], [
             'country_code.required'   => '请选择国家',
             'accounts.required'     => '账号不能为空，单次提交最多50条',
@@ -108,9 +110,11 @@ class ItunesTradeAccountController extends Controller
         ]);
 
         try {
+
             $result = $this->accountService->batchImportAccounts(
                 $validated['country_code'],
-                $validated['accounts']
+                $validated['accounts'],
+                $validated['type']
             );
 
             return response()->json([

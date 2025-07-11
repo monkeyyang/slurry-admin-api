@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ItunesTradePlan;
 use App\Services\ItunesTradePlanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -35,6 +36,7 @@ class ItunesTradePlanController extends Controller
                 'bind_room' => ['nullable', Rule::in(['0', '1'])],
                 'status' => ['nullable', Rule::in(['enabled', 'disabled'])],
                 'keyword' => 'nullable|string|max:255',
+                'type' => 'nullable|string|max:50',
             ]);
 
             // 转换参数格式以适配服务类
@@ -62,6 +64,10 @@ class ItunesTradePlanController extends Controller
 
             if (!empty($params['keyword'])) {
                 $serviceParams['keyword'] = $params['keyword'];
+            }
+
+            if (!empty($params['type'])) {
+                $serviceParams['type'] = $params['type'];
             }
 
             $result = $this->planService->getPlansWithPagination($serviceParams);
@@ -145,6 +151,7 @@ class ItunesTradePlanController extends Controller
                 'bind_room' => 'nullable|integer|in:0,1',
                 'status' => ['nullable', Rule::in(['enabled', 'disabled'])],
                 'description' => 'nullable|string|max:1000',
+                'plan_type' => 'nullable|string|max:1000',
             ]);
 
             // 设置默认值
@@ -154,6 +161,7 @@ class ItunesTradePlanController extends Controller
             $validated['bind_room'] = $validated['bind_room'] ?? 0;
             $validated['status'] = $validated['status'] ?? 'enabled';
             $validated['completed_days'] = [];
+            $validated['plan_type'] = $validated['plan_type'] ?? ItunesTradePlan::PLAN_TYPE_DEVICE;
 
             $plan = $this->planService->createOrUpdatePlan($validated);
 
@@ -203,6 +211,7 @@ class ItunesTradePlanController extends Controller
                 'bind_room' => 'nullable|integer|in:0,1',
                 'status' => ['nullable', Rule::in(['enabled', 'disabled'])],
                 'description' => 'nullable|string|max:1000',
+                'plan_type' => 'nullable|string|max:1000',
             ]);
 
             $plan = $this->planService->createOrUpdatePlan($validated, $id);

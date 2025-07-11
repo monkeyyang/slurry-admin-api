@@ -40,6 +40,7 @@ class ItunesTradeAccount extends Model
         'plan_id',
         'room_id',
         'uid',
+        'account_type',
     ];
 
     protected $casts = [
@@ -66,6 +67,11 @@ class ItunesTradeAccount extends Model
         if (!empty($value)) {
             $this->setEncryptedPassword($value);
         }
+    }
+
+    public function scopeByType($query, $type)
+    {
+        return $query->where('account_type', $type);
     }
 
     /**
@@ -324,6 +330,7 @@ class ItunesTradeAccount extends Model
             'country_code'   => $this->country_code,
             'amount'         => $this->amount,
             'status'         => $this->status,
+            'type'           => $this->account_type,
             'loginStatus'    => $this->login_status,
             'currentPlanDay' => $this->current_plan_day,
             'planId'         => $this->plan_id ? (string)$this->plan_id : null,
