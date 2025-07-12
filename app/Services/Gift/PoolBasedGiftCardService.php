@@ -347,13 +347,14 @@ class PoolBasedGiftCardService
             
             $message = $this->buildWechatMessage($account, $giftCardInfo, $exchangedAmount, $newBalance, $plan);
             
-            // 发送微信消息
-            send_msg_to_wechat($roomId, $message);
+            // 发送微信消息（使用队列）
+            $messageId = send_msg_to_wechat($roomId, $message, 'MT_SEND_TEXTMSG', true, 'gift-card-exchange');
             
-            Log::info("微信通知发送成功", [
+            Log::info("微信通知发送成功（队列）", [
                 'account_id' => $account->id,
                 'room_id' => $roomId,
-                'message_length' => strlen($message)
+                'message_length' => strlen($message),
+                'message_id' => $messageId
             ]);
             
         } catch (Exception $e) {

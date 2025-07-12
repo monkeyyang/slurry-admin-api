@@ -2,11 +2,15 @@
 
 namespace App\Jobs;
 
+use App\Models\OperationLog;
+use App\Services\ProxyService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Env;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class ProcessVerifyCodeJob implements ShouldQueue
@@ -158,7 +162,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
     /**
      * 串行处理账号（备用方案）
      */
-    protected function processAccountsSequentially()
+    protected function processAccountsSequentially(): void
     {
         foreach ($this->accounts as $account) {
             $result = $this->processSingleAccount($account);
@@ -172,7 +176,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
     /**
      * 处理单个账号的查码
      */
-    protected function processSingleAccount($account)
+    protected function processSingleAccount($account): array
     {
         try {
             // 查找账号对应的验证码地址
@@ -190,9 +194,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
             }
 
             // 开始查码
-            $result = $this->fetchVerifyCode($verifyUrl, $account);
-
-            return $result;
+            return $this->fetchVerifyCode($verifyUrl, $account);
 
         } catch (\Exception $e) {
             Log::channel('verify_code_job')->error('查码异常', [
@@ -210,7 +212,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
     /**
      * 获取验证码
      */
-    protected function fetchVerifyCode($verifyUrl, $account)
+    protected function fetchVerifyCode($verifyUrl, $account): array
     {
         $startTime = time();
         $timeout   = config('proxy.verify_timeout', 60);
@@ -309,12 +311,12 @@ class ProcessVerifyCodeJob implements ShouldQueue
     /**
      * 发送HTTP请求
      */
-    protected function makeRequest($url)
+    protected function makeRequest($url): array
     {
         try {
-            $proxy = \App\Services\ProxyService::getProxy();
+            $proxy = ProxyService::getProxy();
 
-            $response = \Illuminate\Support\Facades\Http::timeout(config('proxy.request_timeout', 10))
+            $response = Http::timeout(config('proxy.request_timeout', 10))
                 ->withHeaders([
                     'User-Agent'      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                     'Accept'          => 'application/json, text/plain, */*',
@@ -353,7 +355,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
     /**
      * 提取纯数字验证码
      */
-    protected function extractPureCode($verifyCode)
+    protected function extractPureCode($verifyCode): string
     {
         // 尝试多种模式提取纯数字验证码
         $patterns = [
@@ -386,36 +388,61 @@ class ProcessVerifyCodeJob implements ShouldQueue
     /**
      * 发送微信消息
      */
-    protected function sendWechatMessage($account, $code)
+    protected function sendWechatMessage($account, $code): void
     {
         try {
             $roomId  = '20229649389@chatroom';
             $account = strtolower($account);
+
             // 根据code内容判断是成功还是失败
             if ($code === '查码超时') {
-                // 失败消息格式
-                $msg = "❌ 查码失败\n---------------------\n{$account}\n{$code}";
+                $result = \send_wechat_template($roomId, 'verify_code_failed', [
+                    'account' => $account,
+                    'code'    => $code,
+                ], 'verify-code');
+
+                if ($result) {
+                    Log::channel('verify_code_job')->info('查码失败微信通知发送成功', [
+                        'account'    => $account,
+                        'code'       => $code,
+                        'room_id'    => $roomId,
+                        'message_id' => $result
+                    ]);
+                } else {
+                    Log::channel('verify_code_job')->error('查码失败微信通知发送失败', [
+                        'account' => $account,
+                        'code'    => $code,
+                        'room_id' => $roomId
+                    ]);
+                }
             } else {
-                // 成功消息格式
-                $msg = "✅ 查码成功\n---------------------\n{$account}\n{$code}";
+                $result = \send_wechat_template($roomId, 'verify_code_success', [
+                    'account' => $account,
+                    'code'    => $code,
+                ], 'verify-code');
+
+                if ($result) {
+                    Log::channel('verify_code_job')->info('查码成功微信通知发送成功', [
+                        'account'    => $account,
+                        'code'       => $code,
+                        'room_id'    => $roomId,
+                        'message_id' => $result
+                    ]);
+                } else {
+                    Log::channel('verify_code_job')->error('查码成功微信通知发送失败', [
+                        'account' => $account,
+                        'code'    => $code,
+                        'room_id' => $roomId
+                    ]);
+                }
             }
 
-            // 调用微信发送函数
-            send_msg_to_wechat($roomId, $msg);
-
-            Log::channel('verify_code_job')->info('微信消息发送成功', [
-                'account' => $account,
-                'code'    => $code,
-                'message' => $msg,
-                'room_id' => $roomId
-            ]);
-
         } catch (\Exception $e) {
-            Log::channel('verify_code_job')->error('微信消息发送失败', [
+            Log::channel('verify_code_job')->error('微信消息发送异常', [
                 'error'   => $e->getMessage(),
                 'account' => $account,
                 'code'    => $code,
-                'room_id' => $roomId
+                'room_id' => $roomId ?? '20229649389@chatroom'
             ]);
         }
     }
@@ -426,7 +453,7 @@ class ProcessVerifyCodeJob implements ShouldQueue
     protected function logOperation($account, $result, $details)
     {
         try {
-            \App\Models\OperationLog::create([
+            OperationLog::create([
                 'uid'            => $this->uid ?? 0, // 如果uid为null，使用0作为默认值
                 'room_id'        => $this->roomId,
                 'wxid'           => $this->wxid,
