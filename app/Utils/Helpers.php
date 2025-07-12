@@ -9,7 +9,8 @@ use Illuminate\Support\Facades\Log;
  * 添加或者删除函数后执行composer dump-autoload
  * */
 
-function getAppConfig(string $key) {
+function getAppConfig(string $key)
+{
     return Config::get("self.$key");
 }
 
@@ -39,7 +40,7 @@ function check_bot_heartbeat(): array
 {
     try {
         $response = Http::withHeaders([
-            'User-Agent' => 'Apifox/1.0.0 (https://www.apifox.cn)',
+            'User-Agent'   => 'Apifox/1.0.0 (https://www.apifox.cn)',
             'Content-Type' => 'application/json',
         ])->post('http://43.140.224.234:6666/', [
             'type' => 'PING'
@@ -47,13 +48,13 @@ function check_bot_heartbeat(): array
 
         // 获取完整响应信息
         $statusCode = $response->status();
-        $body = $response->body();
-        $json = $response->json();
+        $body       = $response->body();
+        $json       = $response->json();
 
         // 记录响应信息到日志
         Log::info('机器人心跳检测响应', [
             'status_code' => $statusCode,
-            'response' => $body,
+            'response'    => $body,
             'parsed_json' => $json
         ]);
 
@@ -68,10 +69,10 @@ function check_bot_heartbeat(): array
         }
 
         return [
-            'success' => $isOnline,
+            'success'     => $isOnline,
             'status_code' => $statusCode,
-            'response' => $body,
-            'data' => $json
+            'response'    => $body,
+            'data'        => $json
         ];
     } catch (\Exception $e) {
         // 处理异常
@@ -84,25 +85,45 @@ function check_bot_heartbeat(): array
 
         return [
             'success' => false,
-            'error' => $e->getMessage()
+            'error'   => $e->getMessage()
         ];
     }
 }
 
 /**
  * 向微信群聊发送指定类型和指定内容的消息
+ * 支持队列模式和同步模式
  *
  * @param string $roomId
  * @param string $msg
  * @param string $type
- * @return bool
+ * @param bool $useQueue 是否使用队列模式
+ * @param string|null $fromSource 来源标识
+ * @return bool|int 同步模式返回bool，队列模式返回消息ID
  */
-function send_msg_to_wechat(string $roomId, string $msg, string $type = 'MT_SEND_TEXTMSG'): bool
+function send_msg_to_wechat(string $roomId, string $msg, string $type = 'MT_SEND_TEXTMSG', bool $useQueue = null, ?string $fromSource = null): bool|int
 {
+    // 如果未指定队列模式，根据配置决定
+    if ($useQueue === null) {
+        $useQueue = config('wechat.queue.enabled', true);
+    }
+
+    // 如果使用队列模式，调用新的服务
+    if ($useQueue) {
+        $wechatMessageService = app(\App\Services\WechatMessageService::class);
+        return $wechatMessageService->sendMessage(
+            $roomId,
+            $msg,
+            $type === 'MT_SEND_TEXTMSG' ? 'text' : 'other',
+            $fromSource
+        );
+    }
+
+    // 保持原有的同步发送逻辑
     try {
         // 拼接content
         $content = [
-            'data' => [
+            'data'      => [
                 'to_wxid' => $roomId,
                 'content' => $msg
             ],
@@ -111,11 +132,12 @@ function send_msg_to_wechat(string $roomId, string $msg, string $type = 'MT_SEND
         ];
 
         // 记录发送请求日志
-        Log::channel('wechat')->info('发送微信消息', [
-            'room_id' => $roomId,
-            'message_type' => $type,
-            'message_length' => strlen($msg),
-            'message_preview' => mb_substr($msg, 0, 100) . (strlen($msg) > 100 ? '...' : '')
+        Log::channel('wechat')->info('发送微信消息（同步）', [
+            'room_id'         => $roomId,
+            'message_type'    => $type,
+            'message_length'  => strlen($msg),
+            'message_preview' => mb_substr($msg, 0, 100) . (strlen($msg) > 100 ? '...' : ''),
+            'from_source'     => $fromSource
         ]);
 
         $curl = curl_init();
@@ -135,17 +157,18 @@ function send_msg_to_wechat(string $roomId, string $msg, string $type = 'MT_SEND
             ],
         ]);
 
-        $response = curl_exec($curl);
-        $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $response  = curl_exec($curl);
+        $httpCode  = curl_getinfo($curl, CURLINFO_HTTP_CODE);
         $curlError = curl_error($curl);
         curl_close($curl);
 
         // 检查CURL错误
         if ($curlError) {
             Log::channel('wechat')->error('微信消息发送失败 - CURL错误', [
-                'room_id' => $roomId,
-                'curl_error' => $curlError,
-                'message_preview' => mb_substr($msg, 0, 100)
+                'room_id'         => $roomId,
+                'curl_error'      => $curlError,
+                'message_preview' => mb_substr($msg, 0, 100),
+                'from_source'     => $fromSource
             ]);
             return false;
         }
@@ -153,10 +176,11 @@ function send_msg_to_wechat(string $roomId, string $msg, string $type = 'MT_SEND
         // 检查HTTP状态码
         if ($httpCode !== 200) {
             Log::channel('wechat')->error('微信消息发送失败 - HTTP错误', [
-                'room_id' => $roomId,
-                'http_code' => $httpCode,
-                'response' => $response,
-                'message_preview' => mb_substr($msg, 0, 100)
+                'room_id'         => $roomId,
+                'http_code'       => $httpCode,
+                'response'        => $response,
+                'message_preview' => mb_substr($msg, 0, 100),
+                'from_source'     => $fromSource
             ]);
             return false;
         }
@@ -164,17 +188,19 @@ function send_msg_to_wechat(string $roomId, string $msg, string $type = 'MT_SEND
         // 尝试解析响应
         $responseData = json_decode($response, true);
         if (json_last_error() === JSON_ERROR_NONE) {
-            Log::channel('wechat')->info('微信消息发送成功', [
-                'room_id' => $roomId,
-                'response_data' => $responseData,
-                'message_length' => strlen($msg)
+            Log::channel('wechat')->info('微信消息发送成功（同步）', [
+                'room_id'        => $roomId,
+                'response_data'  => $responseData,
+                'message_length' => strlen($msg),
+                'from_source'    => $fromSource
             ]);
         } else {
-            Log::channel('wechat')->info('微信消息发送完成', [
-                'room_id' => $roomId,
-                'http_code' => $httpCode,
-                'response' => $response,
-                'message_length' => strlen($msg)
+            Log::channel('wechat')->info('微信消息发送完成（同步）', [
+                'room_id'        => $roomId,
+                'http_code'      => $httpCode,
+                'response'       => $response,
+                'message_length' => strlen($msg),
+                'from_source'    => $fromSource
             ]);
         }
 
@@ -182,13 +208,82 @@ function send_msg_to_wechat(string $roomId, string $msg, string $type = 'MT_SEND
 
     } catch (\Exception $e) {
         Log::channel('wechat')->error('微信消息发送异常', [
-            'room_id' => $roomId,
-            'error' => $e->getMessage(),
-            'trace' => $e->getTraceAsString(),
-            'message_preview' => mb_substr($msg, 0, 100)
+            'room_id'         => $roomId,
+            'error'           => $e->getMessage(),
+            'trace'           => $e->getTraceAsString(),
+            'message_preview' => mb_substr($msg, 0, 100),
+            'from_source'     => $fromSource
         ]);
         return false;
     }
+}
+
+/**
+ * 使用模板发送微信消息
+ *
+ * @param string $roomId 群聊ID
+ * @param string $templateName 模板名称
+ * @param array $variables 模板变量
+ * @param string|null $fromSource 来源标识
+ * @param bool $useQueue 是否使用队列
+ * @return bool|int 成功返回true或消息ID，失败返回false
+ */
+function send_wechat_template(
+    string  $roomId,
+    string  $templateName,
+    array   $variables = [],
+    ?string $fromSource = null,
+    bool    $useQueue = true
+): bool|int
+{
+    // 获取模板
+    $template = config("wechat.templates.{$templateName}");
+
+    if (!$template) {
+        Log::error("微信模板不存在: {$templateName}", [
+            'template_name'       => $templateName,
+            'room_id'             => $roomId,
+            'from_source'         => $fromSource,
+            'available_templates' => array_keys(config('wechat.templates', []))
+        ]);
+        return false;
+    }
+
+    // 替换占位符
+    $placeholders = [];
+    $values       = [];
+
+    foreach ($variables as $key => $value) {
+        $placeholders[] = '{' . $key . '}';
+        $values[]       = $value ?? '';
+    }
+
+    $content = str_replace($placeholders, $values, $template);
+
+    // 添加调试日志
+    Log::info("微信模板消息处理", [
+        'template_name'  => $templateName,
+        'room_id'        => $roomId,
+        'from_source'    => $fromSource,
+        'variables'      => $variables,
+        'template'       => $template,
+        'placeholders'   => $placeholders,
+        'values'         => $values,
+        'final_content'  => $content,
+        'content_length' => strlen($content)
+    ]);
+
+    // 检查内容是否为空或包含未替换的占位符
+    if (empty($content) || str_contains($content, '{') && str_contains($content, '}')) {
+        Log::warning("微信模板内容可能有问题", [
+            'template_name'         => $templateName,
+            'content'               => $content,
+            'contains_placeholders' => preg_match('/\{[^}]+\}/', $content)
+        ]);
+    }
+
+    // 发送消息
+    return send_msg_to_wechat($roomId, $content, 'MT_SEND_TEXTMSG', $useQueue, $fromSource);
 }
 
 /**
@@ -209,28 +304,28 @@ function send_async_login_request(array $accounts): void
         $id = 1;
         foreach ($accounts as $account) {
             $loginData['list'][] = [
-                'id' => $id++,
-                'username' => $account['account'],
-                'password' => $account['password'],
+                'id'        => $id++,
+                'username'  => $account['account'],
+                'password'  => $account['password'],
                 'VerifyUrl' => $account['api_url'] ?? ''
             ];
         }
 
-        $response = Http::timeout(30)->post($loginUrl, $loginData);
-        $responseData = $response->json(); // 获取JSON响应数据
-        $statusCode = $response->status(); // 获取HTTP状态码
+        $response     = Http::timeout(30)->post($loginUrl, $loginData);
+        $responseData = $response->json();   // 获取JSON响应数据
+        $statusCode   = $response->status(); // 获取HTTP状态码
         Log::info('登录请求发送成功且收到回调', [
-            'url' => $loginUrl,
-            'accounts_count' => count($loginData['list']),
-            'request_data' => $loginData,
+            'url'             => $loginUrl,
+            'accounts_count'  => count($loginData['list']),
+            'request_data'    => $loginData,
             'response_status' => $statusCode,
-            'response_data' => $responseData,
-            'success' => $response->successful() // 是否为成功响应(2xx)
+            'response_data'   => $responseData,
+            'success'         => $response->successful() // 是否为成功响应(2xx)
         ]);
 
     } catch (\Exception $e) {
         Log::error('登录请求发送失败: ' . $e->getMessage(), [
-            'url' => $loginUrl,
+            'url'      => $loginUrl,
             'accounts' => $accounts
         ]);
     }

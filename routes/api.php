@@ -28,6 +28,7 @@ use App\Http\Controllers\WarehouseGoodsController;
 use App\Http\Controllers\AdminWarehouseController;
 use App\Http\Controllers\WarehouseStockInController;
 use App\Http\Controllers\WechatController;
+use App\Http\Controllers\WechatMonitorController;
 use App\Http\Controllers\WechatRoomBindingController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -60,7 +61,9 @@ Route::post('/register', [RegisterController::class, 'register'])->middleware('t
 Route::any('/api/wechat/webhook', [WechatController::class, 'index']);
 Route::get('/api/wechat/test', [WechatController::class, 'test']);
 
-Route::group(['middleware' => ['auth:api']], function() {
+Route::group(['middleware' => ['auth:api']], function () {
+
+
     Route::get('/admin/user/list', [AdminUserController::class, 'getAdminUserList']);
     Route::post('/admin/user/create', [AdminUserController::class, 'create']);
     Route::post('/admin/user/update', [AdminUserController::class, 'update']);
@@ -267,10 +270,11 @@ Route::group(['middleware' => ['auth:api']], function() {
     });
     // 微信机器人相关路由
     Route::prefix('wechat-bot')->group(function () {
-       // 检测机器人心跳
+        // 检测机器人心跳
         Route::post('heartbeat', function () {
             $result = check_bot_heartbeat();
-            var_dump($result);exit;
+            var_dump($result);
+            exit;
         });
     });
 

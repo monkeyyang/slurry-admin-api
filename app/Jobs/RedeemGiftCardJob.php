@@ -244,30 +244,31 @@ class RedeemGiftCardJob implements ShouldQueue
             if (!in_array($this->roomId, ['brother-card@api', 'no-send-msg@api'])) {
                 try {
                     // 检查是否存在wechat_msg键
-                    if (isset($result['wechat_msg']) && !empty($result['wechat_msg'])) {
-                        $sendResult = send_msg_to_wechat($this->roomId, $result['wechat_msg']);
+                    if (!empty($result['wechat_msg'])) {
+                        $sendResult = send_msg_to_wechat($this->roomId, $result['wechat_msg'], 'MT_SEND_TEXTMSG', true, 'redeem-gift-card');
                         if (!$sendResult) {
                             $this->getLogger()->warning("微信消息发送失败", [
-                                'card_code' => $this->giftCardCode,
-                                'room_id' => $this->roomId,
+                                'card_code'      => $this->giftCardCode,
+                                'room_id'        => $this->roomId,
                                 'message_length' => strlen($result['wechat_msg'])
                             ]);
                         } else {
-                            $this->getLogger()->info("微信消息发送成功", [
-                                'card_code' => $this->giftCardCode,
-                                'room_id' => $this->roomId
+                            $this->getLogger()->info("微信消息发送成功（队列）", [
+                                'card_code'  => $this->giftCardCode,
+                                'room_id'    => $this->roomId,
+                                'message_id' => $sendResult
                             ]);
                         }
                     } else {
                         $this->getLogger()->warning("兑换结果中缺少微信消息内容", [
-                            'card_code' => $this->giftCardCode,
+                            'card_code'   => $this->giftCardCode,
                             'result_keys' => array_keys($result)
                         ]);
                     }
                 } catch (Throwable $e) {
                     $this->getLogger()->warning("微信消息发送异常，但不影响兑换结果", [
                         'card_code' => $this->giftCardCode,
-                        'error' => $e->getMessage()
+                        'error'     => $e->getMessage()
                     ]);
                 }
             }
@@ -278,9 +279,9 @@ class RedeemGiftCardJob implements ShouldQueue
                     $batchService->updateProgress($this->batchId, true, $this->giftCardCode, $result);
                 } catch (Throwable $e) {
                     $this->getLogger()->warning("批量任务进度更新失败，但不影响兑换结果", [
-                        'batch_id' => $this->batchId,
+                        'batch_id'  => $this->batchId,
                         'card_code' => $this->giftCardCode,
-                        'error' => $e->getMessage()
+                        'error'     => $e->getMessage()
                     ]);
                 }
             }
@@ -309,17 +310,17 @@ class RedeemGiftCardJob implements ShouldQueue
                 if (!in_array($this->roomId, ['brother-card@api', 'no-send-msg@api'])) {
                     try {
                         $failMessage = "兑换失败\n-------------------------\n" . $this->giftCardCode . "\n" . $e->getMessage();
-                        $sendResult = send_msg_to_wechat($this->roomId, $failMessage);
+                        $sendResult  = send_msg_to_wechat($this->roomId, $failMessage, 'MT_SEND_TEXTMSG', true, 'redeem-gift-card');
                         if (!$sendResult) {
                             $this->getLogger()->warning("失败消息发送未成功", [
                                 'card_code' => $this->giftCardCode,
-                                'room_id' => $this->roomId
+                                'room_id'   => $this->roomId
                             ]);
                         }
                     } catch (Throwable $msgError) {
                         $this->getLogger()->warning("失败消息发送异常", [
                             'card_code' => $this->giftCardCode,
-                            'error' => $msgError->getMessage()
+                            'error'     => $msgError->getMessage()
                         ]);
                     }
                 }
@@ -330,9 +331,9 @@ class RedeemGiftCardJob implements ShouldQueue
                         $batchService->updateProgress($this->batchId, false, $this->giftCardCode, null, $e->getMessage());
                     } catch (Throwable $progressError) {
                         $this->getLogger()->warning("批量任务进度更新失败", [
-                            'batch_id' => $this->batchId,
+                            'batch_id'  => $this->batchId,
                             'card_code' => $this->giftCardCode,
-                            'error' => $progressError->getMessage()
+                            'error'     => $progressError->getMessage()
                         ]);
                     }
                 }
@@ -364,7 +365,7 @@ class RedeemGiftCardJob implements ShouldQueue
                     } catch (Throwable $progressError) {
                         $this->getLogger()->warning("批量任务进度更新失败", [
                             'batch_id' => $this->batchId,
-                            'error' => $progressError->getMessage()
+                            'error'    => $progressError->getMessage()
                         ]);
                     }
                 }
@@ -428,7 +429,7 @@ class RedeemGiftCardJob implements ShouldQueue
     protected function isPostProcessingError(Throwable $e): bool
     {
         $message = $e->getMessage();
-        $trace = $e->getTraceAsString();
+        $trace   = $e->getTraceAsString();
 
         // 后续处理异常：微信消息发送、批量任务进度更新等
         $postProcessingErrors = [
@@ -458,7 +459,7 @@ class RedeemGiftCardJob implements ShouldQueue
     protected function isSystemError(Throwable $e): bool
     {
         $message = $e->getMessage();
-        $trace = $e->getTraceAsString();
+        $trace   = $e->getTraceAsString();
 
         // 已知的系统错误模式
         $systemErrors = array_merge(self::SYSTEM_ERRORS, [
@@ -616,7 +617,7 @@ class RedeemGiftCardJob implements ShouldQueue
             } catch (Throwable $msgError) {
                 $this->getLogger()->warning("失败消息发送失败", [
                     'card_code' => $this->giftCardCode,
-                    'error' => $msgError->getMessage()
+                    'error'     => $msgError->getMessage()
                 ]);
             }
         }
@@ -651,7 +652,7 @@ class RedeemGiftCardJob implements ShouldQueue
             if (!$pendingRecord) {
                 $this->getLogger()->info("未找到对应的pending记录", [
                     'card_code' => $this->giftCardCode,
-                    'batch_id' => $this->batchId
+                    'batch_id'  => $this->batchId
                 ]);
                 return;
             }
@@ -671,10 +672,10 @@ class RedeemGiftCardJob implements ShouldQueue
 
             if (!$isRelatedRecord) {
                 $this->getLogger()->info("找到的pending记录与当前任务不相关", [
-                    'card_code' => $this->giftCardCode,
-                    'record_id' => $pendingRecord->id,
-                    'record_batch_id' => $pendingRecord->batch_id,
-                    'current_batch_id' => $this->batchId,
+                    'card_code'         => $this->giftCardCode,
+                    'record_id'         => $pendingRecord->id,
+                    'record_batch_id'   => $pendingRecord->batch_id,
+                    'current_batch_id'  => $this->batchId,
                     'record_created_at' => $pendingRecord->created_at
                 ]);
                 return;
@@ -683,21 +684,21 @@ class RedeemGiftCardJob implements ShouldQueue
             // 更新pending记录状态
             $errorMessage = "队列任务最终失败: " . $exception->getMessage();
             $pendingRecord->update([
-                'status' => ItunesTradeAccountLog::STATUS_FAILED,
+                'status'        => ItunesTradeAccountLog::STATUS_FAILED,
                 'error_message' => $errorMessage
             ]);
 
             $this->getLogger()->info("已更新pending记录状态为失败", [
-                'record_id' => $pendingRecord->id,
-                'card_code' => $this->giftCardCode,
+                'record_id'     => $pendingRecord->id,
+                'card_code'     => $this->giftCardCode,
                 'error_message' => $errorMessage
             ]);
 
         } catch (Throwable $e) {
             $this->getLogger()->error("更新pending记录状态失败", [
                 'card_code' => $this->giftCardCode,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error'     => $e->getMessage(),
+                'trace'     => $e->getTraceAsString()
             ]);
         }
     }
@@ -713,7 +714,7 @@ class RedeemGiftCardJob implements ShouldQueue
             if (!$accountId) {
                 $this->getLogger()->warning("兑换成功但未找到账号ID", [
                     'card_code' => $this->giftCardCode,
-                    'result' => $result
+                    'result'    => $result
                 ]);
                 return;
             }
@@ -722,7 +723,7 @@ class RedeemGiftCardJob implements ShouldQueue
             $account = ItunesTradeAccount::find($accountId);
             if (!$account) {
                 $this->getLogger()->warning("未找到账号信息", [
-                    'card_code' => $this->giftCardCode,
+                    'card_code'  => $this->giftCardCode,
                     'account_id' => $accountId
                 ]);
                 return;
@@ -732,7 +733,7 @@ class RedeemGiftCardJob implements ShouldQueue
             $planId = $result['plan_id'] ?? null;
             if (!$planId) {
                 $this->getLogger()->warning("兑换成功但未找到计划ID", [
-                    'card_code' => $this->giftCardCode,
+                    'card_code'  => $this->giftCardCode,
                     'account_id' => $accountId
                 ]);
                 return;
@@ -742,7 +743,7 @@ class RedeemGiftCardJob implements ShouldQueue
             if (!$plan) {
                 $this->getLogger()->warning("未找到计划信息", [
                     'card_code' => $this->giftCardCode,
-                    'plan_id' => $planId
+                    'plan_id'   => $planId
                 ]);
                 return;
             }
@@ -758,12 +759,12 @@ class RedeemGiftCardJob implements ShouldQueue
             $dailyAmountReached = $this->checkDailyAmountReached($account, $plan, $currentDay);
 
             $this->getLogger()->info("检查兑换成功后的账号状态", [
-                'card_code' => $this->giftCardCode,
-                'account_id' => $account->id,
-                'account_email' => $account->account,
-                'current_amount' => $account->amount,
-                'total_amount_limit' => $plan->total_amount,
-                'current_day' => $currentDay,
+                'card_code'            => $this->giftCardCode,
+                'account_id'           => $account->id,
+                'account_email'        => $account->account,
+                'current_amount'       => $account->amount,
+                'total_amount_limit'   => $plan->total_amount,
+                'current_day'          => $currentDay,
                 'total_amount_reached' => $totalAmountReached,
                 'daily_amount_reached' => $dailyAmountReached
             ]);
@@ -776,10 +777,50 @@ class RedeemGiftCardJob implements ShouldQueue
                     // 'current_plan_day' => null,
                     // 'plan_id' => null,
                 ]);
+                // 请求登出此账号
+                ProcessAppleAccountLogoutJob::dispatch($account->id, 'plan_completed_check');
+
+                // 发送微信通知
+                try {
+                    $result = \send_wechat_template(
+                        '45958721463@chatroom',
+                        'redeem_plan_completed',
+                        [
+                            'account' => $account->account,
+                            'country' => $account->country_code ?? 'Unknown',
+                            'balance' => $account->amount
+                        ],
+                        'redeem-gift-card-completion'
+                    );
+
+                    if ($result) {
+                        $this->getLogger()->info("账号完成微信通知发送成功", [
+                            'card_code'  => $this->giftCardCode,
+                            'account_id' => $account->id,
+                            'account'    => $account->account,
+                            'room_id'    => $this->roomId,
+                            'message_id' => $result
+                        ]);
+                    } else {
+                        $this->getLogger()->error("账号完成微信通知发送失败", [
+                            'card_code'  => $this->giftCardCode,
+                            'account_id' => $account->id,
+                            'account'    => $account->account,
+                            'room_id'    => $this->roomId
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    $this->getLogger()->error("账号完成微信通知发送异常", [
+                        'card_code'  => $this->giftCardCode,
+                        'account_id' => $account->id,
+                        'account'    => $account->account,
+                        'error'      => $e->getMessage()
+                    ]);
+                }
 
                 $this->getLogger()->info("总额度达成，账号计划完成", [
-                    'card_code' => $this->giftCardCode,
-                    'account_id' => $account->id,
+                    'card_code'    => $this->giftCardCode,
+                    'account_id'   => $account->id,
                     'final_amount' => $account->amount
                 ]);
             } elseif ($dailyAmountReached) {
@@ -793,22 +834,22 @@ class RedeemGiftCardJob implements ShouldQueue
                     ]);
 
                     $this->getLogger()->info("最后一天计划达成，账号计划完成", [
-                        'card_code' => $this->giftCardCode,
-                        'account_id' => $account->id,
+                        'card_code'    => $this->giftCardCode,
+                        'account_id'   => $account->id,
                         'final_amount' => $account->amount
                     ]);
                 } else {
                     // 进入下一天等待状态
                     $nextDay = $currentDay + 1;
                     $account->update([
-                        'status' => ItunesTradeAccount::STATUS_WAITING,
+                        'status'           => ItunesTradeAccount::STATUS_WAITING,
                         'current_plan_day' => $nextDay,
                     ]);
 
                     $this->getLogger()->info("当日计划达成，账号进入下一天等待", [
-                        'card_code' => $this->giftCardCode,
+                        'card_code'  => $this->giftCardCode,
                         'account_id' => $account->id,
-                        'next_day' => $nextDay
+                        'next_day'   => $nextDay
                     ]);
                 }
             } else {
@@ -818,9 +859,9 @@ class RedeemGiftCardJob implements ShouldQueue
                 ]);
 
                 $this->getLogger()->info("总额度和当日计划都未达成，账号改为processing状态", [
-                    'card_code' => $this->giftCardCode,
-                    'account_id' => $account->id,
-                    'current_amount' => $account->amount,
+                    'card_code'          => $this->giftCardCode,
+                    'account_id'         => $account->id,
+                    'current_amount'     => $account->amount,
                     'total_amount_limit' => $plan->total_amount
                 ]);
             }
@@ -828,8 +869,8 @@ class RedeemGiftCardJob implements ShouldQueue
         } catch (Throwable $e) {
             $this->getLogger()->error("处理成功兑换后的账号状态失败", [
                 'card_code' => $this->giftCardCode,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error'     => $e->getMessage(),
+                'trace'     => $e->getTraceAsString()
             ]);
         }
     }
@@ -849,7 +890,7 @@ class RedeemGiftCardJob implements ShouldQueue
             if (!$log || !$log->account_id) {
                 $this->getLogger()->info("兑换失败但未找到相关账号信息", [
                     'card_code' => $this->giftCardCode,
-                    'error' => $e->getMessage()
+                    'error'     => $e->getMessage()
                 ]);
                 return;
             }
@@ -858,7 +899,7 @@ class RedeemGiftCardJob implements ShouldQueue
             $account = ItunesTradeAccount::find($log->account_id);
             if (!$account) {
                 $this->getLogger()->warning("未找到账号信息", [
-                    'card_code' => $this->giftCardCode,
+                    'card_code'  => $this->giftCardCode,
                     'account_id' => $log->account_id
                 ]);
                 return;
@@ -867,8 +908,8 @@ class RedeemGiftCardJob implements ShouldQueue
             // 检查账号当前状态
             if ($account->status !== ItunesTradeAccount::STATUS_LOCKING) {
                 $this->getLogger()->info("账号状态不是locking，无需处理", [
-                    'card_code' => $this->giftCardCode,
-                    'account_id' => $account->id,
+                    'card_code'      => $this->giftCardCode,
+                    'account_id'     => $account->id,
                     'current_status' => $account->status
                 ]);
                 return;
@@ -880,18 +921,18 @@ class RedeemGiftCardJob implements ShouldQueue
             ]);
 
             $this->getLogger()->info("兑换失败，账号状态已改为processing", [
-                'card_code' => $this->giftCardCode,
-                'account_id' => $account->id,
+                'card_code'     => $this->giftCardCode,
+                'account_id'    => $account->id,
                 'account_email' => $account->account,
-                'error' => $e->getMessage()
+                'error'         => $e->getMessage()
             ]);
 
         } catch (Throwable $statusError) {
             $this->getLogger()->error("处理失败兑换后的账号状态失败", [
-                'card_code' => $this->giftCardCode,
-                'error' => $e->getMessage(),
+                'card_code'    => $this->giftCardCode,
+                'error'        => $e->getMessage(),
                 'status_error' => $statusError->getMessage(),
-                'trace' => $statusError->getTraceAsString()
+                'trace'        => $statusError->getTraceAsString()
             ]);
         }
     }
@@ -910,20 +951,20 @@ class RedeemGiftCardJob implements ShouldQueue
 
             // 获取当天的计划额度
             $dailyAmounts = $plan->daily_amounts ?? [];
-            $dailyLimit = $dailyAmounts[$currentDay - 1] ?? 0;
-            $dailyTarget = $dailyLimit + $plan->float_amount;
+            $dailyLimit   = $dailyAmounts[$currentDay - 1] ?? 0;
+            $dailyTarget  = $dailyLimit + $plan->float_amount;
 
             // 检查是否达到当天的目标额度
             $reached = ($dailySpent >= $dailyLimit);
 
             $this->getLogger()->info("检查当日计划达成情况", [
-                'account_id' => $account->id,
-                'day' => $currentDay,
-                'daily_spent' => $dailySpent,
-                'daily_limit' => $dailyLimit,
+                'account_id'   => $account->id,
+                'day'          => $currentDay,
+                'daily_spent'  => $dailySpent,
+                'daily_limit'  => $dailyLimit,
                 'float_amount' => $plan->float_amount,
                 'daily_target' => $dailyTarget,
-                'reached' => $reached
+                'reached'      => $reached
             ]);
 
             return $reached;
@@ -931,8 +972,8 @@ class RedeemGiftCardJob implements ShouldQueue
         } catch (Throwable $e) {
             $this->getLogger()->error("检查当日计划达成情况失败", [
                 'account_id' => $account->id,
-                'day' => $currentDay,
-                'error' => $e->getMessage()
+                'day'        => $currentDay,
+                'error'      => $e->getMessage()
             ]);
             return false;
         }
