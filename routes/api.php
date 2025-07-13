@@ -327,6 +327,7 @@ Route::group(['middleware' => ['auth:api']], function () {
 
         // iTunes交易执行记录路由
         Route::get('/execution-logs', [ItunesTradeExecutionLogController::class, 'index']);
+        Route::get('/execution-logs/export', [ItunesTradeExecutionLogController::class, 'export']);
         Route::get('/execution-logs-statistics', [ItunesTradeExecutionLogController::class, 'statistics']);
         Route::get('/execution-logs/today-statistics', [ItunesTradeExecutionLogController::class, 'todayStatistics']);
         Route::get('/execution-logs/by-account/{accountId}', [ItunesTradeExecutionLogController::class, 'byAccount'])->where('accountId', '[0-9]+');

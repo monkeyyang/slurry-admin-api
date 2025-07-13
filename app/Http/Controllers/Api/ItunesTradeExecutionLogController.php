@@ -30,7 +30,7 @@ class ItunesTradeExecutionLogController extends Controller
             $params = $request->validate([
                 'page' => 'nullable|integer|min:1',
                 'pageNum' => 'nullable|integer|min:1',
-                'pageSize' => 'nullable|integer|min:1|max:1000',
+                'pageSize' => 'nullable|integer|min:1|max:10000',
                 'keyword' => 'nullable|string|max:255',
                 'accountId' => 'nullable|integer',
                 'account_id' => 'nullable|integer',
@@ -367,6 +367,78 @@ class ItunesTradeExecutionLogController extends Controller
                 'message' => '获取执行记录失败',
                 'data' => null,
             ], 500);
+        }
+    }
+
+    /**
+     * 导出执行记录
+     *
+     * @param Request $request
+     * @return \Symfony\Component\HttpFoundation\StreamedResponse
+     */
+    public function export(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        try {
+            $params = $request->validate([
+                'keyword' => 'nullable|string|max:255',
+                'accountId' => 'nullable|integer',
+                'account_id' => 'nullable|integer',
+                'planId' => 'nullable|integer',
+                'plan_id' => 'nullable|integer',
+                'rate_id' => 'nullable|integer',
+                'executionStatus' => ['nullable', Rule::in(['success', 'failed', 'pending'])],
+                'status' => ['nullable', Rule::in(['success', 'failed', 'pending'])],
+                'country_code' => 'nullable|string|max:10',
+                'account_name' => 'nullable|string|max:255',
+                'day' => 'nullable|integer|min:1',
+                'startTime' => 'nullable|date',
+                'start_time' => 'nullable|date',
+                'endTime' => 'nullable|date',
+                'end_time' => 'nullable|date',
+                'room_id' => 'nullable|string|max:50',
+            ]);
+
+            // 统一参数名称
+            $normalizedParams = [
+                'keyword' => $params['keyword'] ?? null,
+                'account_id' => $params['account_id'] ?? $params['accountId'] ?? null,
+                'plan_id' => $params['plan_id'] ?? $params['planId'] ?? null,
+                'rate_id' => $params['rate_id'] ?? null,
+                'status' => $params['status'] ?? $params['executionStatus'] ?? null,
+                'country_code' => $params['country_code'] ?? null,
+                'account_name' => $params['account_name'] ?? null,
+                'day' => $params['day'] ?? null,
+                'start_time' => $params['start_time'] ?? $params['startTime'] ?? null,
+                'end_time' => $params['end_time'] ?? $params['endTime'] ?? null,
+                'room_id' => $params['room_id'] ?? null,
+            ];
+
+            $filename = 'execution_logs_' . date('Y-m-d_H-i-s') . '.csv';
+
+            return response()->streamDownload(function () use ($normalizedParams) {
+                $this->executionLogService->exportExecutionLogs($normalizedParams);
+            }, $filename, [
+                'Content-Type' => 'text/csv',
+                'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+                'Cache-Control' => 'no-cache, no-store, must-revalidate',
+                'Pragma' => 'no-cache',
+                'Expires' => '0',
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            // 对于验证错误，返回JSON响应
+            return response()->streamDownload(function () use ($e) {
+                echo "参数验证失败: " . json_encode($e->errors());
+            }, 'error.txt', ['Content-Type' => 'text/plain']);
+        } catch (\Exception $e) {
+            Log::error('导出执行记录失败: ' . $e->getMessage(), [
+                'params' => $request->all(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->streamDownload(function () use ($e) {
+                echo "导出失败: " . $e->getMessage();
+            }, 'error.txt', ['Content-Type' => 'text/plain']);
         }
     }
 }

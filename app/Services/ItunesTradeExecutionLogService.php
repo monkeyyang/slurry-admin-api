@@ -68,7 +68,7 @@ class ItunesTradeExecutionLogService
 
         // 分页参数
         $pageNum = $params['pageNum'] ?? 1;
-        $pageSize = min($params['pageSize'] ?? 20, 100);
+        $pageSize = min($params['pageSize'] ?? 20, 5000);
 
         // 执行分页查询
         $result = $query->orderBy('created_at', 'desc')
@@ -296,5 +296,185 @@ class ItunesTradeExecutionLogService
     public function batchDeleteExecutionLogs(array $ids): int
     {
         return ItunesTradeAccountLog::whereIn('id', $ids)->delete();
+    }
+
+    /**
+     * 导出执行记录到CSV
+     *
+     * @param array $params
+     * @return void
+     */
+    public function exportExecutionLogs(array $params): void
+    {
+        // 设置PHP配置以处理大量数据
+        ini_set('memory_limit', '1024M');
+        set_time_limit(300); // 5分钟
+
+        $query = ItunesTradeAccountLog::query()->with(['account', 'plan', 'rate']);
+
+        // 应用筛选条件
+        if (!empty($params['account_id'])) {
+            $query->byAccount($params['account_id']);
+        }
+
+        if (!empty($params['plan_id'])) {
+            $query->byPlan($params['plan_id']);
+        }
+
+        if (!empty($params['rate_id'])) {
+            $query->where('rate_id', $params['rate_id']);
+        }
+
+        if (!empty($params['status'])) {
+            $query->byStatus($params['status']);
+        }
+
+        if (!empty($params['country_code'])) {
+            $query->where('country_code', $params['country_code']);
+        }
+
+        if (!empty($params['account_name'])) {
+            $query->whereHas('account', function ($accountQuery) use ($params) {
+                $accountQuery->where('account', 'like', '%' . $params['account_name'] . '%');
+            });
+        }
+
+        if (!empty($params['day'])) {
+            $query->where('day', $params['day']);
+        }
+
+        if (!empty($params['start_time']) && !empty($params['end_time'])) {
+            $query->whereBetween('exchange_time', [$params['start_time'], $params['end_time']]);
+        }
+
+        if (!empty($params['room_id'])) {
+            $query->where('room_id', $params['room_id']);
+        }
+
+        if (!empty($params['keyword'])) {
+            $keyword = $params['keyword'];
+            $query->where(function ($q) use ($keyword) {
+                $q->where('code', 'like', '%' . $keyword . '%')
+                  ->orWhereHas('account', function ($accountQuery) use ($keyword) {
+                      $accountQuery->where('account', 'like', '%' . $keyword . '%');
+                  });
+            });
+        }
+
+        // 输出CSV头部
+        $output = fopen('php://output', 'w');
+        
+        // 添加UTF-8 BOM以确保Excel正确显示中文
+        fwrite($output, "\xEF\xBB\xBF");
+        
+        // 写入标题行
+        fputcsv($output, [
+            'ID',
+            '兑换码',
+            '国家',
+            '金额',
+            '账号余款',
+            '账号',
+            '错误信息',
+            '执行状态',
+            '兑换时间',
+            '群聊名称',
+            '计划名称',
+            '汇率',
+            '天数',
+            '微信ID',
+            '消息ID',
+            '批次ID',
+            '创建时间',
+            '更新时间',
+        ]);
+
+        // 按时间排序并分批处理数据，避免内存溢出
+        $query->orderBy('created_at', 'desc')
+              ->chunk(1000, function ($logs) use ($output) {
+                  foreach ($logs as $log) {
+                      $this->writeCsvRow($output, $log);
+                  }
+              });
+
+        fclose($output);
+    }
+
+    /**
+     * 写入CSV行数据
+     *
+     * @param resource $output
+     * @param ItunesTradeAccountLog $log
+     * @return void
+     */
+    private function writeCsvRow($output, ItunesTradeAccountLog $log): void
+    {
+        // 获取账号信息
+        $account = $log->account;
+        $accountName = $account ? $account->account : '未知账号';
+        
+        // 获取计划信息
+        $plan = $log->plan;
+        $planName = $plan ? $plan->name : '未知计划';
+        
+        // 获取汇率信息
+        $rate = $log->rate;
+        $rateValue = $rate ? $rate->rate : '0';
+        
+        // 获取群聊信息
+        $roomName = '';
+        if ($log->room_id) {
+            try {
+                $roomInfo = \App\Models\MrRoom::where('room_id', $log->room_id)->first();
+                if ($roomInfo) {
+                    $roomName = $roomInfo->room_name;
+                }
+            } catch (\Exception $e) {
+                // 群聊信息获取失败时跳过
+                $roomName = '获取失败';
+            }
+        }
+        
+        // 获取国家信息
+        $countryName = $log->country_code;
+        try {
+            $country = \App\Models\Countries::where('code', $log->country_code)->first();
+            if ($country) {
+                $countryName = $country->name;
+            }
+        } catch (\Exception $e) {
+            // 国家信息获取失败时使用代码
+        }
+        
+        // 状态文本转换
+        $statusText = match ($log->status) {
+            'success' => '成功',
+            'failed' => '失败',
+            'pending' => '处理中',
+            default => $log->status,
+        };
+
+        $row = [
+            $log->id,
+            $log->code ?: '',
+            $countryName,
+            $log->amount ?: 0,
+            $log->after_amount ?: 0,
+            $accountName,
+            $log->error_message ?: '',
+            $statusText,
+            $log->exchange_time ? $log->exchange_time->format('Y-m-d H:i:s') : '',
+            $roomName,
+            $planName,
+            $rateValue,
+            $log->day ?: '',
+            $log->wxid ?: '',
+            $log->msgid ?: '',
+            $log->batch_id ?: '',
+            $log->created_at ? $log->created_at->format('Y-m-d H:i:s') : '',
+            $log->updated_at ? $log->updated_at->format('Y-m-d H:i:s') : '',
+        ];
+        
+        fputcsv($output, $row);
     }
 }
