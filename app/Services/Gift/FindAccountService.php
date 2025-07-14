@@ -172,7 +172,7 @@ class FindAccountService
     /**
      * 第1层：获取基础条件合格的账号ID列表
      */
-    private function getBaseQualifiedAccountIds(
+    public function getBaseQualifiedAccountIds(
         ItunesTradePlan $plan,
         float           $giftCardAmount,
         string          $country
@@ -206,7 +206,7 @@ class FindAccountService
     /**
      * 第2层：礼品卡约束条件筛选
      */
-    private function getConstraintQualifiedAccountIds(
+    public function getConstraintQualifiedAccountIds(
         array           $accountIds,
         ItunesTradePlan $plan,
         float           $giftCardAmount
@@ -281,7 +281,7 @@ class FindAccountService
     /**
      * 第3层：群聊绑定逻辑筛选
      */
-    private function getRoomBindingQualifiedAccountIds(
+    public function getRoomBindingQualifiedAccountIds(
         array           $accountIds,
         ItunesTradePlan $plan,
         array           $giftCardInfo
@@ -328,7 +328,7 @@ class FindAccountService
     /**
      * 第4层：容量检查筛选（充满/预留逻辑）
      */
-    private function getCapacityQualifiedAccountIds(
+    public function getCapacityQualifiedAccountIds(
         array           $accountIds,
         ItunesTradePlan $plan,
         float           $giftCardAmount
@@ -424,7 +424,7 @@ class FindAccountService
     /**
      * 第5层：每日计划限制筛选（优化版 - 批量查询）
      */
-    private function getDailyPlanQualifiedAccountIds(
+    public function getDailyPlanQualifiedAccountIds(
         array           $accountIds,
         ItunesTradePlan $plan,
         float           $giftCardAmount,
@@ -676,7 +676,7 @@ class FindAccountService
     /**
      * 按优先级排序账号
      */
-    private function sortAccountsByPriority(
+    public function sortAccountsByPriority(
         array           $accountIds,
         ItunesTradePlan $plan,
         string          $roomId,
@@ -688,41 +688,85 @@ class FindAccountService
         }
 
         $placeholders = str_repeat('?,', count($accountIds) - 1) . '?';
+        $bindRoom     = $plan->bind_room ?? false;
 
-        $sql = "
-            SELECT a.*,
-                   CASE
-                       WHEN a.plan_id = ? AND a.room_id = ? THEN 1
-                       WHEN a.plan_id = ? THEN 2
-                       WHEN a.room_id = ? THEN 3
-                       WHEN a.plan_id IS NULL THEN 4
-                       ELSE 5
-                   END as binding_priority,
-                   CASE
-                       WHEN (a.amount + ?) = ? THEN 3
-                       WHEN (a.amount + ?) < ? THEN 2
-                       ELSE 1
-                   END as capacity_priority
-            FROM itunes_trade_accounts a
-            WHERE a.id IN ($placeholders)
-              AND a.deleted_at IS NULL
-            ORDER BY
-                binding_priority ASC,
-                capacity_priority DESC,
-                a.amount DESC,
-                a.id ASC
-        ";
+        // 根据是否绑定房间使用不同的排序逻辑
+        if ($bindRoom) {
+            // 绑定模式：考虑房间绑定优先级
+            $sql = "
+                SELECT a.*,
+                       CASE
+                           WHEN a.plan_id = ? AND a.room_id = ? THEN 1
+                           WHEN a.plan_id = ? THEN 2
+                           WHEN a.room_id = ? THEN 3
+                           WHEN a.plan_id IS NULL THEN 4
+                           ELSE 5
+                       END as binding_priority,
+                       CASE
+                           WHEN (a.amount + ?) = ? THEN 3
+                           WHEN (a.amount + ?) < ? THEN 2
+                           ELSE 1
+                       END as capacity_priority
+                FROM itunes_trade_accounts a
+                WHERE a.id IN ($placeholders)
+                  AND a.deleted_at IS NULL
+                ORDER BY
+                    binding_priority ASC,
+                    capacity_priority DESC,
+                    a.amount DESC,
+                    a.id ASC
+            ";
 
-        $params = [
-            $plan->id,          // WHEN a.plan_id = ? AND a.room_id = ? THEN 1
-            $roomId,            // AND a.room_id = ?
-            $plan->id,          // WHEN a.plan_id = ? THEN 2
-            $roomId,            // WHEN a.room_id = ? THEN 3
-            $giftCardAmount,    // WHEN (a.amount + ?) = ? THEN 3
-            $plan->total_amount,// = ?
-            $giftCardAmount,    // WHEN (a.amount + ?) < ? THEN 2
-            $plan->total_amount // < ?
-        ];
+            $params = [
+                $plan->id,          // WHEN a.plan_id = ? AND a.room_id = ? THEN 1
+                $roomId,            // AND a.room_id = ?
+                $plan->id,          // WHEN a.plan_id = ? THEN 2
+                $roomId,            // WHEN a.room_id = ? THEN 3
+                $giftCardAmount,    // WHEN (a.amount + ?) = ? THEN 3
+                $plan->total_amount,// = ?
+                $giftCardAmount,    // WHEN (a.amount + ?) < ? THEN 2
+                $plan->total_amount // < ?
+            ];
+        } else {
+            // 混充模式：不考虑房间绑定，优先选择最早执行兑换的账号
+            $sql = "
+                SELECT a.*,
+                       CASE
+                           WHEN a.plan_id = ? THEN 1
+                           WHEN a.plan_id IS NULL THEN 2
+                           ELSE 3
+                       END as binding_priority,
+                       CASE
+                           WHEN (a.amount + ?) = ? THEN 3
+                           WHEN (a.amount + ?) < ? THEN 2
+                           ELSE 1
+                       END as capacity_priority,
+                       COALESCE(l.exchange_time, '1970-01-01 00:00:00') as last_exchange_time
+                FROM itunes_trade_accounts a
+                LEFT JOIN (
+                    SELECT account_id, MAX(exchange_time) as exchange_time
+                    FROM itunes_trade_account_logs
+                    WHERE exchange_time IS NOT NULL
+                    GROUP BY account_id
+                ) l ON a.id = l.account_id
+                WHERE a.id IN ($placeholders)
+                  AND a.deleted_at IS NULL
+                ORDER BY
+                    binding_priority ASC,
+                    capacity_priority DESC,
+                    a.amount DESC,
+                    last_exchange_time ASC,
+                    a.id ASC
+            ";
+
+            $params = [
+                $plan->id,          // WHEN a.plan_id = ? THEN 1
+                $giftCardAmount,    // WHEN (a.amount + ?) = ? THEN 3
+                $plan->total_amount,// = ?
+                $giftCardAmount,    // WHEN (a.amount + ?) < ? THEN 2
+                $plan->total_amount // < ?
+            ];
+        }
 
         $params = array_merge($params, $accountIds);
 
@@ -790,27 +834,54 @@ class FindAccountService
             'country' => $country
         ]);
 
-        $sql = "
-            SELECT a.*
-            FROM itunes_trade_accounts a
-            WHERE a.status = 'processing'
-              AND a.login_status = 'valid'
-              AND a.country_code = ?
-              AND a.amount = 0
-              AND a.deleted_at IS NULL
-            ORDER BY
-                CASE
-                    WHEN a.plan_id = ? AND a.room_id = ? THEN 1
-                    WHEN a.plan_id = ? THEN 2
-                    WHEN a.room_id = ? THEN 3
-                    WHEN a.plan_id IS NULL THEN 4
-                    ELSE 5
-                END,
-                a.id ASC
-            LIMIT 1
-        ";
+        $bindRoom = $plan->bind_room ?? false;
 
-        $params = [$country, $plan->id, $roomId, $plan->id, $roomId];
+        if ($bindRoom) {
+            // 绑定模式：考虑房间绑定优先级
+            $sql = "
+                SELECT a.*
+                FROM itunes_trade_accounts a
+                WHERE a.status = 'processing'
+                  AND a.login_status = 'valid'
+                  AND a.country_code = ?
+                  AND a.amount = 0
+                  AND a.deleted_at IS NULL
+                ORDER BY
+                    CASE
+                        WHEN a.plan_id = ? AND a.room_id = ? THEN 1
+                        WHEN a.plan_id = ? THEN 2
+                        WHEN a.room_id = ? THEN 3
+                        WHEN a.plan_id IS NULL THEN 4
+                        ELSE 5
+                    END,
+                    a.id ASC
+                LIMIT 1
+            ";
+
+            $params = [$country, $plan->id, $roomId, $plan->id, $roomId];
+        } else {
+            // 混充模式：不考虑房间绑定，只考虑计划绑定
+            $sql = "
+                SELECT a.*
+                FROM itunes_trade_accounts a
+                WHERE a.status = 'processing'
+                  AND a.login_status = 'valid'
+                  AND a.country_code = ?
+                  AND a.amount = 0
+                  AND a.deleted_at IS NULL
+                ORDER BY
+                    CASE
+                        WHEN a.plan_id = ? THEN 1
+                        WHEN a.plan_id IS NULL THEN 2
+                        ELSE 3
+                    END,
+                    a.id ASC
+                LIMIT 1
+            ";
+
+            $params = [$country, $plan->id];
+        }
+
         $result = DB::select($sql, $params);
 
         if (empty($result)) {
@@ -959,7 +1030,7 @@ class FindAccountService
     {
         // 执行前5层筛选
         $giftCardAmount  = $giftCardInfo['amount'];
-        $giftCardCountry = $giftCardInfo['country'] ?? $plan->country;
+        $giftCardCountry = $giftCardInfo['country_code'] ?? $giftCardInfo['country'] ?? $plan->country;
 
         $baseAccountIds = $this->getBaseQualifiedAccountIds($plan, $giftCardAmount, $giftCardCountry);
         if (empty($baseAccountIds)) return null;

@@ -14,8 +14,8 @@ use Psr\Log\LoggerInterface;
  * 检查各个面额可兑换的账号数量
  *
  * 职责：
- * 1. 检查50-500（以50为基数）各个面额的可兑换账号数量
- * 2. 考虑账号状态、登录状态、当日计划剩余额度
+ * 1. 统计账号金额分布
+ * 2. 识别长期未使用的账号
  * 3. 输出统计报告
  */
 class CheckAvailableAccountsByAmount extends Command
@@ -32,12 +32,7 @@ class CheckAvailableAccountsByAmount extends Command
      *
      * @var string
      */
-    protected $description = '检查各个面额可兑换的账号数量（每30分钟执行）';
-
-    /**
-     * 面额列表（以50为基数，从50到500）
-     */
-    private const AMOUNTS = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500];
+    protected $description = '检查账号金额分布和长期未使用账号（每30分钟执行）';
 
     /**
      * 执行控制台命令
@@ -47,8 +42,8 @@ class CheckAvailableAccountsByAmount extends Command
         $startTime = microtime(true);
         $date = now();
 
-        $this->getLogger()->info("========== 开始检查可兑换账号数量 [{$date}] ==========");
-        $this->info("🔍 开始检查各个面额可兑换的账号数量");
+        $this->getLogger()->info("========== 开始检查账号金额分布 [{$date}] ==========");
+        $this->info("🔍 开始检查账号金额分布和长期未使用账号");
 
         try {
             // 获取要检查的国家列表
@@ -98,10 +93,12 @@ class CheckAvailableAccountsByAmount extends Command
             return $specifiedCountries;
         }
 
-        // 如果没有指定国家，获取所有有处理中账号的国家
+        // 如果没有指定国家，获取所有有账号的国家
         $countries = DB::table('itunes_trade_accounts')
-            ->where('status', ItunesTradeAccount::STATUS_PROCESSING)
-            ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_ACTIVE)
+            ->whereIn('status', [
+                ItunesTradeAccount::STATUS_PROCESSING,
+                ItunesTradeAccount::STATUS_WAITING
+            ])
             ->whereNull('deleted_at')
             ->distinct()
             ->pluck('country_code')
@@ -118,231 +115,125 @@ class CheckAvailableAccountsByAmount extends Command
     {
         $this->info("\n📊 检查国家: {$country}");
         
-        // 获取该国家的所有processing且登录有效的账号
-        $accounts = ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_PROCESSING)
-            ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_ACTIVE)
+        // 获取该国家的所有processing和waiting状态的账号
+        $accounts = ItunesTradeAccount::whereIn('status', [
+                ItunesTradeAccount::STATUS_PROCESSING,
+                ItunesTradeAccount::STATUS_WAITING
+            ])
             ->where('country_code', $country)
             ->whereNull('deleted_at')
-            ->with('plan')
             ->get();
 
         if ($accounts->isEmpty()) {
-            $this->warn("  国家 {$country} 没有可用账号");
+            $this->warn("  国家 {$country} 没有账号");
             return [
                 'total_accounts' => 0,
-                'statistics' => [],
+                'amount_distribution' => [],
+                'inactive_accounts' => [],
                 'no_accounts' => true
             ];
         }
 
         $this->info("  总账号数: {$accounts->count()}");
 
-        // 统计各个面额的可兑换账号数量
-        $statistics = [];
+        // 统计金额分布
+        $amountDistribution = $this->getAmountDistribution($accounts);
         
-        foreach (self::AMOUNTS as $amount) {
-            $availableCount = $this->countAvailableAccountsForAmount($accounts, $amount);
-            $statistics[$amount] = $availableCount;
-            
-            $this->line("  面额 $" . str_pad($amount, 3, ' ', STR_PAD_LEFT) . ": " . str_pad($availableCount, 3, ' ', STR_PAD_LEFT) . " 个账号");
-        }
-
-        // 收集详细统计信息
-        $detailedStats = $this->collectDetailedStatistics($country, $accounts);
+        // 获取长期未使用的账号（1650以上且2小时无兑换）
+        $inactiveAccounts = $this->getInactiveAccounts($accounts);
 
         // 记录到日志
-        $this->getLogger()->info("账号可用性统计", [
+        $this->getLogger()->info("账号金额分布统计", [
             'country' => $country,
             'total_accounts' => $accounts->count(),
-            'statistics' => $statistics,
-            'detailed_stats' => $detailedStats
+            'amount_distribution' => $amountDistribution,
+            'inactive_count' => count($inactiveAccounts)
         ]);
 
         // 输出详细分析
-        $this->outputDetailedAnalysis($country, $accounts, $statistics);
+        $this->outputDetailedAnalysis($country, $accounts, $amountDistribution, $inactiveAccounts);
 
         // 返回检测结果
         return [
             'total_accounts' => $accounts->count(),
-            'statistics' => $statistics,
-            'detailed_stats' => $detailedStats,
+            'amount_distribution' => $amountDistribution,
+            'inactive_accounts' => $inactiveAccounts,
             'no_accounts' => false
         ];
     }
 
     /**
-     * 计算指定面额的可兑换账号数量
+     * 获取金额分布
      */
-    private function countAvailableAccountsForAmount($accounts, float $amount): int
+    private function getAmountDistribution($accounts): array
     {
-        $count = 0;
+        return [
+            '0' => $accounts->where('amount', 0)->count(),
+            '0-600' => $accounts->whereBetween('amount', [0.01, 600])->count(),
+            '600-1200' => $accounts->whereBetween('amount', [600.01, 1200])->count(),
+            '1200-1650' => $accounts->whereBetween('amount', [1200.01, 1650])->count(),
+            '1650+' => $accounts->where('amount', '>', 1650)->count(),
+        ];
+    }
 
-        foreach ($accounts as $account) {
-            if ($this->canAccountRedeemAmount($account, $amount)) {
-                $count++;
+    /**
+     * 获取长期未使用的账号（1650以上且2小时无兑换）
+     */
+    private function getInactiveAccounts($accounts): array
+    {
+        $inactiveAccounts = [];
+        $twoHoursAgo = now()->subHours(2);
+
+        // 只检查1650以上的账号
+        $highBalanceAccounts = $accounts->where('amount', '>', 1650);
+
+        foreach ($highBalanceAccounts as $account) {
+            // 检查最近2小时是否有兑换记录
+            $lastActivity = ItunesTradeAccountLog::where('account_id', $account->id)
+                ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
+                ->orderBy('created_at', 'desc')
+                ->first();
+
+            if (!$lastActivity || $lastActivity->created_at < $twoHoursAgo) {
+                $inactiveAccounts[] = [
+                    'id' => $account->id,
+                    'account' => $account->account,
+                    'balance' => $account->amount,
+                    'status' => $account->status,
+                    'last_activity' => $lastActivity ? $lastActivity->created_at->format('Y-m-d H:i:s') : '无记录',
+                    'hours_inactive' => $lastActivity ? $lastActivity->created_at->diffInHours(now()) : 999
+                ];
             }
         }
 
-        return $count;
-    }
+        // 按未使用时间排序
+        usort($inactiveAccounts, function($a, $b) {
+            return $b['hours_inactive'] <=> $a['hours_inactive'];
+        });
 
-    /**
-     * 检查账号是否可以兑换指定面额
-     */
-    private function canAccountRedeemAmount(ItunesTradeAccount $account, float $amount): bool
-    {
-        // 1. 如果账号余额为0，可以兑换所有面额
-        if ($account->amount == 0) {
-            return true;
-        }
-
-        // 2. 检查总额度限制
-        if (!$account->plan) {
-            // 没有计划的账号，假设无限制（但这种情况很少）
-            return true;
-        }
-
-        $plan = $account->plan;
-        
-        // 检查总额度：当前余额 + 兑换金额 <= 计划总额度
-        if (($account->amount + $amount) > $plan->total_amount) {
-            return false;
-        }
-
-        // 3. 检查当日额度限制
-        return $this->canAccountRedeemAmountToday($account, $plan, $amount);
-    }
-
-    /**
-     * 检查账号今日是否可以兑换指定面额
-     */
-    private function canAccountRedeemAmountToday(ItunesTradeAccount $account, ItunesTradePlan $plan, float $amount): bool
-    {
-        $currentDay = $account->current_plan_day ?? 1;
-
-        // 获取当天已成功兑换的总额
-        $dailySpent = ItunesTradeAccountLog::where('account_id', $account->id)
-            ->where('day', $currentDay)
-            ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
-            ->sum('amount');
-
-        // 获取当天的计划额度
-        $dailyAmounts = $plan->daily_amounts ?? [];
-        $dailyLimit = $dailyAmounts[$currentDay - 1] ?? 0;
-        
-        // 当日最大可兑换 = 计划金额 + 浮动金额
-        $maxDailyAmount = $dailyLimit + ($plan->float_amount ?? 0);
-        
-        // 当日剩余可兑换 = 最大可兑换 - 已兑换
-        $remainingDailyAmount = $maxDailyAmount - $dailySpent;
-
-        // 检查是否足够兑换指定面额
-        return $remainingDailyAmount >= $amount;
-    }
-
-    /**
-     * 收集详细统计信息
-     */
-    private function collectDetailedStatistics(string $country, $accounts): array
-    {
-        // 获取所有相关账号（包含waiting状态的账号）
-        $allAccounts = ItunesTradeAccount::whereIn('status', [
-                ItunesTradeAccount::STATUS_PROCESSING,
-                ItunesTradeAccount::STATUS_WAITING
-            ])
-            ->where('country_code', $country)
-            ->whereNull('deleted_at')
-            ->get();
-
-        // 分析零余额账号（包含waiting状态）
-        $zeroBalanceCount = $allAccounts->where('amount', 0)->count();
-
-        // 分析有计划账号（包含waiting状态的账号）
-        $withPlanCount = $allAccounts->whereNotNull('plan_id')->count();
-        $withoutPlanCount = $allAccounts->whereNull('plan_id')->count();
-
-        // 分析账号余额分布（包含waiting状态）
-        $balanceRanges = [
-            '0' => $allAccounts->where('amount', 0)->count(),
-            '1-500' => $allAccounts->whereBetween('amount', [0.01, 500])->count(),
-            '501-1000' => $allAccounts->whereBetween('amount', [501, 1000])->count(),
-            '1001-1500' => $allAccounts->whereBetween('amount', [1001, 1500])->count(),
-            '1500+' => $allAccounts->where('amount', '>', 1500)->count(),
-        ];
-
-        return [
-            'zero_balance_count' => $zeroBalanceCount,
-            'with_plan_count' => $withPlanCount,
-            'without_plan_count' => $withoutPlanCount,
-            'balance_ranges' => $balanceRanges
-        ];
+        return $inactiveAccounts;
     }
 
     /**
      * 输出详细分析
      */
-    private function outputDetailedAnalysis(string $country, $accounts, array $statistics): void
+    private function outputDetailedAnalysis(string $country, $accounts, array $amountDistribution, array $inactiveAccounts): void
     {
-        // 获取所有相关账号（包含waiting状态的账号）
-        $allAccounts = ItunesTradeAccount::whereIn('status', [
-                ItunesTradeAccount::STATUS_PROCESSING,
-                ItunesTradeAccount::STATUS_WAITING
-            ])
-            ->where('country_code', $country)
-            ->whereNull('deleted_at')
-            ->get();
+        $this->line("  金额分布:");
+        $this->line("    0余额: {$amountDistribution['0']} 个");
+        $this->line("    0-600: {$amountDistribution['0-600']} 个");
+        $this->line("    600-1200: {$amountDistribution['600-1200']} 个");
+        $this->line("    1200-1650: {$amountDistribution['1200-1650']} 个");
+        $this->line("    1650+: {$amountDistribution['1650+']} 个");
 
-        // 分析零余额账号（包含waiting状态）
-        $zeroBalanceCount = $allAccounts->where('amount', 0)->count();
-        $this->line("  零余额账号: {$zeroBalanceCount} 个（可兑换所有面额）");
-
-        // 分析有计划账号（包含waiting状态的账号）
-        $withPlanCount = $allAccounts->whereNotNull('plan_id')->count();
-        $withoutPlanCount = $allAccounts->whereNull('plan_id')->count();
-        $this->line("  有计划账号: {$withPlanCount} 个");
-        $this->line("  无计划账号: {$withoutPlanCount} 个");
-
-        // 分析账号余额分布（包含waiting状态）
-        $balanceRanges = [
-            '0' => $allAccounts->where('amount', 0)->count(),
-            '1-500' => $allAccounts->whereBetween('amount', [0.01, 500])->count(),
-            '501-1000' => $allAccounts->whereBetween('amount', [501, 1000])->count(),
-            '1001-1500' => $allAccounts->whereBetween('amount', [1001, 1500])->count(),
-            '1500+' => $allAccounts->where('amount', '>', 1500)->count(),
-        ];
-
-        $this->line("  余额分布:");
-        foreach ($balanceRanges as $range => $count) {
-            $this->line("    ${range}: {$count} 个");
-        }
-
-        // 找出瓶颈面额（可用账号数量显著下降的面额）
-        $bottleneckAmounts = $this->findBottleneckAmounts($statistics);
-        if (!empty($bottleneckAmounts)) {
-            $this->line("  ⚠️  瓶颈面额: $" . implode(', $', $bottleneckAmounts));
-        }
-    }
-
-    /**
-     * 找出瓶颈面额
-     */
-    private function findBottleneckAmounts(array $statistics): array
-    {
-        $bottlenecks = [];
-        $previousCount = null;
-
-        foreach ($statistics as $amount => $count) {
-            if ($previousCount !== null) {
-                // 如果当前面额的可用账号数比上一个面额减少超过20%，视为瓶颈
-                $reductionRate = ($previousCount - $count) / $previousCount;
-                if ($reductionRate > 0.2 && $count < 10) {
-                    $bottlenecks[] = $amount;
-                }
+        if (!empty($inactiveAccounts)) {
+            $this->line("  ⚠️  长期未使用账号（1650以上且2小时无兑换）:");
+            foreach ($inactiveAccounts as $account) {
+                $this->line("    {$account['account']} - 余额:{$account['balance']} - 最后兑换:{$account['last_activity']} - 未使用:{$account['hours_inactive']}小时");
             }
-            $previousCount = $count;
+        } else {
+            $this->line("  ✅ 没有长期未使用的账号");
         }
-
-        return $bottlenecks;
     }
 
     /**
@@ -352,41 +243,39 @@ class CheckAvailableAccountsByAmount extends Command
     {
         try {
             // 格式化微信消息
-            $message = "可用账号监控\n---------------------\n";
-            $message .= "检测时间: " . now()->format('Y-m-d H:i:s') . "\n";
-            $message .= "执行耗时: {$executionTime}ms\n\n";
+            $message = "💰 账号金额分布监控\n";
+            $message .= "═══════════════════\n";
+            $message .= "📅 检测时间: " . now()->format('Y-m-d H:i:s') . "\n";
+            $message .= "⏱️ 执行耗时: {$executionTime}ms\n\n";
 
             foreach ($allResults as $country => $results) {
                 if ($results['no_accounts']) {
-                    $message .= "📊 国家: {$country}\n";
-                    $message .= "⚠️ 没有可用账号\n\n";
+                    $message .= "🌍 国家: {$country}\n";
+                    $message .= "❌ 没有账号\n\n";
                     continue;
                 }
 
-                $message .= "📊 国家: {$country}\n";
-                $message .= "总账号数: {$results['total_accounts']}\n";
+                $message .= "🌍 国家: {$country}\n";
+                $message .= "📊 总账号数: {$results['total_accounts']}\n";
                 
-                // 显示各面额的可用账号数量
-                foreach ($results['statistics'] as $amount => $count) {
-                    $message .= "  $" . str_pad($amount, 3, ' ', STR_PAD_LEFT) . ": " . str_pad($count, 3, ' ', STR_PAD_LEFT) . " 个\n";
-                }
+                // 显示金额分布
+                $message .= "💰 金额分布:\n";
+                $distribution = $results['amount_distribution'];
+                $message .= "  0余额: {$distribution['0']} 个\n";
+                $message .= "  0-600: {$distribution['0-600']} 个\n";
+                $message .= "  600-1200: {$distribution['600-1200']} 个\n";
+                $message .= "  1200-1650: {$distribution['1200-1650']} 个\n";
+                $message .= "  1650+: {$distribution['1650+']} 个\n";
                 
-                // 标记瓶颈面额
-                $bottleneckAmounts = $this->findBottleneckAmounts($results['statistics']);
-                if (!empty($bottleneckAmounts)) {
-                    $message .= "⚠️ 瓶颈面额: $" . implode(', $', $bottleneckAmounts) . "\n";
-                }
-                
-                // 显示详细统计信息
-                if (isset($results['detailed_stats'])) {
-                    $stats = $results['detailed_stats'];
-                    $message .= "零余额账号: {$stats['zero_balance_count']} 个（可兑换所有面额）\n";
-                    $message .= "有计划账号: {$stats['with_plan_count']} 个\n";
-                    $message .= "无计划账号: {$stats['without_plan_count']} 个\n";
-                    $message .= "余额分布:\n";
-                    foreach ($stats['balance_ranges'] as $range => $count) {
-                        $message .= "  {$range}: {$count} 个\n";
+                // 显示长期未使用的账号
+                $inactiveAccounts = $results['inactive_accounts'];
+                if (!empty($inactiveAccounts)) {
+                    $message .= "\n⚠️  长期未使用账号（1650以上且2小时无兑换）:\n";
+                    foreach ($inactiveAccounts as $account) {
+                        $message .= "  {$account['account']} - 余额:{$account['balance']} - 最后兑换:{$account['last_activity']} - 未使用:{$account['hours_inactive']}小时\n";
                     }
+                } else {
+                    $message .= "\n✅ 没有长期未使用的账号\n";
                 }
                 
                 $message .= "\n";

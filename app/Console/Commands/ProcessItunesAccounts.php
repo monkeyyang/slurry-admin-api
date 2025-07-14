@@ -110,8 +110,7 @@ class ProcessItunesAccounts extends Command
     private function executeLogoutOnly(): void
     {
         // 查找符合条件的账号：amount=0, status=processing, login_status=valid
-        $accounts = ItunesTradeAccount::where('amount', 0)
-            ->where('status', ItunesTradeAccount::STATUS_PROCESSING)
+        $accounts = ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_COMPLETED)
             ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_ACTIVE)
             ->orderBy('created_at', 'desc') // 后导入的先退出登录
             ->get();
@@ -396,8 +395,8 @@ class ProcessItunesAccounts extends Command
     private function executeLoginOnly(): void
     {
         // 查找符合条件的账号：status=processing, login_status=invalid, amount>0
-        $accounts = ItunesTradeAccount::where('status', ItunesTradeAccount::STATUS_PROCESSING)
-            ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_INVALID)
+        $accounts = ItunesTradeAccount::whereIn('status', [ItunesTradeAccount::STATUS_PROCESSING, ItunesTradeAccount::STATUS_WAITING])
+//            ->where('login_status', ItunesTradeAccount::STATUS_LOGIN_INVALID)
             ->where('amount', '>=', 0)
             ->orderBy('created_at', 'asc') // 先导入的优先处理
             ->get();
