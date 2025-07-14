@@ -30,7 +30,7 @@ class ProcessAppleAccountLogoutJob implements ShouldQueue
         $this->reason    = $reason;
 
         // 设置队列
-        $this->onQueue('account_operations');
+        $this->onQueue('account_logout_operations');
     }
 
     /**

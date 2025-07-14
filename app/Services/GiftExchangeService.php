@@ -53,7 +53,7 @@ class GiftExchangeService
     protected $wechatRoomBindingService;
 
     /**
-     * 登录API地址
+     * 登录API地址（已废弃，使用GiftCardApiClient）
      */
     protected const LOGIN_API_URL = 'http://47.76.200.188:8080/api/login_poll/new';
 
@@ -135,15 +135,14 @@ class GiftExchangeService
     public function sendAsyncLoginRequest(array $accounts): void
     {
         try {
-            $loginData = [
-                'list' => []
-            ];
+            $giftCardApiClient = new GiftCardApiClient();
 
+            $loginData = [];
             $id = 1;
             foreach ($accounts as $account) {
                 $accountInfo = is_array($account) ? $account : $this->parseAccountAndPassword($account);
 
-                $loginData['list'][] = [
+                $loginData[] = [
                     'id' => $id++,
                     'username' => $accountInfo['account'],
                     'password' => $accountInfo['password'],
@@ -151,32 +150,18 @@ class GiftExchangeService
                 ];
             }
 
-            // 异步发送HTTP请求
-//            Http::async()->timeout(30)->post(self::LOGIN_API_URL, $loginData);
-//
-//            Log::info('Async login request sent successfully', [
-//                'url' => self::LOGIN_API_URL,
-//                'accounts_count' => count($loginData['list']),
-//                'data' => $loginData
-//            ]);
-
-            $response = Http::timeout(30)->post(self::LOGIN_API_URL, $loginData);
-
-            $responseData = $response->json(); // 获取JSON响应数据
-            $statusCode = $response->status(); // 获取HTTP状态码
+            $response = $giftCardApiClient->createLoginTask($loginData);
 
             Log::info('Login request sent and response received', [
-                'url' => self::LOGIN_API_URL,
-                'accounts_count' => count($loginData['list']),
+                'accounts_count' => count($loginData),
                 'request_data' => $loginData,
-                'response_status' => $statusCode,
-                'response_data' => $responseData,
-                'success' => $response->successful() // 是否为成功响应(2xx)
+                'response_code' => $response['code'] ?? 'unknown',
+                'response_data' => $response,
+                'success' => ($response['code'] ?? -1) === 0
             ]);
 
         } catch (\Exception $e) {
             Log::error('Failed to send async login request: ' . $e->getMessage(), [
-                'url' => self::LOGIN_API_URL,
                 'accounts' => $accounts
             ]);
         }

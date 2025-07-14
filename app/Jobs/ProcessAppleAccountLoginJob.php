@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Apple账号登录队列任务
- * 
+ *
  * 特性：
  * - 每日最多重试3次
  * - 退避机制：首次失败30分钟后重试，二次失败1小时后重试
@@ -46,10 +46,10 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
         $this->accountId = $accountId;
         $this->reason = $reason;
         $this->currentAttempt = $currentAttempt;
-        
+
         // 设置队列和延迟
-        $this->onQueue('account_operations');
-        
+        $this->onQueue('account_login_operations');
+
         // 如果是重试，添加延迟
         if ($currentAttempt > 1 && isset(self::RETRY_DELAYS[$currentAttempt - 1])) {
             $delayMinutes = self::RETRY_DELAYS[$currentAttempt - 1];
@@ -63,7 +63,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
     public function handle(): void
     {
         $account = ItunesTradeAccount::find($this->accountId);
-        
+
         if (!$account) {
             Log::warning("登录任务：账号不存在", ['account_id' => $this->accountId]);
             return;
@@ -72,7 +72,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
         // 防重复处理：获取账号处理锁
         $lockKey = "login_processing_" . $this->accountId;
         $lockTtl = 600; // 10分钟锁定时间
-        
+
         if (!Cache::add($lockKey, $this->job->uuid(), $lockTtl)) {
             Log::info("账号 {$account->account} 正在被其他任务处理，跳过", [
                 'account_id' => $this->accountId,
@@ -96,7 +96,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
     {
         // 检查今日重试次数
         $todayAttempts = $this->getTodayAttempts($account->account);
-        
+
         if ($todayAttempts >= self::MAX_DAILY_ATTEMPTS) {
             Log::warning("账号 {$account->account} 今日登录重试次数已达上限", [
                 'account' => $account->account,
@@ -122,7 +122,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
             ]);
 
             $giftCardApiClient = app(GiftCardApiClient::class);
-            
+
             // 准备登录数据
             $loginData = [[
                 'id' => $account->id,
@@ -136,7 +136,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
 
             if ($response['code'] !== 0) {
                 $errorMsg = $response['msg'] ?? '创建登录任务失败';
-                
+
                 Log::error("❌ 账号 {$account->account} 登录任务创建失败", [
                     'error_code' => $response['code'],
                     'error_msg' => $errorMsg,
@@ -162,20 +162,20 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
 
             // 轮询登录任务状态直到完成
             $finalResult = $this->pollLoginTaskStatus($giftCardApiClient, $taskId, $account);
-            
+
             // 根据最终结果处理
             if ($finalResult['success']) {
                 Log::info("✅ 账号 {$account->account} 登录成功", [
                     'task_id' => $taskId,
                     'result' => $finalResult['result']
                 ]);
-                
+
                 // 登录成功，清除重试记录
                 $this->clearAttempts($account->account);
-                
+
                 // 更新账号状态和余额信息
                 $this->updateAccountFromLoginResult($account, $finalResult['result']);
-                
+
             } else {
                 Log::error("❌ 账号 {$account->account} 登录失败", [
                     'task_id' => $taskId,
@@ -188,7 +188,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
 
         } catch (\Exception $e) {
             $errorMsg = $e->getMessage();
-            
+
             Log::error("❌ 账号 {$account->account} 登录任务异常", [
                 'error' => $errorMsg,
                 'attempt' => $this->currentAttempt,
@@ -207,7 +207,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
         $maxWaitTime = 300; // 最大等待5分钟
         $pollInterval = 0.2; // 200ms轮询间隔
         $startTime = time();
-        
+
         Log::info("开始轮询登录任务状态", [
             'task_id' => $taskId,
             'account' => $account->account,
@@ -218,14 +218,14 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
         while (time() - $startTime < $maxWaitTime) {
             try {
                 $statusResponse = $giftCardApiClient->getLoginTaskStatus($taskId);
-                
+
                 if ($statusResponse['code'] !== 0) {
                     Log::error("查询登录任务状态失败", [
                         'task_id' => $taskId,
                         'account' => $account->account,
                         'error' => $statusResponse['msg'] ?? 'unknown'
                     ]);
-                    
+
                     return [
                         'success' => false,
                         'error' => '查询任务状态失败: ' . ($statusResponse['msg'] ?? 'unknown')
@@ -234,7 +234,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
 
                 $taskStatus = $statusResponse['data']['status'] ?? '';
                 $items = $statusResponse['data']['items'] ?? [];
-                
+
                 Log::debug("登录任务状态", [
                     'task_id' => $taskId,
                     'account' => $account->account,
@@ -251,7 +251,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
                             return $this->parseLoginResult($item, $account);
                         }
                     }
-                    
+
                     return [
                         'success' => false,
                         'error' => '任务完成但未找到账号结果'
@@ -276,7 +276,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
                     'account' => $account->account,
                     'error' => $e->getMessage()
                 ]);
-                
+
                 return [
                     'success' => false,
                     'error' => '轮询状态异常: ' . $e->getMessage()
@@ -330,7 +330,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
 
         try {
             $resultData = json_decode($result, true);
-            
+
             if (!$resultData) {
                 return [
                     'success' => false,
@@ -375,7 +375,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
             if (isset($resultData['balance']) && $resultData['balance'] !== '') {
                 $balance = (float)preg_replace('/[^\d.-]/', '', $resultData['balance']);
                 $updates['amount'] = $balance;
-                
+
                 Log::info("更新账号余额", [
                     'account' => $account->account,
                     'old_balance' => $account->amount,
@@ -387,7 +387,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
             // 更新国家信息
             if (isset($resultData['countryCode']) && !empty($resultData['countryCode'])) {
                 $updates['country_code'] = $resultData['countryCode'];
-                
+
                 Log::info("更新账号国家信息", [
                     'account' => $account->account,
                     'country_code' => $resultData['countryCode'],
@@ -438,7 +438,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
     {
         $cacheKey = "login_attempts_" . md5($account) . "_" . now()->format('Y-m-d');
         $attempts = $this->getTodayAttempts($account) + 1;
-        
+
         // 缓存到明天凌晨
         $expiresAt = now()->addDay()->startOfDay();
         Cache::put($cacheKey, $attempts, $expiresAt);
@@ -460,7 +460,7 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
     {
         $nextAttempt = $this->currentAttempt + 1;
         $delayMinutes = self::RETRY_DELAYS[$this->currentAttempt] ?? 60;
-        
+
         Log::info("📅 安排账号 {$account->account} 重试登录", [
             'next_attempt' => $nextAttempt,
             'delay_minutes' => $delayMinutes,
@@ -509,4 +509,4 @@ class ProcessAppleAccountLoginJob implements ShouldQueue
             'error' => $exception->getMessage()
         ]);
     }
-} 
+}

@@ -25,32 +25,32 @@ class ItunesTradeAccountController extends Controller
     {
         try {
             $params = $request->validate([
-                'account' => 'nullable|string|max:255',
-                'country' => 'nullable|string|max:10',
-                'status' => ['nullable', Rule::in(['completed', 'processing', 'waiting', 'locking'])],
+                'account'     => 'nullable|string|max:255',
+                'country'     => 'nullable|string|max:10',
+                'status'      => ['nullable', Rule::in(['completed', 'processing', 'waiting', 'locking'])],
                 'loginStatus' => ['nullable', Rule::in(['valid', 'invalid'])],
-                'uid' => 'nullable|integer',
-                'startTime' => 'nullable|date',
-                'endTime' => 'nullable|date|after_or_equal:startTime',
-                'pageNum' => 'nullable|integer|min:1',
-                'pageSize' => 'nullable|integer|min:1|max:10000',
-                'type' => 'nullable|string|max:50',
+                'uid'         => 'nullable|integer',
+                'startTime'   => 'nullable|date',
+                'endTime'     => 'nullable|date|after_or_equal:startTime',
+                'pageNum'     => 'nullable|integer|min:1',
+                'pageSize'    => 'nullable|integer|min:1|max:10000',
+                'type'        => 'nullable|string|max:50',
             ]);
 
             $result = $this->accountService->getAccountsWithPagination($params);
 
             return response()->json([
-                'code' => 0,
+                'code'    => 0,
                 'message' => 'success',
-                'data' => $result,
+                'data'    => $result,
             ]);
 
         } catch (\Exception $e) {
             Log::error('获取账号列表失败: ' . $e->getMessage());
             return response()->json([
-                'code' => 500,
+                'code'    => 500,
                 'message' => '获取账号列表失败',
-                'data' => null,
+                'data'    => null,
             ], 500);
         }
     }
@@ -65,24 +65,24 @@ class ItunesTradeAccountController extends Controller
 
             if (!$result) {
                 return response()->json([
-                    'code' => 404,
+                    'code'    => 404,
                     'message' => '账号不存在',
-                    'data' => null,
+                    'data'    => null,
                 ], 404);
             }
 
             return response()->json([
-                'code' => 0,
+                'code'    => 0,
                 'message' => 'success',
-                'data' => $result,
+                'data'    => $result,
             ]);
 
         } catch (\Exception $e) {
             Log::error('获取账号详情失败: ' . $e->getMessage());
             return response()->json([
-                'code' => 500,
+                'code'    => 500,
                 'message' => '获取账号详情失败',
-                'data' => null,
+                'data'    => null,
             ], 500);
         }
     }
@@ -93,19 +93,19 @@ class ItunesTradeAccountController extends Controller
     public function batchImport(Request $request): JsonResponse
     {
         $validated = $request->validate([
-                'country_code' => 'required|string|max:10',
-                'accounts' => 'required|array|min:1|max:50',
-                'accounts.*.account' => 'required|string|max:255',
-                'accounts.*.password' => 'required|string|max:255',
-                'accounts.*.apiUrl' => 'nullable|string|max:500',
-                'type' => 'required|string|max:50',
-            ], [
-            'country_code.required'   => '请选择国家',
-            'accounts.required'     => '账号不能为空，单次提交最多50条',
-            'accounts.min'          => '至少需要1条账号',
-            'accounts.max'          => '单次最多支持提交50个账号',
-            'accounts.*.account.required'   => '账号不能为空',
-            'accounts.*.account.max'        => '账号长度最多255位',
+            'country_code'        => 'required|string|max:10',
+            'accounts'            => 'required|array|min:1|max:50',
+            'accounts.*.account'  => 'required|string|max:255',
+            'accounts.*.password' => 'required|string|max:255',
+            'accounts.*.apiUrl'   => 'nullable|string|max:500',
+            'type'                => 'required|string|max:50',
+        ], [
+            'country_code.required'        => '请选择国家',
+            'accounts.required'            => '账号不能为空，单次提交最多50条',
+            'accounts.min'                 => '至少需要1条账号',
+            'accounts.max'                 => '单次最多支持提交50个账号',
+            'accounts.*.account.required'  => '账号不能为空',
+            'accounts.*.account.max'       => '账号长度最多255位',
             'accounts.*.password.required' => '密码不能为空',
         ]);
 
@@ -118,17 +118,17 @@ class ItunesTradeAccountController extends Controller
             );
 
             return response()->json([
-                'code' => 0,
+                'code'    => 0,
                 'message' => '批量导入完成',
-                'data' => $result,
+                'data'    => $result,
             ]);
 
         } catch (\Exception $e) {
             Log::error('批量导入账号失败: ' . $e->getMessage());
             return response()->json([
-                'code' => 500,
+                'code'    => 500,
                 'message' => '批量导入失败',
-                'data' => null,
+                'data'    => null,
             ], 500);
         }
     }
@@ -147,24 +147,24 @@ class ItunesTradeAccountController extends Controller
 
             if (!$account) {
                 return response()->json([
-                    'code' => 404,
+                    'code'    => 404,
                     'message' => '账号不存在',
-                    'data' => null,
+                    'data'    => null,
                 ], 404);
             }
 
             return response()->json([
-                'code' => 0,
+                'code'    => 0,
                 'message' => '状态更新成功',
-                'data' => $account->toApiArray(),
+                'data'    => $account->toApiArray(),
             ]);
 
         } catch (\Exception $e) {
             Log::error('更新账号状态失败: ' . $e->getMessage());
             return response()->json([
-                'code' => 500,
+                'code'    => 500,
                 'message' => '状态更新失败',
-                'data' => null,
+                'data'    => null,
             ], 500);
         }
     }
@@ -179,25 +179,25 @@ class ItunesTradeAccountController extends Controller
 
             if (!$success) {
                 return response()->json([
-                    'code' => 404,
+                    'code'    => 404,
                     'message' => '账号不存在',
-                    'data' => null,
+                    'data'    => null,
                 ], 404);
             }
 
 
             return response()->json([
-                'code' => 0,
+                'code'    => 0,
                 'message' => '删除成功',
-                'data' => null,
+                'data'    => null,
             ]);
 
         } catch (\Exception $e) {
             Log::error('删除账号失败: ' . $e->getMessage());
             return response()->json([
-                'code' => 500,
+                'code'    => 500,
                 'message' => '删除账号失败',
-                'data' => null,
+                'data'    => null,
             ], 500);
         }
     }
@@ -209,24 +209,24 @@ class ItunesTradeAccountController extends Controller
     {
         try {
             $validated = $request->validate([
-                'ids' => 'required|array|min:1',
+                'ids'   => 'required|array|min:1',
                 'ids.*' => 'required|integer',
             ]);
 
             $deletedCount = $this->accountService->batchDeleteAccounts($validated['ids']);
 
             return response()->json([
-                'code' => 0,
+                'code'    => 0,
                 'message' => '批量删除成功',
-                'data' => ['deleted_count' => $deletedCount],
+                'data'    => ['deleted_count' => $deletedCount],
             ]);
 
         } catch (\Exception $e) {
             Log::error('批量删除账号失败: ' . $e->getMessage());
             return response()->json([
-                'code' => 500,
+                'code'    => 500,
                 'message' => '批量删除失败',
-                'data' => null,
+                'data'    => null,
             ], 500);
         }
     }
@@ -245,24 +245,24 @@ class ItunesTradeAccountController extends Controller
 
             if (!$account) {
                 return response()->json([
-                    'code' => 404,
+                    'code'    => 404,
                     'message' => '账号不存在',
-                    'data' => null,
+                    'data'    => null,
                 ], 404);
             }
 
             return response()->json([
-                'code' => 0,
+                'code'    => 0,
                 'message' => '绑定成功',
-                'data' => $account->toApiArray(),
+                'data'    => $account->toApiArray(),
             ]);
 
         } catch (\Exception $e) {
             Log::error('绑定账号到计划失败: ' . $e->getMessage());
             return response()->json([
-                'code' => 500,
+                'code'    => 500,
                 'message' => '绑定失败',
-                'data' => null,
+                'data'    => null,
             ], 500);
         }
     }
@@ -277,24 +277,24 @@ class ItunesTradeAccountController extends Controller
 
             if (!$account) {
                 return response()->json([
-                    'code' => 404,
+                    'code'    => 404,
                     'message' => '账号不存在',
-                    'data' => null,
+                    'data'    => null,
                 ], 404);
             }
 
             return response()->json([
-                'code' => 0,
+                'code'    => 0,
                 'message' => '解绑成功',
-                'data' => $account->toApiArray(),
+                'data'    => $account->toApiArray(),
             ]);
 
         } catch (\Exception $e) {
             Log::error('解绑账号计划失败: ' . $e->getMessage());
             return response()->json([
-                'code' => 500,
+                'code'    => 500,
                 'message' => '解绑失败',
-                'data' => null,
+                'data'    => null,
             ], 500);
         }
     }
@@ -313,24 +313,24 @@ class ItunesTradeAccountController extends Controller
 
             if (!$account) {
                 return response()->json([
-                    'code' => 404,
+                    'code'    => 404,
                     'message' => '账号不存在',
-                    'data' => null,
+                    'data'    => null,
                 ], 404);
             }
 
             return response()->json([
-                'code' => 0,
+                'code'    => 0,
                 'message' => '登录状态更新成功',
-                'data' => $account->toApiArray(),
+                'data'    => $account->toApiArray(),
             ]);
 
         } catch (\Exception $e) {
             Log::error('更新登录状态失败: ' . $e->getMessage());
             return response()->json([
-                'code' => 500,
+                'code'    => 500,
                 'message' => '登录状态更新失败',
-                'data' => null,
+                'data'    => null,
             ], 500);
         }
     }
@@ -344,17 +344,17 @@ class ItunesTradeAccountController extends Controller
             $result = $this->accountService->getStatistics();
 
             return response()->json([
-                'code' => 0,
+                'code'    => 0,
                 'message' => 'success',
-                'data' => $result,
+                'data'    => $result,
             ]);
 
         } catch (\Exception $e) {
             Log::error('获取统计信息失败: ' . $e->getMessage());
             return response()->json([
-                'code' => 500,
+                'code'    => 500,
                 'message' => '获取统计信息失败',
-                'data' => null,
+                'data'    => null,
             ], 500);
         }
     }
@@ -381,17 +381,17 @@ class ItunesTradeAccountController extends Controller
             })->toArray();
 
             return response()->json([
-                'code' => 0,
+                'code'    => 0,
                 'message' => 'success',
-                'data' => $data,
+                'data'    => $data,
             ]);
 
         } catch (\Exception $e) {
             Log::error('获取可用账号失败: ' . $e->getMessage());
             return response()->json([
-                'code' => 500,
+                'code'    => 500,
                 'message' => '获取可用账号失败',
-                'data' => null,
+                'data'    => null,
             ], 500);
         }
     }

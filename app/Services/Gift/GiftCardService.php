@@ -521,7 +521,9 @@ class GiftCardService
         // 先根据roomId获取room表id
         $roomInfo = MrRoom::getByRoomId($roomId);
         if ($roomInfo) $roomId = $roomInfo->id;
-        return MrRoomGroup::whereRaw("FIND_IN_SET(?, room_ids)", [$roomId])->value('id');
+        return MrRoomGroup::whereRaw("FIND_IN_SET(?, room_ids)", [$roomId])
+            ->orderByDesc('id')
+            ->value('id');
     }
 
     /**

@@ -309,7 +309,8 @@ class RedeemGiftCardJob implements ShouldQueue
                 // 发送失败消息 - 使用try-catch避免二次失败
                 if (!in_array($this->roomId, ['brother-card@api', 'no-send-msg@api'])) {
                     try {
-                        $failMessage = "兑换失败\n-------------------------\n" . $this->giftCardCode . "\n" . $e->getMessage();
+//                        $failMessage = "兑换失败\n-------------------------\n" . $this->giftCardCode . "\n" . $e->getMessage();
+                        $failMessage = "❌ 兑换失败\n--------------------------\n" . $this->giftCardCode . "\n";
                         $sendResult  = send_msg_to_wechat($this->roomId, $failMessage, 'MT_SEND_TEXTMSG', true, 'redeem-gift-card');
                         if (!$sendResult) {
                             $this->getLogger()->warning("失败消息发送未成功", [

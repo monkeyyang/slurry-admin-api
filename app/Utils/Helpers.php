@@ -294,16 +294,13 @@ function send_wechat_template(
  */
 function send_async_login_request(array $accounts): void
 {
-    $loginUrl = 'http://47.76.200.188:8080/api/login_poll/new';
     try {
+        $giftCardApiClient = new \App\Services\GiftCardApiClient();
 
-        $loginData = [
-            'list' => []
-        ];
-
+        $loginData = [];
         $id = 1;
         foreach ($accounts as $account) {
-            $loginData['list'][] = [
+            $loginData[] = [
                 'id'        => $id++,
                 'username'  => $account['account'],
                 'password'  => $account['password'],
@@ -311,21 +308,18 @@ function send_async_login_request(array $accounts): void
             ];
         }
 
-        $response     = Http::timeout(30)->post($loginUrl, $loginData);
-        $responseData = $response->json();   // 获取JSON响应数据
-        $statusCode   = $response->status(); // 获取HTTP状态码
+        $response = $giftCardApiClient->createLoginTask($loginData);
+        
         Log::info('登录请求发送成功且收到回调', [
-            'url'             => $loginUrl,
-            'accounts_count'  => count($loginData['list']),
+            'accounts_count'  => count($loginData),
             'request_data'    => $loginData,
-            'response_status' => $statusCode,
-            'response_data'   => $responseData,
-            'success'         => $response->successful() // 是否为成功响应(2xx)
+            'response_code'   => $response['code'] ?? 'unknown',
+            'response_data'   => $response,
+            'success'         => ($response['code'] ?? -1) === 0
         ]);
 
     } catch (\Exception $e) {
         Log::error('登录请求发送失败: ' . $e->getMessage(), [
-            'url'      => $loginUrl,
             'accounts' => $accounts
         ]);
     }

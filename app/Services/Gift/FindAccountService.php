@@ -67,6 +67,7 @@ class FindAccountService
             $baseAccountIds = $this->getBaseQualifiedAccountIds($plan, $giftCardAmount, $giftCardCountry);
 
             if (empty($baseAccountIds)) {
+                $this->getLogger()->info("开始基础条件筛选（SQL层面）");
                 $this->logNoAccountFound($plan, $roomId, $giftCardAmount, $startTime, 'base_qualification');
                 return null;
             }
@@ -187,13 +188,15 @@ class FindAccountService
               AND (a.amount + ?) <= ?
               AND a.deleted_at IS NULL
               AND a.account_type = ?
+              AND (a.plan_id = ? OR a.plan_id IS NULL)
         ";
 
         $params = [
             $country,
             $giftCardAmount,
             $plan->total_amount,
-            $plan->plan_type
+            'device',
+            $plan->id
         ];
 
         $result = DB::select($sql, $params);
@@ -513,9 +516,9 @@ class FindAccountService
         // 按天数分组账号，减少查询次数
         $accountsByDay = [];
         foreach ($accounts as $accountData) {
-            $accountPlanId = $accountData->plan_id;
+            $accountPlanId     = $accountData->plan_id;
             $accountCurrentDay = $accountData->current_plan_day ?? 1;
-            $validationDay = $accountPlanId ? $accountCurrentDay : $currentDay;
+            $validationDay     = $accountPlanId ? $accountCurrentDay : $currentDay;
 
             $accountsByDay[$validationDay][] = $accountData->id;
         }
@@ -525,7 +528,7 @@ class FindAccountService
             if (empty($accountIds)) continue;
 
             $placeholders = str_repeat('?,', count($accountIds) - 1) . '?';
-            $params = array_merge($accountIds, [$day]);
+            $params       = array_merge($accountIds, [$day]);
 
             $results = DB::select("
                 SELECT account_id, COALESCE(SUM(amount), 0) as daily_spent
@@ -556,21 +559,21 @@ class FindAccountService
      * 优化后的每日计划限制验证（使用预查询的daily spent）
      */
     private function validateDailyPlanLimitOptimized(
-        object $accountData,
+        object          $accountData,
         ItunesTradePlan $plan,
-        float $giftCardAmount,
-        int $currentDay,
-        array $dailySpentMap
+        float           $giftCardAmount,
+        int             $currentDay,
+        array           $dailySpentMap
     ): bool
     {
-        $accountPlanId = $accountData->plan_id;
+        $accountPlanId     = $accountData->plan_id;
         $accountCurrentDay = $accountData->current_plan_day ?? 1;
 
         // 确定用于验证的天数
         $validationDay = $accountPlanId ? $accountCurrentDay : $currentDay;
 
         // 检查是否为最后一天
-        $planDays = $plan->plan_days ?? 1;
+        $planDays  = $plan->plan_days ?? 1;
         $isLastDay = $validationDay >= $planDays;
 
         if ($isLastDay) {
@@ -579,8 +582,8 @@ class FindAccountService
 
         // 计算当天限额
         $dailyAmounts = $plan->daily_amounts ?? [];
-        $dailyLimit = $dailyAmounts[$validationDay - 1] ?? 0;
-        $dailyTarget = $dailyLimit + $plan->float_amount;
+        $dailyLimit   = $dailyAmounts[$validationDay - 1] ?? 0;
+        $dailyTarget  = $dailyLimit + $plan->float_amount;
 
         // 从预查询结果获取已兑换金额
         $dailySpent = $dailySpentMap[$accountData->id] ?? 0;
@@ -644,7 +647,7 @@ class FindAccountService
             // 测试模式：只返回最优账号信息，不执行锁定
             if (!empty($optimalAccountIds)) {
                 $bestAccountId = $optimalAccountIds[0];
-                $account = ItunesTradeAccount::find($bestAccountId);
+                $account       = ItunesTradeAccount::find($bestAccountId);
 
                 $this->getLogger()->info("测试模式找到最优账号", [
                     'account_id'    => $bestAccountId,
@@ -984,13 +987,13 @@ class FindAccountService
             $account = ItunesTradeAccount::find($optimalAccountIds[$i]);
             if ($account) {
                 $topAccounts[] = [
-                    'rank' => $i + 1,
-                    'id' => $account->id,
-                    'email' => $account->account,
-                    'balance' => $account->amount,
-                    'status' => $account->status,
-                    'plan_id' => $account->plan_id,
-                    'room_id' => $account->room_id,
+                    'rank'        => $i + 1,
+                    'id'          => $account->id,
+                    'email'       => $account->account,
+                    'balance'     => $account->amount,
+                    'status'      => $account->status,
+                    'plan_id'     => $account->plan_id,
+                    'room_id'     => $account->room_id,
                     'current_day' => $account->current_plan_day
                 ];
             }
@@ -998,7 +1001,7 @@ class FindAccountService
 
         return [
             'total_candidates' => count($dailyPlanAccountIds),
-            'top_accounts' => $topAccounts
+            'top_accounts'     => $topAccounts
         ];
     }
 

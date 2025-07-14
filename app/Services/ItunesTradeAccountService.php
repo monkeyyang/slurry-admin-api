@@ -19,7 +19,7 @@ class ItunesTradeAccountService
      */
     public function getAccountsWithPagination(array $params): array
     {
-        $query = ItunesTradeAccount::query()->with(['user','country','plan']);
+        $query = ItunesTradeAccount::query()->with(['user', 'country', 'plan']);
 
         // 应用筛选条件
         if (!empty($params['account'])) {
@@ -51,12 +51,12 @@ class ItunesTradeAccountService
         }
 
         // 分页参数
-        $pageNum = $params['pageNum'] ?? 1;
+        $pageNum  = $params['pageNum'] ?? 1;
         $pageSize = min($params['pageSize'] ?? 20, 10000);
 
         // 执行分页查询
         $result = $query->orderBy('updated_at', 'desc')
-                       ->paginate($pageSize, ['*'], 'page', $pageNum);
+            ->paginate($pageSize, ['*'], 'page', $pageNum);
 
         $accounts = collect($result->items());
         // 转换为API格式
@@ -65,9 +65,9 @@ class ItunesTradeAccountService
         })->toArray();
 
         return [
-            'data' => $data,
-            'total' => $result->total(),
-            'pageNum' => $result->currentPage(),
+            'data'     => $data,
+            'total'    => $result->total(),
+            'pageNum'  => $result->currentPage(),
             'pageSize' => $result->perPage(),
         ];
     }
@@ -91,18 +91,18 @@ class ItunesTradeAccountService
      */
     public function batchImportAccounts(string $country, array $accountsData, string $type): array
     {
-        $successCount = 0;
+        $successCount     = 0;
         $restoredAccounts = [];
-        $createdAccounts = [];
-        $updatedAccounts = [];
-        $loginItems = [];
+        $createdAccounts  = [];
+        $updatedAccounts  = [];
+        $loginItems       = [];
 
         DB::beginTransaction();
         try {
             foreach ($accountsData as $accountData) {
-                $account = $accountData['account'];
+                $account  = $accountData['account'];
                 $password = $accountData['password'];
-                $apiUrl = $accountData['apiUrl'] ?? null;
+                $apiUrl   = $accountData['apiUrl'] ?? null;
 //                $loginItems[] = [
 //
 //                            'username' => $account,
@@ -113,47 +113,47 @@ class ItunesTradeAccountService
 
                 // 检查是否已存在（包括已删除的）
                 $existing = ItunesTradeAccount::withTrashed()
-                                            ->where('account', $account)
-                                            ->where('country_code', $country)
-                                            ->where('account_type', $type)
-                                            ->first();
+                    ->where('account', $account)
+                    ->where('country_code', $country)
+                    ->where('account_type', $type)
+                    ->first();
 
                 if ($existing) {
                     if ($existing->trashed()) {
                         // 如果是已删除的账号，恢复并更新信息
                         $existing->restore();
                         $existing->update([
-                            'password' => $password,
-                            'api_url' => $apiUrl,
-                            'status' => ItunesTradeAccount::STATUS_PROCESSING,
-                            'uid' => Auth::id(),
-                            'login_status' => 'invalid', // 重置登录状态
-                            'plan_id' => null, // 重置计划绑定
+                            'password'         => $password,
+                            'api_url'          => $apiUrl,
+                            'status'           => ItunesTradeAccount::STATUS_PROCESSING,
+                            'uid'              => Auth::id(),
+                            'login_status'     => 'invalid', // 重置登录状态
+                            'plan_id'          => null, // 重置计划绑定
                             'current_plan_day' => 1,
                         ]);
 
                         $restoredAccounts[] = $existing;
-                        $loginItems[] = [
-                            'id' => $existing->id,
-                            'username' => $account,
-                            'password' => $password,
+                        $loginItems[]       = [
+                            'id'        => $existing->id,
+                            'username'  => $account,
+                            'password'  => $password,
                             'VerifyUrl' => $apiUrl
                         ];
                         $successCount++;
                     } else {
                         // 如果是有效账号，更新其信息
                         $existing->update([
-                            'password' => $password,
-                            'api_url' => $apiUrl,
-                            'uid' => Auth::id(),
+                            'password'     => $password,
+                            'api_url'      => $apiUrl,
+                            'uid'          => Auth::id(),
                             'login_status' => 'invalid', // 重置登录状态，需要重新验证
                         ]);
 
                         $updatedAccounts[] = $existing;
-                        $loginItems[] = [
-                            'id' => $existing->id,
-                            'username' => $account,
-                            'password' => $password,
+                        $loginItems[]      = [
+                            'id'        => $existing->id,
+                            'username'  => $account,
+                            'password'  => $password,
                             'VerifyUrl' => $apiUrl
                         ];
                         $successCount++;
@@ -161,21 +161,21 @@ class ItunesTradeAccountService
                 } else {
                     // 创建新账号
                     $newAccount = ItunesTradeAccount::create([
-                        'account' => $account,
-                        'password' => $password,
-                        'api_url' => $apiUrl,
+                        'account'      => $account,
+                        'password'     => $password,
+                        'api_url'      => $apiUrl,
                         'country_code' => $country,
                         'login_status' => 'invalid',
-                        'status' => ItunesTradeAccount::STATUS_PROCESSING,
-                        'uid' => Auth::id(),
+                        'status'       => ItunesTradeAccount::STATUS_PROCESSING,
+                        'uid'          => Auth::id(),
                         'account_type' => $type
                     ]);
 
                     $createdAccounts[] = $newAccount;
-                    $loginItems[] = [
-                        'id' => $newAccount->id,
-                        'username' => $account,
-                        'password' => $password,
+                    $loginItems[]      = [
+                        'id'        => $newAccount->id,
+                        'username'  => $account,
+                        'password'  => $password,
                         'VerifyUrl' => $apiUrl
                     ];
 
@@ -193,11 +193,11 @@ class ItunesTradeAccountService
                 ->concat($updatedAccounts);
 
             return [
-                'successCount' => $successCount,
+                'successCount'  => $successCount,
                 'restoredCount' => count($restoredAccounts),
-                'createdCount' => count($createdAccounts),
-                'updatedCount' => count($updatedAccounts),
-                'accounts' => $allAccounts->map->toApiArray()->toArray(),
+                'createdCount'  => count($createdAccounts),
+                'updatedCount'  => count($updatedAccounts),
+                'accounts'      => $allAccounts->map->toApiArray()->toArray(),
             ];
 
         } catch (Exception $e) {
@@ -211,37 +211,14 @@ class ItunesTradeAccountService
      */
     protected function createLoginTask(array $items)
     {
-        $payload = ['list' => array_map(function ($item) {
-            return [
-                'id' => $item['id'],
-                'username' => $item['username'],
-                'password' => $item['password'],
-                'VerifyUrl' => $item['VerifyUrl']
-            ];
-        }, $items)];
+        $giftCardApiClient = new GiftCardApiClient();
 
-        $response = Http::post('http://47.76.200.188:8080/api/login_poll/new', $payload)->json();
+        $response = $giftCardApiClient->createLoginTask($items);
         Log::channel('websocket_monitor')->info('发送登录请求', $response);
-        if ($response['code'] !== 0) {
-            throw new Exception("创建登录任务失败: ".$response['msg']);
-        }
 
-//        // 保存任务记录
-//        $task = AccountLoginTask::create([
-//            'task_id' => $response['data']['task_id'],
-//            'creator_id' => Auth::id(),
-//            'overall_status' => 'pending',
-//            'started_at' => now(),
-//        ]);
-//
-//        // 保存任务项
-//        foreach ($items as $item) {
-//            AccountLoginTaskItem::create([
-//                'task_id' => $task->id,
-//                'account_id' => $item['id'],
-//                'status' => 'pending',
-//            ]);
-//        }
+        if ($response['code'] !== 0) {
+            throw new Exception("创建登录任务失败: " . $response['msg']);
+        }
 
         return $response['data'];
     }
@@ -271,16 +248,12 @@ class ItunesTradeAccountService
      */
     protected function deleteApiLoginUsers(array $items): mixed
     {
-        $payload = ['list' => array_map(function ($item) {
-            return [
-                'username' => $item['username'],
-            ];
-        }, $items)];
+        $giftCardApiClient = new GiftCardApiClient();
 
-        $response = Http::post('http://47.76.200.188:8080/api/del_users', $payload)->json();
+        $response = $giftCardApiClient->deleteUserLogins($items);
 
         if ($response['code'] !== 0) {
-            throw new Exception("删除接口账户登录失败: ".$response['msg']);
+            throw new Exception("删除接口账户登录失败: " . $response['msg']);
         }
 
         return $response['data'];
@@ -299,11 +272,11 @@ class ItunesTradeAccountService
         }
         $giftCardApiClient = new GiftCardApiClient();
         try {
-            $loginAccount = [
+            $loginAccount       = [
                 'username' => $account->account,
             ];
             $deleteLoginRespond = $giftCardApiClient->deleteUserLogins($loginAccount);
-            Log::channel('websocket_monitor')->info('删除的账号：'. json_encode($deleteLoginRespond));
+            Log::channel('websocket_monitor')->info('删除的账号：' . json_encode($deleteLoginRespond));
             return $account->delete();
         } catch (Exception $e) {
             return false;
@@ -330,9 +303,9 @@ class ItunesTradeAccountService
         }
 
         $account->update([
-            'plan_id' => $planId,
+            'plan_id'          => $planId,
             'current_plan_day' => 1, // 绑定新计划时重置为第1天
-            'status' => ItunesTradeAccount::STATUS_WAITING,
+            'status'           => ItunesTradeAccount::STATUS_WAITING,
         ]);
 
         return $account;
@@ -350,9 +323,9 @@ class ItunesTradeAccountService
         }
 
         $account->update([
-            'plan_id' => null,
+            'plan_id'          => null,
             'current_plan_day' => null,
-            'status' => ItunesTradeAccount::STATUS_WAITING,
+            'status'           => ItunesTradeAccount::STATUS_WAITING,
         ]);
 
         return $account;
@@ -379,7 +352,7 @@ class ItunesTradeAccountService
      */
     public function getStatistics(): array
     {
-        $total = ItunesTradeAccount::count();
+        $total    = ItunesTradeAccount::count();
         $byStatus = ItunesTradeAccount::selectRaw('status, count(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status')
@@ -397,9 +370,9 @@ class ItunesTradeAccountService
             ->toArray();
 
         return [
-            'total' => $total,
-            'by_status' => $byStatus,
-            'by_country' => $byCountry,
+            'total'           => $total,
+            'by_status'       => $byStatus,
+            'by_country'      => $byCountry,
             'by_login_status' => $byLoginStatus,
         ];
     }
@@ -440,7 +413,7 @@ class ItunesTradeAccountService
     public function getAvailableAccounts(string $country = null): Collection
     {
         $query = ItunesTradeAccount::whereNull('plan_id')
-                                  ->where('status', ItunesTradeAccount::STATUS_WAITING);
+            ->where('status', ItunesTradeAccount::STATUS_WAITING);
 
         if ($country) {
             $query->where('country', $country);
