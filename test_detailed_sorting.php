@@ -92,7 +92,7 @@ foreach ($result as $index => $account) {
 echo "\n=== 目标账号检查 ===\n";
 $targetAccount = null;
 foreach ($result as $index => $account) {
-    if ($account->account === 'ferrispatrick369612@gmail.com') {
+    if ($account->account === 'dellaelmo7498@gmail.com') {
         $targetAccount = $account;
         echo "找到目标账号在排序第" . ($index + 1) . "位:\n";
         echo "- 账号: {$account->account}\n";

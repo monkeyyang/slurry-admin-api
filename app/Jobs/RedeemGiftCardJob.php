@@ -311,7 +311,7 @@ class RedeemGiftCardJob implements ShouldQueue
                     try {
                         $failMessage = "兑换失败\n-------------------------\n" . $this->giftCardCode . "\n" . $e->getMessage();
 //                        $failMessage = "❌ 兑换失败\n--------------------------\n" . $this->giftCardCode . "\n";
-                        $sendResult  = send_msg_to_wechat($this->roomId, $failMessage, 'MT_SEND_TEXTMSG', true, 'redeem-gift-card');
+                        $sendResult = send_msg_to_wechat($this->roomId, $failMessage, 'MT_SEND_TEXTMSG', true, 'redeem-gift-card');
                         if (!$sendResult) {
                             $this->getLogger()->warning("失败消息发送未成功", [
                                 'card_code' => $this->giftCardCode,
@@ -756,9 +756,13 @@ class RedeemGiftCardJob implements ShouldQueue
             // 检查总额度是否达成
             $totalAmountReached = ($account->amount >= $plan->total_amount);
 
-            // 检查当日计划是否达成
-            $dailyAmountReached = $this->checkDailyAmountReached($account, $plan, $currentDay);
-
+            // 检查当日计划是否达成（最后一天不判断）
+            $planDays  = $plan->plan_days ?? 1;
+            $isLastDay = $currentDay >= $planDays;
+            $dailyAmountReached = false; // 默认不达成
+            if(!$isLastDay) {
+                $dailyAmountReached = $this->checkDailyAmountReached($account, $plan, $currentDay);
+            }
             $this->getLogger()->info("检查兑换成功后的账号状态", [
                 'card_code'            => $this->giftCardCode,
                 'account_id'           => $account->id,
@@ -951,21 +955,23 @@ class RedeemGiftCardJob implements ShouldQueue
                 ->sum('amount');
 
             // 获取当天的计划额度
-            $dailyAmounts = $plan->daily_amounts ?? [];
-            $dailyLimit   = $dailyAmounts[$currentDay - 1] ?? 0;
-            $dailyTarget  = $dailyLimit + $plan->float_amount;
+            $dailyAmounts   = $plan->daily_amounts ?? [];
+            $dailyLimit     = $dailyAmounts[$currentDay - 1] ?? 0;
+            $dailyTarget    = $dailyLimit + $plan->float_amount;
+            $dailyMinTarget = $dailyLimit - $plan->float_amount;
 
-            // 检查是否达到当天的目标额度
-            $reached = ($dailySpent >= $dailyLimit);
+            // 检查是否达到当天的目标额度(达到最小当日目标)
+            $reached = ($dailySpent >= $dailyMinTarget);
 
             $this->getLogger()->info("检查当日计划达成情况", [
-                'account_id'   => $account->id,
-                'day'          => $currentDay,
-                'daily_spent'  => $dailySpent,
-                'daily_limit'  => $dailyLimit,
-                'float_amount' => $plan->float_amount,
-                'daily_target' => $dailyTarget,
-                'reached'      => $reached
+                'account_id'       => $account->id,
+                'day'              => $currentDay,
+                'daily_spent'      => $dailySpent,
+                'daily_limit'      => $dailyLimit,
+                'float_amount'     => $plan->float_amount,
+                'daily_target'     => $dailyTarget,
+                'min_daily_target' => $dailyMinTarget,
+                'reached'          => $reached
             ]);
 
             return $reached;

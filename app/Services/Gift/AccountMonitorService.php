@@ -313,7 +313,9 @@ class AccountMonitorService
                         $updateData['amount'] = $amount;
                     }
 
+                    $account->timestamps = false;
                     $account->update($updateData);
+                    $account->timestamps = true;
 
                     $this->getLogger()->info("账号状态更新成功", [
                         'username'         => $username,
@@ -350,9 +352,11 @@ class AccountMonitorService
 
                 if ($account) {
                     $oldLoginStatus = $account->login_status;
+                    $account->timestamps = false;
                     $account->update([
                         'login_status' => ItunesTradeAccount::STATUS_LOGIN_INVALID,
                     ]);
+                    $account->timestamps = true;
 
                     $this->getLogger()->info("账号登出状态更新成功", [
                         'username'         => $username,

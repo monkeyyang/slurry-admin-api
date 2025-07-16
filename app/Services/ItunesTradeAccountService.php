@@ -55,7 +55,7 @@ class ItunesTradeAccountService
         $pageSize = min($params['pageSize'] ?? 20, 10000);
 
         // 执行分页查询
-        $result = $query->orderBy('updated_at', 'desc')
+        $result = $query->orderBy('updated_at', 'desc')->orderBy('amount', 'desc')
             ->paginate($pageSize, ['*'], 'page', $pageNum);
 
         $accounts = collect($result->items());

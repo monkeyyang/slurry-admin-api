@@ -48,7 +48,7 @@ class CheckAvailableAccountsByAmount extends Command
         try {
             // 获取要检查的国家列表
             $countries = $this->getCountriesToCheck();
-            
+
             if (empty($countries)) {
                 $this->warn("没有找到需要检查的国家");
                 return;
@@ -88,7 +88,7 @@ class CheckAvailableAccountsByAmount extends Command
     private function getCountriesToCheck(): array
     {
         $specifiedCountries = $this->option('country');
-        
+
         if (!empty($specifiedCountries)) {
             return $specifiedCountries;
         }
@@ -114,7 +114,7 @@ class CheckAvailableAccountsByAmount extends Command
     private function checkCountryAccounts(string $country): array
     {
         $this->info("\n📊 检查国家: {$country}");
-        
+
         // 获取该国家的所有processing和waiting状态的账号
         $accounts = ItunesTradeAccount::whereIn('status', [
                 ItunesTradeAccount::STATUS_PROCESSING,
@@ -138,8 +138,8 @@ class CheckAvailableAccountsByAmount extends Command
 
         // 统计金额分布
         $amountDistribution = $this->getAmountDistribution($accounts);
-        
-        // 获取长期未使用的账号（1650以上且2小时无兑换）
+
+        // 获取长期未使用的账号（2小时无兑换）
         $inactiveAccounts = $this->getInactiveAccounts($accounts);
 
         // 记录到日志
@@ -185,30 +185,48 @@ class CheckAvailableAccountsByAmount extends Command
         $twoHoursAgo = now()->subHours(2);
 
         // 只检查1650以上的账号
-        $highBalanceAccounts = $accounts->where('amount', '>', 1650);
+        $highBalanceAccounts = $accounts->where('amount', '>', 0)->where('status', 'processing')->where('login_status', 'valid');
 
         foreach ($highBalanceAccounts as $account) {
-            // 检查最近2小时是否有兑换记录
+            // 检查最近2小时是否有兑换记录，使用exchange_time字段
             $lastActivity = ItunesTradeAccountLog::where('account_id', $account->id)
                 ->where('status', ItunesTradeAccountLog::STATUS_SUCCESS)
-                ->orderBy('created_at', 'desc')
+                ->whereNotNull('exchange_time')
+                ->orderBy('exchange_time', 'desc')
                 ->first();
 
-            if (!$lastActivity || $lastActivity->created_at < $twoHoursAgo) {
+            if (!$lastActivity || $lastActivity->exchange_time < $twoHoursAgo) {
                 $inactiveAccounts[] = [
                     'id' => $account->id,
                     'account' => $account->account,
                     'balance' => $account->amount,
                     'status' => $account->status,
-                    'last_activity' => $lastActivity ? $lastActivity->created_at->format('Y-m-d H:i:s') : '无记录',
-                    'hours_inactive' => $lastActivity ? $lastActivity->created_at->diffInHours(now()) : 999
+                    'plan_id' => $account->plan_id,
+                    'current_plan_day' => $account->current_plan_day ?? 1,
+                    'last_activity' => $lastActivity ? $lastActivity->exchange_time->format('Y-m-d H:i:s') : '无记录',
+                    'hours_inactive' => $lastActivity ? $lastActivity->exchange_time->diffInHours(now()) : 999,
+                    'last_exchange_time' => $lastActivity ? $lastActivity->exchange_time->timestamp : 0
                 ];
             }
         }
 
-        // 按未使用时间排序
+        // 按优先级排序：优先级排序 + 金额倒序 + 兑换时间正序
         usort($inactiveAccounts, function($a, $b) {
-            return $b['hours_inactive'] <=> $a['hours_inactive'];
+            // 1. 优先级排序：有计划的账号优先
+            $aHasPlan = !empty($a['plan_id'] ?? null);
+            $bHasPlan = !empty($b['plan_id'] ?? null);
+
+            if ($aHasPlan !== $bHasPlan) {
+                return $bHasPlan <=> $aHasPlan; // 有计划的优先
+            }
+
+            // 2. 金额倒序：余额高的优先（最大排最前）
+            if ($a['balance'] !== $b['balance']) {
+                return $b['balance'] <=> $a['balance']; // 金额倒序
+            }
+
+            // 3. 兑换时间正序：最早兑换的优先（最早排最前）
+            return $a['last_exchange_time'] <=> $b['last_exchange_time']; // 时间正序
         });
 
         return $inactiveAccounts;
@@ -227,7 +245,8 @@ class CheckAvailableAccountsByAmount extends Command
         $this->line("    1650+: {$amountDistribution['1650+']} 个");
 
         if (!empty($inactiveAccounts)) {
-            $this->line("  ⚠️  长期未使用账号（1650以上且2小时无兑换）:");
+            $count = count($inactiveAccounts);
+            $this->line("  ⚠️  长期未使用账号（2小时无兑换 {$count}个）:");
             foreach ($inactiveAccounts as $account) {
                 $this->line("    {$account['account']} - 余额:{$account['balance']} - 最后兑换:{$account['last_activity']} - 未使用:{$account['hours_inactive']}小时");
             }
@@ -244,7 +263,7 @@ class CheckAvailableAccountsByAmount extends Command
         try {
             // 格式化微信消息
             $message = "💰 账号金额分布监控\n";
-            $message .= "═══════════════════\n";
+            $message .= "══════════════\n";
             $message .= "📅 检测时间: " . now()->format('Y-m-d H:i:s') . "\n";
             $message .= "⏱️ 执行耗时: {$executionTime}ms\n\n";
 
@@ -257,7 +276,7 @@ class CheckAvailableAccountsByAmount extends Command
 
                 $message .= "🌍 国家: {$country}\n";
                 $message .= "📊 总账号数: {$results['total_accounts']}\n";
-                
+
                 // 显示金额分布
                 $message .= "💰 金额分布:\n";
                 $distribution = $results['amount_distribution'];
@@ -266,18 +285,22 @@ class CheckAvailableAccountsByAmount extends Command
                 $message .= "  600-1200: {$distribution['600-1200']} 个\n";
                 $message .= "  1200-1650: {$distribution['1200-1650']} 个\n";
                 $message .= "  1650+: {$distribution['1650+']} 个\n";
-                
-                // 显示长期未使用的账号
+
+                // 显示长期未使用的账号（只显示前6条）
                 $inactiveAccounts = $results['inactive_accounts'];
                 if (!empty($inactiveAccounts)) {
-                    $message .= "\n⚠️  长期未使用账号（1650以上且2小时无兑换）:\n";
-                    foreach ($inactiveAccounts as $account) {
-                        $message .= "  {$account['account']} - 余额:{$account['balance']} - 最后兑换:{$account['last_activity']} - 未使用:{$account['hours_inactive']}小时\n";
+                    $message .= "\n⚠️  长期未使用账号（2小时无兑换）:\n";
+                    $displayAccounts = array_slice($inactiveAccounts, 0, 6);
+                    foreach ($displayAccounts as $account) {
+                        $message .= "  {$account['account']} - 余额:{$account['balance']} - 当前计划天:{$account['current_plan_day']} - 未使用:{$account['hours_inactive']}小时\n";
+                    }
+                    if (count($inactiveAccounts) > 6) {
+                        $message .= "  ... 还有 " . (count($inactiveAccounts) - 6) . " 个账号未显示\n";
                     }
                 } else {
                     $message .= "\n✅ 没有长期未使用的账号\n";
                 }
-                
+
                 $message .= "\n";
             }
 
@@ -313,4 +336,4 @@ class CheckAvailableAccountsByAmount extends Command
     {
         return Log::channel('kernel_process_accounts');
     }
-} 
+}
