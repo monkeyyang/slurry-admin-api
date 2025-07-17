@@ -121,6 +121,7 @@ class CheckAvailableAccountsByAmount extends Command
                 ItunesTradeAccount::STATUS_WAITING
             ])
             ->where('country_code', $country)
+            ->where('login_status', 'valid')
             ->whereNull('deleted_at')
             ->get();
 
@@ -185,7 +186,9 @@ class CheckAvailableAccountsByAmount extends Command
         $twoHoursAgo = now()->subHours(2);
 
         // 只检查1650以上的账号
-        $highBalanceAccounts = $accounts->where('amount', '>', 0)->where('status', 'processing')->where('login_status', 'valid');
+        $highBalanceAccounts = $accounts->where('amount', '>', 0)
+            ->where('status', 'processing')
+            ->where('login_status', 'valid');
 
         foreach ($highBalanceAccounts as $account) {
             // 检查最近2小时是否有兑换记录，使用exchange_time字段
@@ -195,7 +198,8 @@ class CheckAvailableAccountsByAmount extends Command
                 ->orderBy('exchange_time', 'desc')
                 ->first();
 
-            if (!$lastActivity || $lastActivity->exchange_time < $twoHoursAgo) {
+            if (!$lastActivity) {
+                // 没有兑换记录，直接标记为不活跃
                 $inactiveAccounts[] = [
                     'id' => $account->id,
                     'account' => $account->account,
@@ -203,9 +207,32 @@ class CheckAvailableAccountsByAmount extends Command
                     'status' => $account->status,
                     'plan_id' => $account->plan_id,
                     'current_plan_day' => $account->current_plan_day ?? 1,
-                    'last_activity' => $lastActivity ? $lastActivity->exchange_time->format('Y-m-d H:i:s') : '无记录',
-                    'hours_inactive' => $lastActivity ? $lastActivity->exchange_time->diffInHours(now()) : 999,
-                    'last_exchange_time' => $lastActivity ? $lastActivity->exchange_time->timestamp : 0
+                    'last_activity' => '无记录',
+                    'hours_inactive' => 999,
+                    'last_exchange_time' => 0
+                ];
+                continue;
+            }
+
+            // 获取账号当前天数和最后兑换记录的天数
+            $accountCurrentDay = $account->current_plan_day ?? 1;
+            $lastExchangeDay = $lastActivity->day ?? 1;
+            
+            // 计算需要检查的时间点
+            $checkTime = $this->calculateInactivityCheckTime($lastActivity->exchange_time, $accountCurrentDay, $lastExchangeDay, $account->plan);
+            
+            // 如果当前时间超过检查时间点2小时，则标记为不活跃
+            if (now()->gt($checkTime->addHours(2))) {
+                $inactiveAccounts[] = [
+                    'id' => $account->id,
+                    'account' => $account->account,
+                    'balance' => $account->amount,
+                    'status' => $account->status,
+                    'plan_id' => $account->plan_id,
+                    'current_plan_day' => $accountCurrentDay,
+                    'last_activity' => $lastActivity->exchange_time->format('Y-m-d H:i:s'),
+                    'hours_inactive' => $lastActivity->exchange_time->diffInHours(now()),
+                    'last_exchange_time' => $lastActivity->exchange_time->timestamp
                 ];
             }
         }
@@ -230,6 +257,34 @@ class CheckAvailableAccountsByAmount extends Command
         });
 
         return $inactiveAccounts;
+    }
+
+    /**
+     * 计算不活跃检查时间点
+     * 
+     * @param \Carbon\Carbon $lastExchangeTime 最后兑换时间
+     * @param int $accountCurrentDay 账号当前天数
+     * @param int $lastExchangeDay 最后兑换记录的天数
+     * @param ItunesTradePlan|null $plan 计划信息
+     * @return \Carbon\Carbon 检查时间点
+     */
+    private function calculateInactivityCheckTime($lastExchangeTime, int $accountCurrentDay, int $lastExchangeDay, $plan): \Carbon\Carbon
+    {
+        // 如果账号的当前天和最后一条兑换成功记录天是一致的，直接返回最后兑换时间
+        if ($accountCurrentDay === $lastExchangeDay) {
+            return $lastExchangeTime;
+        }
+
+        // 如果最后一天兑换成功记录的天小于账号当前天，则应该减去计划要求的天间隔时间
+        if ($lastExchangeDay < $accountCurrentDay) {
+            $dayInterval = $plan ? ($plan->day_interval ?? 24) : 24; // 默认24小时间隔
+            $intervalHours = ($accountCurrentDay - $lastExchangeDay) * $dayInterval;
+            
+            return $lastExchangeTime->addHours($intervalHours);
+        }
+
+        // 其他情况（理论上不应该发生），直接返回最后兑换时间
+        return $lastExchangeTime;
     }
 
     /**
@@ -292,7 +347,7 @@ class CheckAvailableAccountsByAmount extends Command
                     $message .= "\n⚠️  长期未使用账号（2小时无兑换）:\n";
                     $displayAccounts = array_slice($inactiveAccounts, 0, 6);
                     foreach ($displayAccounts as $account) {
-                        $message .= "  {$account['account']} - 余额:{$account['balance']} - 当前计划天:{$account['current_plan_day']} - 未使用:{$account['hours_inactive']}小时\n";
+                        $message .= "  {$account['account']} - {$account['balance']} - {$account['current_plan_day']} - {$account['hours_inactive']}H\n";
                     }
                     if (count($inactiveAccounts) > 6) {
                         $message .= "  ... 还有 " . (count($inactiveAccounts) - 6) . " 个账号未显示\n";

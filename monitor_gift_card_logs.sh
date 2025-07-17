@@ -335,6 +335,8 @@ enhanced_format_log_line() {
             echo -e "${CYAN}[$timestamp]$prefix ▶️ 开始队列任务${NC}"
         elif [[ $line == *"礼品卡兑换任务完成"* ]]; then
             echo -e "${GREEN}[$timestamp]$prefix ✅ 队列任务完成${NC}"
+        elif [[ $line == *"总额度达成，账号计划完成"* ]]; then
+            echo -e "${GREEN}[$timestamp]$prefix ✅ 总额度达成，账号计划完成${NC}"
         elif [[ $line == *"批量兑换任务已启动"* ]]; then
             echo -e "${PURPLE}[$timestamp]$prefix 🚀 批量任务启动${NC}"
         elif [[ $line == *"批量兑换任务完成"* ]]; then

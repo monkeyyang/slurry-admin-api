@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\ProcessAppleAccountLogoutJob;
 use App\Models\ItunesTradeAccount;
 use App\Models\ItunesTradePlan;
 use Exception;
@@ -225,6 +226,7 @@ class ItunesTradeAccountService
 
     /**
      * 更新账号状态
+     * @throws Exception
      */
     public function updateAccountStatus(int $id, string $status): ?ItunesTradeAccount
     {
@@ -234,7 +236,15 @@ class ItunesTradeAccountService
             return null;
         }
 
+        if($account->status == ItunesTradeAccount::STATUS_BANNED) { // 状态已禁用，禁止改变状态
+            throw new Exception('当前账号已禁用，无法修改状态');
+        }
+
         $account->update(['status' => $status]);
+        if($status == ItunesTradeAccount::STATUS_BANNED) { // 当状态变为禁用时需要登出账号
+            // 请求登出此账号
+            ProcessAppleAccountLogoutJob::dispatch($account->id, 'account-banned');
+        }
 
         return $account;
     }

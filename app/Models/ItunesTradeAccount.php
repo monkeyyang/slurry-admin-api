@@ -22,6 +22,7 @@ class ItunesTradeAccount extends Model
     const STATUS_PROCESSING = 'processing';
     const STATUS_WAITING    = 'waiting';
     const STATUS_LOCKING    = 'locking';
+    const STATUS_BANNED     = 'banned';
 
     // 登录状态常量
     const STATUS_LOGIN_ACTIVE = 'valid';    // 有效
@@ -138,9 +139,10 @@ class ItunesTradeAccount extends Model
     {
         return match ($this->status) {
             self::STATUS_COMPLETED => '已完成',
-            self::STATUS_PROCESSING => '执行中',
+            self::STATUS_PROCESSING => '进行中',
             self::STATUS_WAITING => '等待中',
             self::STATUS_LOCKING => '锁定中',
+            self::STATUS_BANNED => '已禁用',
             default => '未知',
         };
     }

@@ -27,7 +27,7 @@ class ItunesTradeAccountController extends Controller
             $params = $request->validate([
                 'account'     => 'nullable|string|max:255',
                 'country'     => 'nullable|string|max:10',
-                'status'      => ['nullable', Rule::in(['completed', 'processing', 'waiting', 'locking'])],
+                'status'      => ['nullable', Rule::in(['completed', 'processing', 'waiting', 'locking', 'banned'])],
                 'loginStatus' => ['nullable', Rule::in(['valid', 'invalid'])],
                 'uid'         => 'nullable|integer',
                 'startTime'   => 'nullable|date',
@@ -140,7 +140,7 @@ class ItunesTradeAccountController extends Controller
     {
         try {
             $validated = $request->validate([
-                'status' => ['required', Rule::in(['completed', 'processing', 'waiting'])],
+                'status' => ['required', Rule::in(['completed', 'processing', 'waiting', 'banned'])],
             ]);
 
             $account = $this->accountService->updateAccountStatus($id, $validated['status']);
@@ -163,7 +163,7 @@ class ItunesTradeAccountController extends Controller
             Log::error('更新账号状态失败: ' . $e->getMessage());
             return response()->json([
                 'code'    => 500,
-                'message' => '状态更新失败',
+                'message' => '状态更新失败：' . $e->getMessage(),
                 'data'    => null,
             ], 500);
         }
@@ -359,9 +359,23 @@ class ItunesTradeAccountController extends Controller
         }
     }
 
-    public function lockStatus()
+    public function lockStatus(Request $request): JsonResponse
     {
-
+        try {
+            $validated = $request->validate([]);
+            return response()->json([
+                'code'    => 0,
+                'message' => 'success',
+                'data'    => [],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('禁用賬號失败: ' . $e->getMessage());
+            return response()->json([
+                'code'    => 500,
+                'message' => '禁用賬號失败',
+                'data'    => null,
+            ], 500);
+        }
     }
 
     /**

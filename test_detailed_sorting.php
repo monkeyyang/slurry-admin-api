@@ -16,7 +16,7 @@ echo "=== 详细排序逻辑测试 ===\n";
 // 测试参数
 $planId         = 1;
 $roomId         = '46321584173@chatroom';
-$giftCardAmount = 150;
+$giftCardAmount = 200;
 $country        = 'CA';
 
 // 获取计划信息
@@ -92,7 +92,7 @@ foreach ($result as $index => $account) {
 echo "\n=== 目标账号检查 ===\n";
 $targetAccount = null;
 foreach ($result as $index => $account) {
-    if ($account->account === 'dellaelmo7498@gmail.com') {
+    if ($account->account === 'cydneyjoyce6682@gmail.com') {
         $targetAccount = $account;
         echo "找到目标账号在排序第" . ($index + 1) . "位:\n";
         echo "- 账号: {$account->account}\n";

@@ -116,6 +116,19 @@ class FindAccountService
                 'stage'           => 'capacity_qualification'
             ]);
 
+            // 4.5. 临时筛选层：1650优先选择（已注释）
+            // $priority1650AccountIds = $this->get1650PriorityAccountIds($capacityAccountIds, $giftCardAmount);
+            //
+            // if (empty($priority1650AccountIds)) {
+            //     $this->logNoAccountFound($plan, $roomId, $giftCardAmount, $startTime, '1650_priority_qualification');
+            //     return null;
+            // }
+            //
+            // $this->getLogger()->debug("1650优先筛选完成", [
+            //     'qualified_count' => count($priority1650AccountIds),
+            //     'stage'           => '1650_priority_qualification'
+            // ]);
+
             // 5. 每日计划筛选
             $dailyPlanAccountIds = $this->getDailyPlanQualifiedAccountIds($capacityAccountIds, $plan, $giftCardAmount, $currentDay);
 
@@ -338,7 +351,6 @@ class FindAccountService
             return [];
         }
 
-        $qualifiedIds = [];
         $placeholders = str_repeat('?,', count($accountIds) - 1) . '?';
 
         // 批量获取账号信息
@@ -349,6 +361,8 @@ class FindAccountService
               AND deleted_at IS NULL
         ", $accountIds);
 
+        $qualifiedIds = [];
+
         foreach ($accounts as $accountData) {
             if ($this->validateAccountCapacity($accountData, $plan, $giftCardAmount)) {
                 $qualifiedIds[] = $accountData->id;
@@ -356,6 +370,66 @@ class FindAccountService
         }
 
         return $qualifiedIds;
+    }
+
+    /**
+     * 临时筛选层：1650优先选择
+     * 注意：这是一个临时条件，可以很容易移除
+     */
+    public function get1650PriorityAccountIds(
+        array $accountIds,
+        float $giftCardAmount
+    ): array
+    {
+        if (empty($accountIds)) {
+            return [];
+        }
+
+        $placeholders = str_repeat('?,', count($accountIds) - 1) . '?';
+
+        // 批量获取账号信息
+        $accounts = DB::select("
+            SELECT id, amount
+            FROM itunes_trade_accounts
+            WHERE id IN ($placeholders)
+              AND deleted_at IS NULL
+        ", $accountIds);
+
+        $target1650Ids = []; // 兑换后额度为1650的账号
+        $otherIds      = []; // 其他账号
+
+        foreach ($accounts as $accountData) {
+            $currentBalance      = $accountData->amount;
+            $afterExchangeAmount = $currentBalance + $giftCardAmount;
+
+            // 检查是否能兑换到1650
+            if (abs($afterExchangeAmount - 1650) < 0.01) {
+                $target1650Ids[] = $accountData->id;
+                $this->getLogger()->debug("1650优先筛选：找到目标账号", [
+                    'account_id'            => $accountData->id,
+                    'current_balance'       => $currentBalance,
+                    'gift_card_amount'      => $giftCardAmount,
+                    'after_exchange_amount' => $afterExchangeAmount
+                ]);
+            } else {
+                $otherIds[] = $accountData->id;
+            }
+        }
+
+        // 优先返回兑换后额度为1650的账号
+        if (!empty($target1650Ids)) {
+            $this->getLogger()->info("1650优先筛选：找到 " . count($target1650Ids) . " 个目标账号", [
+                'target_1650_count' => count($target1650Ids),
+                'other_count'       => count($otherIds)
+            ]);
+            return $target1650Ids;
+        }
+
+        // 如果没有1650的账号，返回所有账号
+        $this->getLogger()->info("1650优先筛选：没有找到目标账号，返回所有账号", [
+            'total_count' => count($otherIds)
+        ]);
+        return $otherIds;
     }
 
     /**
@@ -370,6 +444,17 @@ class FindAccountService
         $currentBalance      = $accountData->amount;
         $totalPlanAmount     = $plan->total_amount;
         $afterExchangeAmount = $currentBalance + $giftCardAmount;
+
+        // 临时条件：排斥金额+面额为1700的账号
+        if (abs($afterExchangeAmount - 1700) < 0.01) {
+            $this->getLogger()->debug("排斥账号：金额+面额为1700", [
+                'account_id'            => $accountData->id,
+                'current_balance'       => $currentBalance,
+                'gift_card_amount'      => $giftCardAmount,
+                'after_exchange_amount' => $afterExchangeAmount
+            ]);
+            return false;
+        }
 
         // 情况1：正好充满计划总额度
         if (abs($afterExchangeAmount - $totalPlanAmount) < 0.01) {
