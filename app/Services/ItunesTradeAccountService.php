@@ -236,17 +236,97 @@ class ItunesTradeAccountService
             return null;
         }
 
-        if($account->status == ItunesTradeAccount::STATUS_BANNED) { // 状态已禁用，禁止改变状态
+        if ($account->status == ItunesTradeAccount::STATUS_BANNED) { // 状态已禁用，禁止改变状态
             throw new Exception('当前账号已禁用，无法修改状态');
         }
 
         $account->update(['status' => $status]);
-        if($status == ItunesTradeAccount::STATUS_BANNED) { // 当状态变为禁用时需要登出账号
+        if ($status == ItunesTradeAccount::STATUS_BANNED) { // 当状态变为禁用时需要登出账号
             // 请求登出此账号
             ProcessAppleAccountLogoutJob::dispatch($account->id, 'account-banned');
         }
 
         return $account;
+    }
+
+    /**
+     * 根据用户名禁用账号
+     */
+    public function banAccountByUsername(string $username, string $reason = '', int $code = null): ?ItunesTradeAccount
+    {
+        // 查找账号
+        $account = ItunesTradeAccount::where('account', $username)->first();
+
+        if (!$account) {
+            throw new Exception('账号不存在');
+        }
+
+        // 检查账号是否已经被禁用
+        if ($account->status === ItunesTradeAccount::STATUS_BANNED) {
+            throw new Exception('账号已经被禁用');
+        }
+
+        // 更新账号状态为禁用
+        $account->update(['status' => ItunesTradeAccount::STATUS_BANNED]);
+
+        // 请求登出此账号
+        ProcessAppleAccountLogoutJob::dispatch($account->id, 'account-banned');
+
+        // 发送微信通知
+        $this->sendWechatNotification($account, $reason);
+
+        // 记录操作日志
+        Log::info('账号被禁用', [
+            'account_id' => $account->id,
+            'account'    => $account->account,
+            'reason'     => $reason,
+            'code'       => $code,
+            'operator'   => 'api_lock_status'
+        ]);
+
+        return $account;
+    }
+
+    /**
+     * 发送微信通知
+     */
+    private function sendWechatNotification(ItunesTradeAccount $account, string $reason = ''): void
+    {
+        try {
+            $roomId = config('wechat.default_rooms.default', '45958721463@chatroom');
+
+            // 构建通知消息
+            $message = " ⚠️  账号：{$account->account} 被禁用请注意查看";
+            if (!empty($reason)) {
+                $message .= "\n原因：{$reason}";
+            }
+            $message .= "\n时间：" . now()->format('Y-m-d H:i:s');
+
+            // 发送微信消息
+            $result = send_msg_to_wechat($roomId, $message, 'MT_SEND_TEXTMSG', true, 'account-ban');
+
+            if ($result) {
+                Log::info('账号禁用微信通知发送成功', [
+                    'account_id' => $account->id,
+                    'account'    => $account->account,
+                    'room_id'    => $roomId,
+                    'message_id' => $result
+                ]);
+            } else {
+                Log::error('账号禁用微信通知发送失败', [
+                    'account_id' => $account->id,
+                    'account'    => $account->account,
+                    'room_id'    => $roomId
+                ]);
+            }
+
+        } catch (\Exception $e) {
+            Log::error('发送微信通知异常', [
+                'account_id' => $account->id,
+                'account'    => $account->account,
+                'error'      => $e->getMessage()
+            ]);
+        }
     }
 
     /**

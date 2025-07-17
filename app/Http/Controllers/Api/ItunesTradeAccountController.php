@@ -362,19 +362,49 @@ class ItunesTradeAccountController extends Controller
     public function lockStatus(Request $request): JsonResponse
     {
         try {
-            $validated = $request->validate([]);
+            $validated = $request->validate([
+                'username' => 'required|string|max:255',
+                'code'     => 'nullable|integer',
+                'msg'      => 'nullable|string|max:500',
+            ]);
+
+            // 调用Service中的方法处理账号禁用
+            $account = $this->accountService->banAccountByUsername(
+                $validated['username'],
+                $validated['msg'] ?? '',
+                $validated['code'] ?? null
+            );
+
             return response()->json([
                 'code'    => 0,
-                'message' => 'success',
-                'data'    => [],
+                'message' => '账号禁用成功',
+                'data'    => $account->toApiArray(),
             ]);
+
         } catch (\Exception $e) {
-            Log::error('禁用賬號失败: ' . $e->getMessage());
+            Log::error('禁用账号失败: ' . $e->getMessage(), [
+                'username' => $request->input('username'),
+                'error'    => $e->getMessage(),
+                'trace'    => $e->getTraceAsString()
+            ]);
+
+            // 根据异常类型返回不同的错误码
+            $errorCode    = 500;
+            $errorMessage = '禁用账号失败: ' . $e->getMessage();
+
+            if (str_contains($e->getMessage(), '账号不存在')) {
+                $errorCode    = 404;
+                $errorMessage = '账号不存在';
+            } elseif (str_contains($e->getMessage(), '账号已经被禁用')) {
+                $errorCode    = 400;
+                $errorMessage = '账号已经被禁用';
+            }
+
             return response()->json([
-                'code'    => 500,
-                'message' => '禁用賬號失败',
+                'code'    => $errorCode,
+                'message' => $errorMessage,
                 'data'    => null,
-            ], 500);
+            ], $errorCode);
         }
     }
 
