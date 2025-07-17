@@ -959,6 +959,9 @@ class RedeemGiftCardJob implements ShouldQueue
             $dailyLimit     = $dailyAmounts[$currentDay - 1] ?? 0;
             $dailyTarget    = $dailyLimit + $plan->float_amount;
             $dailyMinTarget = $dailyLimit - $plan->float_amount;
+            if($currentDay == 2) { // 临时要求，当计划为第二天时要求最小额度增加50，例如500->550
+                $dailyMinTarget += 50;
+            }
 
             // 检查是否达到当天的目标额度(达到最小当日目标)
             $reached = ($dailySpent >= $dailyMinTarget);

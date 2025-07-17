@@ -368,6 +368,8 @@ class ItunesTradeAccountController extends Controller
                 'msg'      => 'nullable|string|max:500',
             ]);
 
+
+
             // 调用Service中的方法处理账号禁用
             $account = $this->accountService->banAccountByUsername(
                 $validated['username'],
@@ -378,7 +380,7 @@ class ItunesTradeAccountController extends Controller
             return response()->json([
                 'code'    => 0,
                 'message' => '账号禁用成功',
-                'data'    => $account->toApiArray(),
+                'data'    => null,
             ]);
 
         } catch (\Exception $e) {

@@ -321,8 +321,6 @@ Route::group(['middleware' => ['auth:api']], function () {
         Route::post('/accounts/{id}/unbind-plan', [ItunesTradeAccountController::class, 'unbindFromPlan'])->where('id', '[0-9]+');
         Route::put('/accounts/{id}/login-status', [ItunesTradeAccountController::class, 'updateLoginStatus'])->where('id', '[0-9]+');
 
-        // iTunes账号被封回调路由
-        Route::post('/accounts-status-lock', [ItunesTradeAccountController::class, 'lockStatus'])->where('id', '[0-9]+');
 
 
         // iTunes交易执行记录路由
@@ -351,6 +349,10 @@ Route::group(['middleware' => ['auth:api']], function () {
         // 群组接口
         Route::get('/groups', 'App\Http\Controllers\Api\MrRoomGroupController@getGroupsList');
     });
+
+    // iTunes账号被封回调路由
+    Route::post('/trade/itunes/accounts-status-locked', [ItunesTradeAccountController::class, 'lockStatus']);
+
 
     // 查码路由
     Route::prefix('verify')->group(function () {
