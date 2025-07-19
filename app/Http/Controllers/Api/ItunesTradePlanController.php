@@ -30,7 +30,7 @@ class ItunesTradePlanController extends Controller
         try {
             $params = $request->validate([
                 'page' => 'nullable|integer|min:1',
-                'pageSize' => 'nullable|integer|min:1|max:100',
+                'pageSize' => 'nullable|integer|min:1|max:10000',
                 'countryId' => 'nullable|string|max:10',
                 'rateId' => 'nullable|integer',
                 'bind_room' => ['nullable', Rule::in(['0', '1'])],

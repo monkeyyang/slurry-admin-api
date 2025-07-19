@@ -27,7 +27,7 @@ class ItunesTradeAccountController extends Controller
             $params = $request->validate([
                 'account'     => 'nullable|string|max:255',
                 'country'     => 'nullable|string|max:10',
-                'status'      => ['nullable', Rule::in(['completed', 'processing', 'waiting', 'locking', 'banned'])],
+                'status'      => ['nullable', Rule::in(['completed', 'processing', 'waiting', 'locking', 'banned', 'proposed'])],
                 'loginStatus' => ['nullable', Rule::in(['valid', 'invalid'])],
                 'uid'         => 'nullable|integer',
                 'startTime'   => 'nullable|date',
@@ -140,10 +140,11 @@ class ItunesTradeAccountController extends Controller
     {
         try {
             $validated = $request->validate([
-                'status' => ['required', Rule::in(['completed', 'processing', 'waiting', 'banned'])],
+                'status' => ['required', Rule::in(['completed', 'processing', 'waiting', 'banned', 'proposed'])],
+                'reason' => ['required_if:status,proposed', 'nullable', 'string'], // 如果 status 是 proposed，则 reason 必填
             ]);
 
-            $account = $this->accountService->updateAccountStatus($id, $validated['status']);
+            $account = $this->accountService->updateAccountStatus($id, $validated['status'], $validated['reason']);
 
             if (!$account) {
                 return response()->json([

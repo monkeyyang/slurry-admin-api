@@ -23,10 +23,11 @@ class ItunesTradeAccount extends Model
     const STATUS_WAITING    = 'waiting';
     const STATUS_LOCKING    = 'locking';
     const STATUS_BANNED     = 'banned';
+    const STATUS_PROPOSED   = 'proposed';
 
     // 登录状态常量
-    const STATUS_LOGIN_ACTIVE = 'valid';    // 有效
-    const STATUS_LOGIN_INVALID = 'invalid'; // 失效
+    const STATUS_LOGIN_ACTIVE  = 'valid';    // 有效
+    const STATUS_LOGIN_INVALID = 'invalid';  // 失效
 
     protected $fillable = [
         'account',
@@ -42,6 +43,7 @@ class ItunesTradeAccount extends Model
         'room_id',
         'uid',
         'account_type',
+        'remark',
     ];
 
     protected $casts = [
@@ -138,12 +140,13 @@ class ItunesTradeAccount extends Model
     public function getStatusTextAttribute(): string
     {
         return match ($this->status) {
-            self::STATUS_COMPLETED => '已完成',
+            self::STATUS_COMPLETED  => '已完成',
             self::STATUS_PROCESSING => '进行中',
-            self::STATUS_WAITING => '等待中',
-            self::STATUS_LOCKING => '锁定中',
-            self::STATUS_BANNED => '已禁用',
-            default => '未知',
+            self::STATUS_WAITING    => '等待中',
+            self::STATUS_LOCKING    => '锁定中',
+            self::STATUS_BANNED     => '已禁用',
+            self::STATUS_PROPOSED   => '已提出',
+            default                 => '未知',
         };
     }
 
@@ -157,9 +160,9 @@ class ItunesTradeAccount extends Model
         }
 
         return match ($this->login_status) {
-            self::STATUS_LOGIN_ACTIVE => '有效',
+            self::STATUS_LOGIN_ACTIVE  => '有效',
             self::STATUS_LOGIN_INVALID => '失效',
-            default => '未知',
+            default                    => '未知',
         };
     }
 
@@ -281,11 +284,11 @@ class ItunesTradeAccount extends Model
     {
         // 获取所有兑换日志并按天分组
         $logs = $this->exchangeLogs()
-            ->selectRaw('day, SUM(amount) as total_amount, MAX(exchange_time) as last_exchange_time')
-            ->groupBy('day')
-            ->orderBy('day')
-            ->get()
-            ->keyBy('day');
+                     ->selectRaw('day, SUM(amount) as total_amount, MAX(exchange_time) as last_exchange_time')
+                     ->groupBy('day')
+                     ->orderBy('day')
+                     ->get()
+                     ->keyBy('day');
 
         $completions = [];
 
@@ -337,6 +340,7 @@ class ItunesTradeAccount extends Model
             'currentPlanDay' => $this->current_plan_day,
             'planId'         => $this->plan_id ? (string)$this->plan_id : null,
             'completedDays'  => $this->getDailyCompletions(),
+            'remark'         => $this->remark,
             'user'           => $this->user ? [
                 'nickname' => $this->user->nickname
             ] : null,

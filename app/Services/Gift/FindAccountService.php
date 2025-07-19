@@ -142,8 +142,31 @@ class FindAccountService
                 'stage'           => 'daily_plan_qualification'
             ]);
 
+            // 临时条件，兑换后额度除以50为奇数筛选, 如果没有筛选到单面额是奇数，新开账号
+            // 非倍数约束的跳过
+            $rate           = $plan->rate;
+            $constraintType = $rate->amount_constraint;
+            if ($constraintType == 'multiple') {
+                $get50AccountIds = $this->get50PriorityAccountIds($dailyPlanAccountIds, $plan, $giftCardAmount);
+                if(!empty($get50AccountIds)){
+                    $this->getLogger()->debug("找到兑换后总额为奇数的账号", [
+                        'qualified_count' => count($get50AccountIds),
+                        'stage'           => 'quotient_qualification'
+                    ]);
+                }
+                if (empty($get50AccountIds) && $giftCardAmount % 2 == 0) {
+                    $get50AccountIds = $dailyPlanAccountIds;
+                    $this->getLogger()->debug("没有找到兑换后总额为奇数的账号", [
+                        'qualified_amount' => $giftCardAmount,
+                        'stage'           => 'quotient_qualification'
+                    ]);
+                }
+            } else {
+                $get50AccountIds = $dailyPlanAccountIds;
+            }
+
             // 6. 获取最终候选账号并排序
-            $optimalAccount = $this->selectOptimalAccount($dailyPlanAccountIds, $plan, $roomId, $currentDay, $giftCardAmount, $testMode);
+            $optimalAccount = $this->selectOptimalAccount($get50AccountIds, $plan, $roomId, $currentDay, $giftCardAmount, $testMode);
 
             if ($optimalAccount) {
                 $this->logOptimalAccountFound($optimalAccount, $plan, $giftCardAmount, $startTime, $testMode);
@@ -373,17 +396,19 @@ class FindAccountService
     }
 
     /**
-     * 临时筛选层：1650优先选择
+     * 临时筛选层：如果加后总额除以50是奇数优先
      * 注意：这是一个临时条件，可以很容易移除
      */
-    public function get1650PriorityAccountIds(
-        array $accountIds,
-        float $giftCardAmount
-    ): array
+    private function get50PriorityAccountIds(array $accountIds, ItunesTradePlan $plan, float $giftCardAmount): array
     {
         if (empty($accountIds)) {
             return [];
         }
+
+        // 非倍数约束的跳过
+        $rate           = $plan->rate;
+        $constraintType = $rate->amount_constraint;
+        if ($constraintType != 'multiple') return [];
 
         $placeholders = str_repeat('?,', count($accountIds) - 1) . '?';
 
@@ -395,41 +420,26 @@ class FindAccountService
               AND deleted_at IS NULL
         ", $accountIds);
 
-        $target1650Ids = []; // 兑换后额度为1650的账号
-        $otherIds      = []; // 其他账号
+        $target50Ids = []; // 兑换后额度为1650的账号
 
         foreach ($accounts as $accountData) {
             $currentBalance      = $accountData->amount;
             $afterExchangeAmount = $currentBalance + $giftCardAmount;
 
-            // 检查是否能兑换到1650
-            if (abs($afterExchangeAmount - 1650) < 0.01) {
-                $target1650Ids[] = $accountData->id;
-                $this->getLogger()->debug("1650优先筛选：找到目标账号", [
-                    'account_id'            => $accountData->id,
-                    'current_balance'       => $currentBalance,
-                    'gift_card_amount'      => $giftCardAmount,
-                    'after_exchange_amount' => $afterExchangeAmount
-                ]);
-            } else {
-                $otherIds[] = $accountData->id;
+            // 检查是否能兑换后总额除以50能否为奇数
+            $quotient = $afterExchangeAmount / 50;
+            if ($quotient % 2 != 0) {
+                $target50Ids[] = $accountData->id;
+//                $this->getLogger()->debug("兑换后总额除以50能否为奇数筛选：找到目标账号", [
+//                    'account_id'            => $accountData->id,
+//                    'current_balance'       => $currentBalance,
+//                    'gift_card_amount'      => $giftCardAmount,
+//                    'after_exchange_amount' => $afterExchangeAmount
+//                ]);
             }
         }
 
-        // 优先返回兑换后额度为1650的账号
-        if (!empty($target1650Ids)) {
-            $this->getLogger()->info("1650优先筛选：找到 " . count($target1650Ids) . " 个目标账号", [
-                'target_1650_count' => count($target1650Ids),
-                'other_count'       => count($otherIds)
-            ]);
-            return $target1650Ids;
-        }
-
-        // 如果没有1650的账号，返回所有账号
-        $this->getLogger()->info("1650优先筛选：没有找到目标账号，返回所有账号", [
-            'total_count' => count($otherIds)
-        ]);
-        return $otherIds;
+        return $target50Ids;
     }
 
     /**
@@ -446,15 +456,15 @@ class FindAccountService
         $afterExchangeAmount = $currentBalance + $giftCardAmount;
 
         // 临时条件：排斥金额+面额为1700的账号
-        if (abs($afterExchangeAmount - 1700) < 0.01) {
-            $this->getLogger()->debug("排斥账号：金额+面额为1700", [
-                'account_id'            => $accountData->id,
-                'current_balance'       => $currentBalance,
-                'gift_card_amount'      => $giftCardAmount,
-                'after_exchange_amount' => $afterExchangeAmount
-            ]);
-            return false;
-        }
+//        if (abs($afterExchangeAmount - 1700) < 0.01) {
+//            $this->getLogger()->debug("排斥账号：金额+面额为1700", [
+//                'account_id'            => $accountData->id,
+//                'current_balance'       => $currentBalance,
+//                'gift_card_amount'      => $giftCardAmount,
+//                'after_exchange_amount' => $afterExchangeAmount
+//            ]);
+//            return false;
+//        }
 
         // 情况1：正好充满计划总额度
         if (abs($afterExchangeAmount - $totalPlanAmount) < 0.01) {
@@ -873,16 +883,16 @@ class FindAccountService
             // 原子更新：只有状态仍为processing时才能锁定
             // 注意：不重写current_plan_day，保持账号原有的天数设置
             $lockResult = DB::table('itunes_trade_accounts')
-                ->where('id', $accountId)
-                ->where('status', ItunesTradeAccount::STATUS_PROCESSING)
-                ->whereNull('deleted_at')
-                ->update([
-                    'status'     => ItunesTradeAccount::STATUS_LOCKING,
-                    'plan_id'    => $plan->id,
-                    'room_id'    => $roomId,
-                    // 移除 'current_plan_day' => $currentDay, 保持原有天数
-                    'updated_at' => now()
-                ]);
+                            ->where('id', $accountId)
+                            ->where('status', ItunesTradeAccount::STATUS_PROCESSING)
+                            ->whereNull('deleted_at')
+                            ->update([
+                                         'status'     => ItunesTradeAccount::STATUS_LOCKING,
+                                         'plan_id'    => $plan->id,
+                                         'room_id'    => $roomId,
+                                         // 移除 'current_plan_day' => $currentDay, 保持原有天数
+                                         'updated_at' => now()
+                                     ]);
 
             if ($lockResult > 0) {
                 // 锁定成功，获取最新的账号对象
@@ -1038,8 +1048,8 @@ class FindAccountService
 
         // 按国家统计账号状态分布
         $query = DB::table('itunes_trade_accounts')
-            ->where('country_code', $country)
-            ->whereNull('deleted_at');
+                   ->where('country_code', $country)
+                   ->whereNull('deleted_at');
 
         $statusCounts = (clone $query)
             ->select('status', DB::raw('count(*) as count'))

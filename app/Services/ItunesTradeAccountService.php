@@ -57,7 +57,7 @@ class ItunesTradeAccountService
 
         // 执行分页查询
         $result = $query->orderBy('updated_at', 'desc')->orderBy('amount', 'desc')
-            ->paginate($pageSize, ['*'], 'page', $pageNum);
+                        ->paginate($pageSize, ['*'], 'page', $pageNum);
 
         $accounts = collect($result->items());
         // 转换为API格式
@@ -114,24 +114,24 @@ class ItunesTradeAccountService
 
                 // 检查是否已存在（包括已删除的）
                 $existing = ItunesTradeAccount::withTrashed()
-                    ->where('account', $account)
-                    ->where('country_code', $country)
-                    ->where('account_type', $type)
-                    ->first();
+                                              ->where('account', $account)
+                                              ->where('country_code', $country)
+                                              ->where('account_type', $type)
+                                              ->first();
 
                 if ($existing) {
                     if ($existing->trashed()) {
                         // 如果是已删除的账号，恢复并更新信息
                         $existing->restore();
                         $existing->update([
-                            'password'         => $password,
-                            'api_url'          => $apiUrl,
-                            'status'           => ItunesTradeAccount::STATUS_PROCESSING,
-                            'uid'              => Auth::id(),
-                            'login_status'     => 'invalid', // 重置登录状态
-                            'plan_id'          => null, // 重置计划绑定
-                            'current_plan_day' => 1,
-                        ]);
+                                              'password'         => $password,
+                                              'api_url'          => $apiUrl,
+                                              'status'           => ItunesTradeAccount::STATUS_PROCESSING,
+                                              'uid'              => Auth::id(),
+                                              'login_status'     => 'invalid', // 重置登录状态
+                                              'plan_id'          => null, // 重置计划绑定
+                                              'current_plan_day' => 1,
+                                          ]);
 
                         $restoredAccounts[] = $existing;
                         $loginItems[]       = [
@@ -144,11 +144,11 @@ class ItunesTradeAccountService
                     } else {
                         // 如果是有效账号，更新其信息
                         $existing->update([
-                            'password'     => $password,
-                            'api_url'      => $apiUrl,
-                            'uid'          => Auth::id(),
-                            'login_status' => 'invalid', // 重置登录状态，需要重新验证
-                        ]);
+                                              'password'     => $password,
+                                              'api_url'      => $apiUrl,
+                                              'uid'          => Auth::id(),
+                                              'login_status' => 'invalid', // 重置登录状态，需要重新验证
+                                          ]);
 
                         $updatedAccounts[] = $existing;
                         $loginItems[]      = [
@@ -162,15 +162,15 @@ class ItunesTradeAccountService
                 } else {
                     // 创建新账号
                     $newAccount = ItunesTradeAccount::create([
-                        'account'      => $account,
-                        'password'     => $password,
-                        'api_url'      => $apiUrl,
-                        'country_code' => $country,
-                        'login_status' => 'invalid',
-                        'status'       => ItunesTradeAccount::STATUS_PROCESSING,
-                        'uid'          => Auth::id(),
-                        'account_type' => $type
-                    ]);
+                                                                 'account'      => $account,
+                                                                 'password'     => $password,
+                                                                 'api_url'      => $apiUrl,
+                                                                 'country_code' => $country,
+                                                                 'login_status' => 'invalid',
+                                                                 'status'       => ItunesTradeAccount::STATUS_PROCESSING,
+                                                                 'uid'          => Auth::id(),
+                                                                 'account_type' => $type
+                                                             ]);
 
                     $createdAccounts[] = $newAccount;
                     $loginItems[]      = [
@@ -228,7 +228,7 @@ class ItunesTradeAccountService
      * 更新账号状态
      * @throws Exception
      */
-    public function updateAccountStatus(int $id, string $status): ?ItunesTradeAccount
+    public function updateAccountStatus(int $id, string $status, string $reason = null): ?ItunesTradeAccount
     {
         $account = ItunesTradeAccount::find($id);
 
@@ -240,7 +240,14 @@ class ItunesTradeAccountService
             throw new Exception('当前账号已禁用，无法修改状态');
         }
 
-        $account->update(['status' => $status]);
+        $updateData = ['status' => $status];
+        // 提出账号必须填写原因
+        if ($status == ItunesTradeAccount::STATUS_PROPOSED) {
+            if (empty($reason)) throw new Exception('请填写提出账号的原因');
+            $updateData['remark'] = $reason;
+        }
+
+        $account->update($updateData);
         if ($status == ItunesTradeAccount::STATUS_BANNED) { // 当状态变为禁用时需要登出账号
             // 请求登出此账号
             ProcessAppleAccountLogoutJob::dispatch($account->id, 'account-banned');
@@ -393,10 +400,10 @@ class ItunesTradeAccountService
         }
 
         $account->update([
-            'plan_id'          => $planId,
-            'current_plan_day' => 1, // 绑定新计划时重置为第1天
-            'status'           => ItunesTradeAccount::STATUS_WAITING,
-        ]);
+                             'plan_id'          => $planId,
+                             'current_plan_day' => 1, // 绑定新计划时重置为第1天
+                             'status'           => ItunesTradeAccount::STATUS_WAITING,
+                         ]);
 
         return $account;
     }
@@ -413,10 +420,10 @@ class ItunesTradeAccountService
         }
 
         $account->update([
-            'plan_id'          => null,
-            'current_plan_day' => null,
-            'status'           => ItunesTradeAccount::STATUS_WAITING,
-        ]);
+                             'plan_id'          => null,
+                             'current_plan_day' => null,
+                             'status'           => ItunesTradeAccount::STATUS_WAITING,
+                         ]);
 
         return $account;
     }
@@ -444,20 +451,20 @@ class ItunesTradeAccountService
     {
         $total    = ItunesTradeAccount::count();
         $byStatus = ItunesTradeAccount::selectRaw('status, count(*) as count')
-            ->groupBy('status')
-            ->pluck('count', 'status')
-            ->toArray();
+                                      ->groupBy('status')
+                                      ->pluck('count', 'status')
+                                      ->toArray();
 
         $byCountry = ItunesTradeAccount::selectRaw('country, count(*) as count')
-            ->groupBy('country')
-            ->pluck('count', 'country')
-            ->toArray();
+                                       ->groupBy('country')
+                                       ->pluck('count', 'country')
+                                       ->toArray();
 
         $byLoginStatus = ItunesTradeAccount::selectRaw('login_status, count(*) as count')
-            ->whereNotNull('login_status')
-            ->groupBy('login_status')
-            ->pluck('count', 'login_status')
-            ->toArray();
+                                           ->whereNotNull('login_status')
+                                           ->groupBy('login_status')
+                                           ->pluck('count', 'login_status')
+                                           ->toArray();
 
         return [
             'total'           => $total,
@@ -503,7 +510,7 @@ class ItunesTradeAccountService
     public function getAvailableAccounts(string $country = null): Collection
     {
         $query = ItunesTradeAccount::whereNull('plan_id')
-            ->where('status', ItunesTradeAccount::STATUS_WAITING);
+                                   ->where('status', ItunesTradeAccount::STATUS_WAITING);
 
         if ($country) {
             $query->where('country', $country);
